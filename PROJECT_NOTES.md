@@ -223,6 +223,41 @@ code.
   minimal for now (dark toast, orange button) — not yet matched to any
   real design system since one doesn't exist yet.
 
+- **Drawing engine prototype: draw + erase.** First real pass at step
+  1 of the build order — fill and smudge are deliberately deferred
+  until draw/erase feel is confirmed on the actual iPad/stylus.
+  `canvas/canvas.js` owns Pointer Events input and rendering; it
+  doesn't read/write the frame/project schema yet (storage/ is step
+  2) — for now it just owns one in-memory canvas at the default
+  1920×1080, wired directly into `ui/ui.js`'s tool rail. Draw and
+  erase are the same brush engine (erase uses
+  `globalCompositeOperation = 'destination-out'`), matching the
+  planned single-bitmap `strokeLayer` model. Notable choices, revisit
+  once tested on her actual iPad/stylus:
+  - **Smoothing:** quadratic-curve-through-midpoints (draw a curve
+    between the midpoints of consecutive sampled points, not straight
+    segment-to-segment lines). Standard technique for reducing the
+    jagged look of raw pointer samples; cheap, no library.
+  - **Palm rejection:** "first pointer down wins" — only one pointer
+    can be drawing at a time; a second pointer going down while a
+    stroke is active is ignored. Catches a palm landing *after* the
+    stylus already touched down; does not handle every ordering (e.g.
+    palm first). This is the one piece most likely to need real
+    tuning once she's actually using it — flagged as unverified
+    outside a real device, per the working agreement.
+  - **Pressure/tilt:** intentionally not read yet, even though
+    available on PointerEvent — matches the architecture decision to
+    keep the brush engine unaware of them until real Pencil support
+    is added.
+  - `ui/ui.js` tool rail is bare-bones on purpose: Draw/Erase toggle,
+    a brush-size slider (shared control, per the toolset decision),
+    and a dev-only Clear button (no confirm dialog — nothing durable
+    to lose yet, no storage/ until step 2). Fill/smudge/image-import/
+    mic/pan buttons land with their own build steps.
+  - Canvas is letterboxed at a fixed 16:9 (1920×1080 backing store,
+    CSS-scaled to fit) — not yet reading a per-project canvas size
+    from storage, since storage doesn't exist yet.
+
 ## What's realistically next
 
 Agreed build order (core app before backend, since the backend is the

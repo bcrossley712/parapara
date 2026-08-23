@@ -17,6 +17,84 @@ html, body {
   width: 100vw;
 }
 
+/* App shell: tool rail + canvas area (js/ui/ui.js initUI).
+   Deliberately minimal for the drawing-engine testing pass — not the
+   real toolkit look, just enough to drive draw/erase and be usable
+   with a thumb on an iPad. */
+.pp-app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.pp-tool-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 76px;
+  padding: 12px 8px;
+  background: #3a3226;
+  flex-shrink: 0;
+}
+
+.pp-tool-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 12px 4px;
+  background: #55483a;
+  color: #faf4eb;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pp-tool-btn.is-active {
+  background: #f2a65a;
+  color: #3a3226;
+  font-weight: 600;
+}
+
+.pp-tool-btn--secondary {
+  margin-top: auto;
+  opacity: 0.8;
+}
+
+.pp-brush-size {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #faf4eb;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.pp-brush-size input[type="range"] {
+  width: 100%;
+}
+
+.pp-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e1a15;
+  overflow: hidden;
+}
+
+.pp-canvas {
+  background: #ffffff;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  touch-action: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
 /* PWA update-available toast (js/ui/ui.js showUpdatePrompt) */
 .pp-update-toast {
   position: fixed;
