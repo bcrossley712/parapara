@@ -206,6 +206,23 @@ flat source masters, corners flood-filled from an AI-generated draft
 image). Schema drafted (above) — not yet built/tested against real
 code.
 
+## Built so far
+
+- **PWA update-refresh prompt.** Added ahead of the drawing engine
+  since testing happens on the deployed GitHub Pages URL from the
+  start, and it's easy to mistake stale cache for a bug otherwise.
+  `sw.js` no longer calls `self.skipWaiting()` automatically on
+  install — a new version now sits in "waiting" until the page tells
+  it to take over. `main.js` registers the service worker and detects
+  a waiting update (both "arrived while this tab was open" and
+  "already waiting at load"); `ui/ui.js` owns the actual prompt
+  (`showUpdatePrompt`) — a small custom-styled toast, not a native
+  dialog, per the working agreement. Clicking refresh posts
+  `SKIP_WAITING` to the new worker, which then triggers a
+  `controllerchange` → automatic page reload. Styling is intentionally
+  minimal for now (dark toast, orange button) — not yet matched to any
+  real design system since one doesn't exist yet.
+
 ## What's realistically next
 
 Agreed build order (core app before backend, since the backend is the

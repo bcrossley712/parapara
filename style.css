@@ -16,3 +16,38 @@ html, body {
   height: 100vh;
   width: 100vw;
 }
+
+/* PWA update-available toast (js/ui/ui.js showUpdatePrompt) */
+.pp-update-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #3a3226;
+  color: #faf4eb;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 1000;
+}
+
+.pp-update-toast__btn {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: #f2a65a;
+  color: #3a3226;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pp-update-toast__btn:active {
+  background: #e6944a;
+}

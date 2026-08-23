@@ -14,6 +14,7 @@ const APP_SHELL = [
   './manifest.json',
   './style.css',
   './js/main.js',
+  './js/ui/ui.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
@@ -22,7 +23,17 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   );
-  self.skipWaiting();
+  // Deliberately NOT calling self.skipWaiting() here. A new SW stays
+  // in "waiting" state until the page tells it to take over (see the
+  // SKIP_WAITING message below), which is what lets main.js show an
+  // update-available prompt instead of silently swapping caches out
+  // from under an open session.
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
