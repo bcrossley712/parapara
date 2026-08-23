@@ -36,8 +36,49 @@ incidental punctuation — keep it in the app title, icon, manifest
 - **Batch related changes** into one pass rather than iterating
   file-by-file across separate turns once scope is clear.
 
+## Habits worth keeping
+
+Small, cheap-now/expensive-later scaffolding is worth doing on sight,
+even before it's strictly needed — the CSS custom-properties pass
+below is the example that prompted writing this down:
+
+- `style.css` had `#3a3226` and `#f2a65a` hardcoded in multiple
+  selectors. Trivial to fix while there are only two colors and a
+  handful of selectors; each one added afterward (gallery, timeline,
+  audio-trim UI, real toolkit look) would have meant either repeating
+  the hex value again or a riskier find-and-replace across a much
+  bigger file. Named as `--pp-ink`, `--pp-accent`, etc. in `:root`
+  instead — this is also most of what a real color/design-token system
+  would need later, not thrown-away work.
+- The general shape of the tradeoff: if something is a five-minute fix
+  today and a real refactor once three more features depend on the
+  unfixed version, do it now rather than deferring it to "when it
+  actually hurts" — waiting doesn't save the work, it just moves it to
+  a more expensive moment and adds risk of missing a spot.
+- This is about small structural habits (naming repeated values,
+  keeping the frame/project schema additive, the scope-specific file
+  layout), not scope creep — it's not license to build speculative
+  features or infrastructure ahead of need. The distinguishing
+  question: does this make a *near-certain* future change cheaper
+  without adding real complexity now? If yes, do it now. If it's
+  hedging against a feature that might not happen, that's still scope
+  creep and still needs confirming first, per the working agreement.
+
 ## Working agreements with this user
 
+- **Flag deviations from drawing/animation-app conventions,
+  proactively.** The user isn't an experienced user of apps like this
+  himself; his daughter is, and usability against what she's used to
+  (Sketchbook, Procreate, Clip Studio, Flipaclip, Rough Animator, etc.)
+  matters more than it would for a from-scratch user. Whenever a
+  decision — mine or his — departs from how those apps typically
+  behave, say so explicitly, ideally *before* building it, so it's a
+  deliberate choice rather than an accidental surprise for her
+  workflow. Example of this already happening: per-tool brush size
+  memory vs. one shared size (see "Built so far") and layer operations
+  being undoable (see architectural decisions) were both caught this
+  way — worth rechecking new decisions against this as a matter of
+  habit, not just when explicitly asked.
 - **Confirm before starting new builds/changes** — don't proceed on a
   feature without checking scope/direction first, especially where
   there's real design ambiguity.
@@ -130,6 +171,37 @@ recipients) — not a public product, low-stakes threat model.
   to match how short animations typically get shared/viewed. Stored as
   a project setting rather than hardcoded, so changing the default or
   offering per-project choice later is a config change, not a rebuild.
+- **User-facing drawable layers (multiple layers per frame), reversing
+  the earlier single-bitmap decision below.** Reopened because the
+  primary user is used to how Sketchbook and similar apps work, and
+  matching that matters more than the simplicity the single-bitmap
+  model bought. Caught in time — storage/undo (step 2) hadn't been
+  built yet, so nothing gets thrown away reversing it now rather than
+  later.
+  - **v1 feature set:** add/delete, reorder, visibility toggle,
+    opacity, and per-layer lock (so a reference/lined-paper-style
+    layer can't be accidentally drawn on). No blend modes, groups, or
+    clipping masks yet.
+  - **New frames copy the previous frame's layer structure** (same
+    layers — id/name/order/visibility/opacity/lock — but blank
+    bitmaps), not a blank single layer. Keeps a consistent stack
+    (e.g. "sketch" / "line" / "color") across the whole animation
+    without her rebuilding it every frame.
+  - **The imported reference image stays separate**, as originally
+    documented below — not folded into the new layer list. It already
+    has its own transform model (position/scale/rotation) that
+    doesn't map cleanly onto a stroke layer.
+  - **Undo/redo:** whole-stack raster snapshot (all layers in the
+    frame, before/after an edit), not per-layer. Keeps one undo model
+    instead of two, matching why raster snapshots were chosen over
+    vector replay in the first place. **Confirmed:** layer structure
+    changes (add/delete/reorder/visibility/opacity/lock) are undoable
+    too, on the same stack as drawing operations — matching how
+    Procreate/Photoshop/Krita behave (an accidental layer delete is
+    Cmd/Ctrl+Z-able there, and the working assumption of "only strokes
+    are undoable" would have been a real, surprising gap for someone
+    used to those apps). Revisits the earlier "working assumption, not
+    yet confirmed" note — resolved now, not deferred.
 - **Undo/redo via a command history, built in from the start.** Every
   stroke, transform, or frame edit is recorded as an undoable action.
   This was deliberately front-loaded because it's the one piece that's
@@ -144,6 +216,10 @@ recipients) — not a public product, low-stakes threat model.
     snapshot taken on stroke-end, not per pointer-move). Keeps
     `storage/` uniform at the cost of heavier undo entries than pure
     vector replay.
+    - **Superseded by the layers decision above** for what counts as
+      "the bitmap" — now the whole layer stack per frame, not a single
+      stroke layer. The reasoning for snapshot-over-replay still
+      holds; only the unit being snapshotted changed.
 - **Default fps: 12, "on twos."** Standard beginner-friendly rate for
   hand-drawn/flipbook animation, matches Flipaclip/Rough Animator
   defaults. Stored per-project, adjustable, not hardcoded.
@@ -258,7 +334,55 @@ code.
     CSS-scaled to fit) — not yet reading a per-project canvas size
     from storage, since storage doesn't exist yet.
 
-## What's realistically next
+- **Drawing engine: full toolset now built — draw, erase, fill,
+  smudge.** Second pass, after draw/erase feel was confirmed good.
+  - **Brush-tip seam introduced.** Draw/erase no longer call
+    `ctx.stroke()` directly — `canvas/brush.js` is new, holding a
+    small `stamp(ctx, point, size)` interface (only `roundBrush`
+    exists today), and `canvas.js` samples points along the smoothed
+    path (straight segment for the first, quadratic-midpoint curve
+    after) and stamps the active brush at each one, instead of one
+    native stroke call. This is what makes tip variety (chisel,
+    textured, etc.) a later "add a brush object" change instead of a
+    rendering rewrite — no new tip shapes were added now, this is
+    purely the seam. `canvas.js` exposes `setBrush()` for this even
+    though nothing calls it yet. Switching from native strokes to
+    stamping is a real rendering change (not just a refactor) — worth
+    a specific re-check that it still feels as good as the
+    already-confirmed native-stroke version, since spacing/density
+    tuning (`roundBrush.spacingRatio`) could subtly change the feel.
+  - **Fill:** tap-only flood fill (not a drag), iterative/stack-based
+    (not recursive, to avoid stack depth issues on a 1920×1080
+    region), with a color-distance tolerance (`FILL_TOLERANCE = 32`)
+    so anti-aliased stroke edges don't leave an unfilled fringe.
+    Always fills with the current draw color — no separate
+    "erase-fill" mode. Reads/writes the full canvas pixel buffer per
+    tap (~8MB at 1920×1080); unverified how this performs on the
+    actual iPad, flagging per the working agreement on unverifiable-
+    outside-a-real-device items.
+  - **Smudge:** drag-based, samples a small patch of existing pixels
+    behind the stroke and blends it forward at each step
+    (`SMUDGE_STRENGTH = 0.5`, fixed, not yet a control) — this is what
+    "drags" color rather than stamping flat color like draw/erase.
+    Uses a small reused offscreen scratch canvas (sized to
+    `MAX_BRUSH_SIZE`) rather than allocating one per stroke or per
+    step. Calls `getImageData` every drag step, so the main canvas
+    context is created with `willReadFrequently: true`.
+  - `MAX_BRUSH_SIZE` now lives in `canvas.js` and is imported by
+    `ui.js` for the size slider's `max`, instead of the same number
+    being hardcoded in both places.
+  - `ui/ui.js` tool rail now has all four: Draw/Erase/Fill/Smudge.
+- **Brush size: per-tool memory, not one shared value.** Caught during
+  a standards check (see "Habits worth keeping" below) — sharing one
+  size across draw/erase/smudge doesn't match how Procreate/
+  Sketchbook/etc. behave (each tool remembers its own last-used size
+  independently). `canvas.js` now keeps `brushSizes = { draw, erase,
+  smudge }`; `setBrushSize()` writes to the active tool's slot,
+  `getBrushSize()` reads it back so `ui.js` can sync the slider's
+  displayed value whenever the active tool changes. Fill has no size
+  concept (a flood fill has no radius) — not tracked, and the slider
+  disables itself while Fill is active rather than showing a
+  meaningless number.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
@@ -267,7 +391,11 @@ most optional piece):
    Pencil-specific logic yet) — get input feel right before anything
    else, since a bad drawing feel undermines everything built on top
    of it.
-2. Frame/project data model + IndexedDB storage layer.
+2. Frame/project data model + IndexedDB storage layer, including the
+   layers UI (add/delete/reorder/visibility/opacity/lock) — schema is
+   locked in (see architectural decisions + draft schema above), but
+   the UI itself is intentionally deferred to this step rather than
+   built into the current draw/erase-only prototype.
 3. Image import + adjustable image-layer transform per frame.
 4. Playback loop + onion skinning.
 5. Audio import/record + single-clip trim.
@@ -281,6 +409,8 @@ Decided since wireframing:
   draw/erase/smudge. (See undo/redo note above — smudge is why undo
   is raster-snapshot-based rather than command-replay-based.)
 - **Default fps: 12** (see architectural decisions above).
+- **Multiple drawable layers per frame** (see architectural decisions
+  above) — schema locked in, UI deferred to step 2.
 
 Still open:
 - Default export format specifics (container/codec) — not needed
@@ -325,11 +455,15 @@ you want ffmpeg.wasm reinstated specifically.
 
     frame = {
       id,
-      strokeLayer: bitmapRef,   // single composited raster layer (draw/erase/fill/smudge all paint here)
-      undoStack: [ snapshotRef, ... ],  // capped depth, per-frame
+      layers: [
+        { id, name, bitmapRef, visible: true, opacity: 1, locked: false },
+        ...   // array order = stacking order, index 0 = bottom
+      ],
+      activeLayerId,   // which layer new strokes paint onto
+      undoStack: [ snapshotRef, ... ],  // whole layer-stack snapshot, capped depth, per-frame
       image: {
         blobRef, x, y, scale, rotation, opacity
-      } | null
+      } | null   // reference image — separate from layers, see architectural decisions
     }
 
 Nothing here has been built or tested yet — this file will be updated

@@ -10,7 +10,7 @@
 // timeline, gallery, and the rest of the tool rail (fill/smudge/
 // image-import/mic/pan) land with their respective build steps.
 
-import { initCanvas } from '../canvas/canvas.js';
+import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 
 export function initUI(container) {
   container.innerHTML = '';
@@ -32,8 +32,12 @@ export function initUI(container) {
 
   const drawBtn = createToolButton('Draw', () => setActiveTool('draw'));
   const eraseBtn = createToolButton('Erase', () => setActiveTool('erase'));
+  const fillBtn = createToolButton('Fill', () => setActiveTool('fill'));
+  const smudgeBtn = createToolButton('Smudge', () => setActiveTool('smudge'));
   rail.appendChild(drawBtn);
   rail.appendChild(eraseBtn);
+  rail.appendChild(fillBtn);
+  rail.appendChild(smudgeBtn);
 
   const sizeControl = document.createElement('label');
   sizeControl.className = 'pp-brush-size';
@@ -42,7 +46,7 @@ export function initUI(container) {
   const sizeInput = document.createElement('input');
   sizeInput.type = 'range';
   sizeInput.min = '1';
-  sizeInput.max = '60';
+  sizeInput.max = String(MAX_BRUSH_SIZE);
   sizeInput.value = '6';
   sizeInput.addEventListener('input', () => {
     canvasApi.setBrushSize(Number(sizeInput.value));
@@ -62,6 +66,20 @@ export function initUI(container) {
     canvasApi.setTool(tool);
     drawBtn.classList.toggle('is-active', tool === 'draw');
     eraseBtn.classList.toggle('is-active', tool === 'erase');
+    fillBtn.classList.toggle('is-active', tool === 'fill');
+    smudgeBtn.classList.toggle('is-active', tool === 'smudge');
+
+    // Each tool remembers its own size (see canvas.js) — sync the
+    // slider to whatever the newly active tool last used, rather than
+    // leaving it showing the previous tool's value. Fill has no size
+    // concept at all, so the control is disabled rather than shown
+    // with a meaningless number.
+    const size = canvasApi.getBrushSize();
+    sizeInput.disabled = size === null;
+    sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
+    if (size !== null) {
+      sizeInput.value = String(size);
+    }
   }
 
   function createToolButton(label, onClick) {

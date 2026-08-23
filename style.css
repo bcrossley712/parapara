@@ -1,13 +1,26 @@
 /* Parapara! — base app styles
-   Placeholder. Tool rail, transport, and timeline layout from the
-   wireframing phase land here once the drawing engine (step 1) is
-   underway. */
+   Tool rail, canvas area, and the update-prompt toast so far. More
+   lands here as each build step ships (gallery, timeline/frame-strip,
+   audio-trim UI, etc.). */
+
+:root {
+  /* Recurring colors, named once here instead of repeated as hex
+     literals across selectors — see PROJECT_NOTES.md "Habits worth
+     keeping" for why this is worth doing even at small scale. */
+  --pp-bg: #faf4eb;          /* app background, warm off-white */
+  --pp-ink: #3a3226;         /* dark brown — rail, toast, canvas-area text */
+  --pp-ink-light: #55483a;   /* lighter brown — inactive tool buttons */
+  --pp-stage: #1e1a15;       /* near-black — canvas area backdrop */
+  --pp-accent: #f2a65a;      /* orange — active tool, primary actions */
+  --pp-accent-active: #e6944a; /* orange, pressed state */
+  --pp-font: system-ui, sans-serif;
+}
 
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #faf4eb;
+  background: var(--pp-bg);
   overscroll-behavior: none;
   touch-action: none;
 }
@@ -34,7 +47,7 @@ html, body {
   gap: 8px;
   width: 76px;
   padding: 12px 8px;
-  background: #3a3226;
+  background: var(--pp-ink);
   flex-shrink: 0;
 }
 
@@ -42,16 +55,16 @@ html, body {
   border: none;
   border-radius: 8px;
   padding: 12px 4px;
-  background: #55483a;
-  color: #faf4eb;
-  font-family: system-ui, sans-serif;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
   font-size: 13px;
   cursor: pointer;
 }
 
 .pp-tool-btn.is-active {
-  background: #f2a65a;
-  color: #3a3226;
+  background: var(--pp-accent);
+  color: var(--pp-ink);
   font-weight: 600;
 }
 
@@ -65,8 +78,8 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  color: #faf4eb;
-  font-family: system-ui, sans-serif;
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
   font-size: 12px;
   margin-top: 8px;
 }
@@ -75,12 +88,16 @@ html, body {
   width: 100%;
 }
 
+.pp-brush-size--disabled {
+  opacity: 0.4;
+}
+
 .pp-canvas-area {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1e1a15;
+  background: var(--pp-stage);
   overflow: hidden;
 }
 
@@ -106,9 +123,9 @@ html, body {
   gap: 12px;
   padding: 10px 14px;
   border-radius: 12px;
-  background: #3a3226;
-  color: #faf4eb;
-  font-family: system-ui, sans-serif;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
   font-size: 14px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   z-index: 1000;
@@ -118,8 +135,8 @@ html, body {
   border: none;
   border-radius: 8px;
   padding: 6px 12px;
-  background: #f2a65a;
-  color: #3a3226;
+  background: var(--pp-accent);
+  color: var(--pp-ink);
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -127,5 +144,5 @@ html, body {
 }
 
 .pp-update-toast__btn:active {
-  background: #e6944a;
+  background: var(--pp-accent-active);
 }
