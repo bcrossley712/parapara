@@ -532,6 +532,23 @@ code.
   devices with a home-indicator gesture bar rather than the 9th-gen's
   physical home button — kept generic rather than hardcoded to this
   specific iPad.
+  - **Follow-up fix: the padding had no visible effect on retest.**
+    Root cause was a separate, older iOS-specific setting fighting the
+    fix above: `<meta name="apple-mobile-web-app-status-bar-style">`
+    was `"default"`, which makes iOS treat the status bar as opaque,
+    OS-reserved space — the page never draws under it at all, so
+    `env(safe-area-inset-top)` correctly resolves to `0px` in that
+    mode. The padding fix wasn't broken, it was adding zero. That env
+    var only does something under the *other* status-bar mode,
+    `"black-translucent"` (status bar becomes a transparent overlay,
+    page draws full-screen underneath, genuinely needs the inset) —
+    the CSS assumed that mode while the meta tag was set to the one
+    that doesn't need it. Fixed by switching the meta tag to
+    `black-translucent`. Contrast check: white status-bar text/icons
+    now show up over whatever the app draws at the very top — fine
+    here since both the rail and canvas-area are dark at the top edge
+    already, but worth remembering if that region's color ever
+    changes.
 - **Bug fix: zoom anchored to the canvas center instead of the pinch
   point.** The `computeGestureTransform` math in `gestures.js`
   requires `transform-origin` pinned at the canvas's own top-left
