@@ -383,6 +383,51 @@ code.
   concept (a flood fill has no radius) — not tracked, and the slider
   disables itself while Fill is active rather than showing a
   meaningless number.
+- **Bug fix: smudge stippled instead of smearing.** Reported after
+  testing — smudge only ran one blend step per pointer sample pair
+  (`smudgeStep`), with no interpolation, unlike draw/erase which
+  already fill gaps between far-apart samples
+  (`stampAlongLine`/`stampAlongQuadratic`). On a fast drag, consecutive
+  points can land farther apart than the brush radius, producing
+  isolated circular blends with visible gaps instead of a continuous
+  smear. Fixed by adding `smudgeAlongLine`, which interpolates
+  `smudgeStep` calls along the segment the same way draw/erase already
+  do.
+- **Color picker: custom HSV square + hue slider + hex input.**
+  Flagged first — a drawing app with no way to change color at all is
+  itself a deviation from every app in this category, not just a
+  missing nice-to-have; it was simply unreached in build order rather
+  than deliberately deferred. Chose the full custom-picker route over
+  a quick preset-swatch row, matching standard-app-grade expectations
+  rather than a placeholder. New file `js/ui/color-picker.js` (same
+  reasoning as `canvas/brush.js` splitting out of `canvas.js` — a
+  gradient canvas with pointer dragging and hex parsing is a real
+  subsystem, not a few lines in `ui.js`). No native
+  `<input type="color">` — same reasoning as the existing ban on
+  native `confirm()`/`alert()`/date-input chrome, extended here.
+  - SV square uses the standard two-gradient-overlay technique (fill
+    hue → white-to-transparent horizontal overlay → transparent-to-
+    black vertical overlay) rendered on its own small canvas, dragged
+    via Pointer Events with capture, consistent with how the drawing
+    canvas itself handles pointer input.
+  - Hue slider is a native `<input type="range">` (0–360, styled with
+    a rainbow gradient track) — range inputs aren't part of the
+    native-chrome ban, unlike color/date inputs, so no need to build a
+    custom drag control for it.
+  - Hex input is a native `<input type="text">`, validated on
+    `change` (invalid entries snap back to the last valid color rather
+    than being accepted).
+  - Opens as a floating panel anchored to a new swatch button in the
+    rail (shows current color), positioned via `getBoundingClientRect`
+    on open rather than a fixed offset. Closes on tapping anywhere
+    outside it, including the canvas.
+  - `canvas.js` now exports `DEFAULT_COLOR` (`'#2b2b2b'`) as the single
+    source of truth for the starting color, imported by both the
+    drawing engine and the picker's initial state — same pattern as
+    `MAX_BRUSH_SIZE`.
+  - Not included, on purpose, to avoid scope creep beyond what was
+    asked: recent/preset swatches, eyedropper, opacity control. Worth
+    revisiting later if she wants them, not assumed now.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
@@ -426,11 +471,16 @@ Still open:
     PROJECT_NOTES.md
     js/
       canvas/         pointer input, brush engine, rendering
+                        (canvas.js + brush.js, split once tip variety
+                        became a real seam to hold — see architectural
+                        decisions)
       timeline/        frame array, thumbnails, reorder logic, playback loop
       storage/          IndexedDB wrapper, schema, undo/redo (raster snapshots)
       export/           GIF/WebM stitching, Web Share
       audio/            record/import, trim, Web Audio playback
       ui/               toolbar, buttons, DOM glue
+                        (ui.js + color-picker.js, same splitting
+                        reasoning as canvas/ above)
       main.js           app entry, screen routing (gallery <-> editor)
     icons/            app icon set
 

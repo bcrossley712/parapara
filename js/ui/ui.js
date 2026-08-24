@@ -1,16 +1,19 @@
 // js/ui/ui.js
 //
-// Owns: tool rail (draw/erase/fill/smudge/brush-size/image-import/
-// mic/pan), transport controls, project gallery screen, DOM glue
-// between the other modules. Custom-styled dialogs only — no native
-// confirm()/alert()/date-input chrome, per the working agreement.
+// Owns: tool rail (draw/erase/fill/smudge/brush-size/color/image-
+// import/mic/pan), transport controls, project gallery screen, DOM
+// glue between the other modules. Custom-styled dialogs only — no
+// native confirm()/alert()/date-input/color chrome, per the working
+// agreement.
 //
-// Bare-bones so far: just enough of the rail (draw/erase/brush size)
-// to drive canvas.js for the drawing-engine testing pass. Transport,
-// timeline, gallery, and the rest of the tool rail (fill/smudge/
-// image-import/mic/pan) land with their respective build steps.
+// Bare-bones so far: enough of the rail (draw/erase/fill/smudge,
+// brush size, color) to drive canvas.js for the drawing-engine
+// testing pass. Transport, timeline, gallery, and the rest of the
+// tool rail (image-import/mic/pan) land with their respective build
+// steps. Color picker itself lives in color-picker.js.
 
-import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
+import { initCanvas, MAX_BRUSH_SIZE, DEFAULT_COLOR } from '../canvas/canvas.js';
+import { createColorPicker } from './color-picker.js';
 
 export function initUI(container) {
   container.innerHTML = '';
@@ -38,6 +41,49 @@ export function initUI(container) {
   rail.appendChild(eraseBtn);
   rail.appendChild(fillBtn);
   rail.appendChild(smudgeBtn);
+
+  // Color swatch — opens the custom picker (canvas/brush.js-style
+  // split into its own file, see color-picker.js) as a floating panel
+  // rather than native <input type="color"> chrome, per the working
+  // agreement.
+  const colorSwatch = document.createElement('button');
+  colorSwatch.type = 'button';
+  colorSwatch.className = 'pp-color-swatch';
+  colorSwatch.setAttribute('aria-label', 'Color');
+  colorSwatch.style.background = DEFAULT_COLOR;
+  rail.appendChild(colorSwatch);
+
+  const picker = createColorPicker(DEFAULT_COLOR, (hex) => {
+    canvasApi.setColor(hex);
+    colorSwatch.style.background = hex;
+  });
+  picker.element.classList.add('pp-color-picker--hidden');
+  shell.appendChild(picker.element);
+
+  let pickerOpen = false;
+
+  function setPickerOpen(open) {
+    pickerOpen = open;
+    picker.element.classList.toggle('pp-color-picker--hidden', !open);
+    if (open) {
+      const rect = colorSwatch.getBoundingClientRect();
+      picker.element.style.left = `${rect.right + 8}px`;
+      picker.element.style.top = `${rect.top}px`;
+    }
+  }
+
+  colorSwatch.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setPickerOpen(!pickerOpen);
+  });
+
+  // Tapping anywhere outside the panel (including the canvas) closes
+  // it, matching how a floating picker behaves in other apps.
+  document.addEventListener('pointerdown', (event) => {
+    if (!pickerOpen) return;
+    if (picker.element.contains(event.target) || event.target === colorSwatch) return;
+    setPickerOpen(false);
+  });
 
   const sizeControl = document.createElement('label');
   sizeControl.className = 'pp-brush-size';

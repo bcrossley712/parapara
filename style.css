@@ -112,6 +112,114 @@ html, body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* Color swatch + picker (js/ui/ui.js, js/ui/color-picker.js) */
+.pp-color-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid var(--pp-bg);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.pp-color-picker {
+  position: fixed;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 192px;
+  padding: 12px;
+  background: var(--pp-ink);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.pp-color-picker--hidden {
+  display: none;
+}
+
+.pp-color-picker__sv-wrap {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 8px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.pp-color-picker__sv {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pp-color-picker__sv-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.pp-color-picker__hue {
+  width: 100%;
+  height: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 8px;
+  background: linear-gradient(
+    to right,
+    #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000
+  );
+}
+
+.pp-color-picker__hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--pp-ink);
+  cursor: pointer;
+}
+
+.pp-color-picker__hue::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--pp-ink);
+  cursor: pointer;
+}
+
+.pp-color-picker__hex-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 14px;
+}
+
+.pp-color-picker__hex-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
 /* PWA update-available toast (js/ui/ui.js showUpdatePrompt) */
 .pp-update-toast {
   position: fixed;

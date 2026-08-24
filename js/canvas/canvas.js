@@ -33,6 +33,11 @@ export const MAX_BRUSH_SIZE = 60;
 // control the toolset decision calls for.
 const SMUDGE_STRENGTH = 0.5;
 
+// Default draw/fill color — single source of truth, shared with
+// ui/color-picker.js so the picker's initial state and the canvas's
+// actual starting color can't drift apart.
+export const DEFAULT_COLOR = '#2b2b2b';
+
 // Fill: per-channel color-distance tolerance for what counts as "the
 // same region" to flood. Anti-aliased line edges are never a single
 // exact color, so a tolerance of 0 would leave a ring of unfilled
@@ -64,7 +69,7 @@ export function initCanvas(container, options = {}) {
 
   let tool = 'draw';      // 'draw' | 'erase' | 'fill' | 'smudge'
   let brush = roundBrush; // only tip today — see brush.js for the seam
-  let color = '#2b2b2b';  // draw/fill color; unused for erase/smudge
+  let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
 
   // Per-tool brush size memory — draw/erase/smudge each remember
   // their own size independently (matches how Procreate/Sketchbook/
@@ -141,17 +146,14 @@ export function initCanvas(container, options = {}) {
 
   // --- smudge: sample a patch behind the stroke, blend it forward ---
 
-  function smudgeStep(from, to) {
-    const size = Math.max(2, Math.round(brushSizes.smudge));
+  function smudgeStep(from, to, size) {
     const half = size / 2;
 
-    // Sample a patch centered on the stroke's previous point, then
-    // paint it back centered on the new point at partial opacity —
-    // repeated every step along a drag, this is what drags color
-    // along the path instead of just stamping flat color like
-    // draw/erase. Points near the canvas edge sample some
-    // out-of-bounds pixels, which come back transparent per spec —
-    // fine, it just fades toward transparent at the edge.
+    // Sample a patch centered on the previous position, then paint it
+    // back centered on the new position at partial opacity. Points
+    // near the canvas edge sample some out-of-bounds pixels, which
+    // come back transparent per spec — fine, it just fades toward
+    // transparent at the edge.
     const patch = ctx.getImageData(
       Math.round(from.x - half),
       Math.round(from.y - half),
@@ -168,6 +170,29 @@ export function initCanvas(container, options = {}) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(scratchCanvas, 0, 0, size, size, to.x - half, to.y - half, size, size);
     ctx.restore();
+  }
+
+  // Bug fix: smudge originally called smudgeStep once per pointer
+  // sample pair, with no interpolation — unlike draw/erase (see
+  // stampAlongLine/stampAlongQuadratic above), which already fill
+  // gaps between far-apart samples. On a fast drag, consecutive
+  // points can land farther apart than the brush radius, so instead
+  // of a continuous smear it produced isolated circular blends with
+  // visible gaps — reported as "stippling dots." This interpolates
+  // smudgeStep calls along the segment the same way draw/erase do.
+  function smudgeAlongLine(from, to) {
+    const size = Math.max(2, Math.round(brushSizes.smudge));
+    const spacing = Math.max(1, size * 0.2);
+    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const steps = Math.max(1, Math.ceil(dist / spacing));
+
+    let prev = from;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const point = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+      smudgeStep(prev, point, size);
+      prev = point;
+    }
   }
 
   // --- fill: flood fill from a single tap, no drag involved ---
@@ -266,7 +291,7 @@ export function initCanvas(container, options = {}) {
     const p2 = point;
 
     if (tool === 'smudge') {
-      smudgeStep(p1, p2);
+      smudgeAlongLine(p1, p2);
       p0 = p1;
       p1 = p2;
       return;
