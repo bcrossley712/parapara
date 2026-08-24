@@ -1,6 +1,8 @@
 // js/canvas/canvas.js
 //
-// Owns: Pointer Events input, brush engine, stroke-layer compositing.
+// Owns: Pointer Events input, brush engine, stroke-layer compositing,
+// two-finger pan/zoom (gesture math lives in gestures.js; dispatch —
+// deciding whether a touch is a stroke or a gesture — lives here).
 // Onion-skin rendering of neighboring frames lands with timeline/
 // (step 4).
 //
@@ -17,6 +19,14 @@
 // into timeline/storage internals directly.
 
 import { roundBrush } from './brush.js';
+import {
+  distance,
+  midpoint,
+  isQuickTap,
+  computeGestureTransform,
+  GESTURE_WINDOW_MS,
+  GESTURE_MOVEMENT_THRESHOLD_PX,
+} from './gestures.js';
 
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
@@ -121,6 +131,81 @@ export function initCanvas(container, options = {}) {
   let p0 = null; // two points back
   let p1 = null; // one point back
 
+  // --- pan/zoom viewport (two-finger gesture) ---
+  //
+  // Applied as a CSS transform on the canvas element only — the
+  // backing-store bitmap and its 1920x1080 resolution never change.
+  // toCanvasPoint() below reads the canvas's live bounding rect on
+  // every call, so it automatically accounts for whatever transform
+  // is currently applied, with no changes needed there.
+  let viewportScale = 1;
+  let viewportX = 0;
+  let viewportY = 0;
+
+  // The canvas's natural (untransformed, fit-to-screen) box, relative
+  // to its container — captured once, and re-captured on resize. This
+  // is the fixed reference frame the gesture math works in.
+  let natLeft = 0, natTop = 0, natWidth = 0, natHeight = 0;
+
+  function applyViewport() {
+    canvas.style.transform = `translate(${viewportX}px, ${viewportY}px) scale(${viewportScale})`;
+  }
+
+  function resetViewport() {
+    viewportScale = 1;
+    viewportX = 0;
+    viewportY = 0;
+    applyViewport();
+  }
+
+  function captureNaturalRect() {
+    const areaRect = container.getBoundingClientRect();
+    // Clear the transform first so the measured rect is the natural
+    // (untransformed) box, not whatever pan/zoom happens to be
+    // applied right now.
+    canvas.style.transform = '';
+    const canvasRect = canvas.getBoundingClientRect();
+    natLeft = canvasRect.left - areaRect.left;
+    natTop = canvasRect.top - areaRect.top;
+    natWidth = canvasRect.width;
+    natHeight = canvasRect.height;
+    applyViewport();
+  }
+
+  captureNaturalRect();
+
+  // Layout may have changed (e.g. iPad rotation) — simplest safe
+  // behavior is to reset pan/zoom rather than try to preserve it
+  // across a resize.
+  window.addEventListener('resize', () => {
+    viewportScale = 1;
+    viewportX = 0;
+    viewportY = 0;
+    captureNaturalRect();
+  });
+
+  // --- touch-vs-gesture disambiguation ---
+  //
+  // A touch pointer starts drawing immediately (no added delay) but
+  // stays a "pending" gesture candidate for a short window. If a
+  // second touch joins within that window while the first has barely
+  // moved, both become a two-finger pan/zoom gesture instead — the
+  // first pointer's just-drawn mark is reverted from a saved pixel
+  // patch. If the window expires (or the first pointer moves too far)
+  // without a second touch, it was just a normal solo stroke and
+  // nothing further happens — the draw was never delayed waiting to
+  // find out.
+  //
+  // pointerType 'pen' (and mouse, for desktop testing) bypasses all
+  // of this and goes straight to drawing — real styli, and hopefully
+  // eventually a real Apple Pencil, report reliably enough that no
+  // gesture candidacy is needed. Fill is also exempt: it commits its
+  // result immediately regardless of pointerType, since reverting an
+  // arbitrary flood-filled region isn't a cheap "restore a small
+  // patch" operation the way draw/erase's single dot is.
+  let pendingTouch = null; // { pointerId, startTime, startLocal, lastLocal, revertPatch }
+  let gesture = null;      // { pointerIds, points, startTime, startScale, startX, startY, startMidpoint, startDistance, totalMovement }
+
   function toCanvasPoint(event) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -131,7 +216,16 @@ export function initCanvas(container, options = {}) {
     };
   }
 
-  function midpoint(a, b) {
+  // Container-relative CSS px — distinct from toCanvasPoint (which
+  // maps to backing-store pixels and accounts for the live
+  // transform). This is for gesture math only, in the same stable
+  // frame as natLeft/natTop (the container itself never transforms).
+  function toLocalPoint(event) {
+    const areaRect = container.getBoundingClientRect();
+    return { x: event.clientX - areaRect.left, y: event.clientY - areaRect.top };
+  }
+
+  function stampMidpoint(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
 
@@ -328,8 +422,8 @@ export function initCanvas(container, options = {}) {
       // the midpoints of consecutive points rather than connecting
       // raw sample points with straight segments, which is what
       // produces the jagged/faceted look on sampled pointer input.
-      const mid1 = midpoint(p0, p1);
-      const mid2 = midpoint(p1, p2);
+      const mid1 = stampMidpoint(p0, p1);
+      const mid2 = stampMidpoint(p1, p2);
       stampAlongQuadratic(mid1, p1, mid2);
     }
 
@@ -343,15 +437,110 @@ export function initCanvas(container, options = {}) {
     p1 = null;
   }
 
+  // --- revert-patch helpers, used only for the touch/gesture disambiguation below ---
+
+  function capturePatchAt(point, size) {
+    const half = size / 2;
+    const x = Math.round(point.x - half);
+    const y = Math.round(point.y - half);
+    return { x, y, data: ctx.getImageData(x, y, size, size) };
+  }
+
+  function restorePatch(patch) {
+    ctx.putImageData(patch.data, patch.x, patch.y);
+  }
+
   function onPointerDown(event) {
-    if (activePointerId !== null) return; // palm-rejection heuristic, see above
+    if (event.pointerType === 'touch') {
+      // A third finger, or a second finger arriving after the window
+      // has already closed, is treated the same as the palm-rejection
+      // heuristic always has: ignored.
+      if (gesture) return;
+
+      if (pendingTouch && event.pointerId !== pendingTouch.pointerId) {
+        const elapsed = event.timeStamp - pendingTouch.startTime;
+        const moved = distance(pendingTouch.lastLocal, pendingTouch.startLocal);
+
+        if (elapsed <= GESTURE_WINDOW_MS && moved <= GESTURE_MOVEMENT_THRESHOLD_PX) {
+          // Confirmed: this is a two-finger gesture, not a palm.
+          // Revert whatever the first finger had started drawing.
+          if (pendingTouch.revertPatch) restorePatch(pendingTouch.revertPatch);
+          if (canvas.hasPointerCapture?.(pendingTouch.pointerId)) {
+            canvas.releasePointerCapture(pendingTouch.pointerId);
+          }
+
+          const firstLocal = pendingTouch.lastLocal;
+          const secondLocal = toLocalPoint(event);
+
+          canvas.setPointerCapture(event.pointerId);
+          gesture = {
+            pointerIds: [pendingTouch.pointerId, event.pointerId],
+            points: new Map([
+              [pendingTouch.pointerId, firstLocal],
+              [event.pointerId, secondLocal],
+            ]),
+            startTime: event.timeStamp,
+            startScale: viewportScale,
+            startX: viewportX,
+            startY: viewportY,
+            startMidpoint: midpoint(firstLocal, secondLocal),
+            startDistance: Math.max(1, distance(firstLocal, secondLocal)),
+            totalMovement: 0,
+          };
+
+          pendingTouch = null;
+          activePointerId = null;
+          p0 = null;
+          p1 = null;
+          return;
+        }
+
+        // Too late, or the first finger already moved too far to be
+        // a gesture start — just ignore this extra touch.
+        return;
+      }
+
+      if (pendingTouch || activePointerId !== null) return;
+
+      const point = toCanvasPoint(event);
+      activePointerId = event.pointerId;
+      canvas.setPointerCapture(event.pointerId);
+
+      const local = toLocalPoint(event);
+      pendingTouch = {
+        pointerId: event.pointerId,
+        startTime: event.timeStamp,
+        startLocal: local,
+        lastLocal: local,
+        revertPatch: null,
+      };
+
+      if (tool === 'fill') {
+        // Fill commits immediately regardless of pointerType — not a
+        // gesture candidate (see the comment above pendingTouch).
+        floodFill(point);
+        pendingTouch = null;
+        return;
+      }
+
+      if (tool === 'draw' || tool === 'erase') {
+        pendingTouch.revertPatch = capturePatchAt(point, brushSizes[tool]);
+      }
+      // Smudge draws nothing on pointerdown (see beginStroke) — there
+      // is nothing yet to revert, so no patch needed.
+
+      beginStroke(point);
+      return;
+    }
+
+    // Non-touch (pen, mouse): unchanged, immediate draw, no gesture
+    // candidacy at all — see the comment above pendingTouch for why.
+    if (activePointerId !== null || gesture || pendingTouch) return;
 
     activePointerId = event.pointerId;
     canvas.setPointerCapture(event.pointerId);
 
     if (tool === 'fill') {
-      // Fill is a single tap-and-done action, not a drag — no
-      // beginStroke/extendStroke lifecycle needed.
       floodFill(toCanvasPoint(event));
       return;
     }
@@ -360,6 +549,50 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerMove(event) {
+    if (gesture && gesture.pointerIds.includes(event.pointerId)) {
+      const local = toLocalPoint(event);
+      const prev = gesture.points.get(event.pointerId);
+      gesture.totalMovement += distance(local, prev);
+      gesture.points.set(event.pointerId, local);
+
+      const [idA, idB] = gesture.pointerIds;
+      const pA = gesture.points.get(idA);
+      const pB = gesture.points.get(idB);
+      const currentMidpoint = midpoint(pA, pB);
+      const currentDistance = Math.max(1, distance(pA, pB));
+
+      const next = computeGestureTransform({
+        natLeft, natTop,
+        startScale: gesture.startScale,
+        startX: gesture.startX,
+        startY: gesture.startY,
+        startMidpointLocal: gesture.startMidpoint,
+        startDistance: gesture.startDistance,
+        currentMidpointLocal: currentMidpoint,
+        currentDistance,
+      });
+
+      viewportScale = next.scale;
+      viewportX = next.x;
+      viewportY = next.y;
+      applyViewport();
+      return;
+    }
+
+    if (pendingTouch && event.pointerId === pendingTouch.pointerId) {
+      pendingTouch.lastLocal = toLocalPoint(event);
+
+      const moved = distance(pendingTouch.lastLocal, pendingTouch.startLocal);
+      const elapsed = event.timeStamp - pendingTouch.startTime;
+      if (elapsed > GESTURE_WINDOW_MS || moved > GESTURE_MOVEMENT_THRESHOLD_PX) {
+        // Window's closed, or this is clearly a real stroke, not a
+        // gesture candidate — stop tracking it as pending. The stroke
+        // itself keeps going via the activePointerId path below; this
+        // only stops it from being revertible.
+        pendingTouch = null;
+      }
+    }
+
     if (event.pointerId !== activePointerId) return;
     if (tool === 'fill') return; // nothing to drag for fill
 
@@ -377,6 +610,31 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerUp(event) {
+    if (gesture && gesture.pointerIds.includes(event.pointerId)) {
+      // Ending either finger ends the gesture entirely — drawing
+      // doesn't resume with whichever pointer is still down, to avoid
+      // a stray mark right as a pinch/pan ends. The other pointer's
+      // future move/up events fall through every branch below as a
+      // no-op once gesture is cleared, since it was never tracked as
+      // pendingTouch or activePointerId.
+      const gestureDuration = event.timeStamp - gesture.startTime;
+      const wasTap = isQuickTap(gestureDuration, gesture.totalMovement);
+
+      for (const id of gesture.pointerIds) {
+        if (canvas.hasPointerCapture?.(id)) canvas.releasePointerCapture(id);
+      }
+      gesture = null;
+
+      if (wasTap) resetViewport();
+      return;
+    }
+
+    if (pendingTouch && event.pointerId === pendingTouch.pointerId) {
+      pendingTouch = null;
+      // Falls through to the normal endStroke() below — this was
+      // just a solo stroke that never grew a second finger.
+    }
+
     if (event.pointerId !== activePointerId) return;
     if (canvas.hasPointerCapture?.(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
@@ -389,10 +647,14 @@ export function initCanvas(container, options = {}) {
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
   // Pointer capture should keep move/up events routed here even if
-  // the pointer slides off the canvas edge mid-stroke, but this is a
-  // belt-and-suspenders fallback in case capture isn't honored.
+  // the pointer slides off the canvas edge mid-stroke/gesture, but
+  // this is a belt-and-suspenders fallback in case capture isn't
+  // honored.
   canvas.addEventListener('pointerleave', (event) => {
-    if (event.pointerId === activePointerId && !canvas.hasPointerCapture?.(event.pointerId)) {
+    const isTracked = event.pointerId === activePointerId
+      || (pendingTouch && event.pointerId === pendingTouch.pointerId)
+      || (gesture && gesture.pointerIds.includes(event.pointerId));
+    if (isTracked && !canvas.hasPointerCapture?.(event.pointerId)) {
       onPointerUp(event);
     }
   });

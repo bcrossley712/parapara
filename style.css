@@ -110,6 +110,10 @@ html, body {
   aspect-ratio: 16 / 9;
   touch-action: none;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  /* Hints the browser to optimize for the pan/zoom transform updates
+     in canvas.js — scoped to just this, unlike the earlier
+     willReadFrequently mistake which affected the whole canvas. */
+  will-change: transform;
 }
 
 /* Color swatch + picker (js/ui/ui.js, js/ui/color-picker.js) */

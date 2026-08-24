@@ -446,6 +446,61 @@ code.
   - Not included, on purpose, to avoid scope creep beyond what was
     asked: recent/preset swatches, eyedropper, opacity control. Worth
     revisiting later if she wants them, not assumed now.
+- **Two-finger pan/zoom gesture.** Flagged proactively, not requested
+  first — pan/zoom is close to universal in this app category
+  (Procreate/Sketchbook/etc. and animation-specific apps alike), and
+  wasn't in the original toolset planning at all (pan was listed in
+  early wireframing, zoom wasn't mentioned anywhere). Placed before
+  storage/step 2 on purpose, even though that delays real persistence
+  a bit further — the complexity lives entirely in `canvas.js`'s
+  pointer-coordinate mapping, which storage/layers/image-transform
+  would otherwise build on top of unaware of pan/zoom, meaning a later
+  retrofit would likely touch three subsystems instead of one.
+  - New file `js/canvas/gestures.js` — pure transform math only (no
+    DOM/pointer handling), so the fiddly part (keeping a pinch anchor
+    point visually fixed while scale changes) can be reasoned about
+    independent of dispatch logic.
+  - Pan/zoom is a CSS `transform: translate() scale()` on the canvas
+    element — the backing-store bitmap stays 1920×1080 always.
+    `toCanvasPoint()` already read the canvas's live bounding rect on
+    every call, so it needed *zero* changes to keep working correctly
+    at any zoom level — a fortunate consequence of how it was already
+    written, not something added for this.
+  - **The real problem was disambiguating a pinch from a draw
+    stroke,** not the transform math. Her stylus very likely reports
+    `pointerType: 'touch'`, indistinguishable from an actual finger —
+    the same ambiguity already flagged as unverified for palm
+    rejection, surfacing again here. Resolved by: a touch always
+    starts drawing immediately (no added latency for the common
+    single-finger case), but stays a "pending" gesture candidate for
+    ~150ms (`GESTURE_WINDOW_MS`) as long as it's moved less than 8px
+    (`GESTURE_MOVEMENT_THRESHOLD_PX`). If a second touch joins within
+    that window, it's retroactively treated as a gesture — the first
+    touch's just-drawn mark is reverted from a saved pixel patch
+    (captured before drawing, same idea as smudge's sample/restore,
+    just used to undo instead of blend). If the window expires with no
+    second touch, nothing happens — it was just a normal stroke that
+    was never delayed. `pointerType === 'pen'` (and mouse, for desktop
+    testing) bypasses this entirely and draws immediately, no
+    candidacy — this is also what keeps a real Apple Pencil seamless
+    later: it reports `'pen'` reliably, so it was always the simple
+    code path this was built around, not a special case to add.
+  - Fill is exempt from the revert mechanism — it commits immediately
+    regardless of pointer type, since reverting an arbitrary
+    flood-filled region isn't a cheap small-patch operation.
+  - Ending the gesture via either finger lifting ends it completely —
+    drawing doesn't resume with whichever finger is still down, to
+    avoid a stray mark right as a pinch/pan ends.
+  - Zoom clamped to 1x (can't zoom out past fit-to-screen) – 8x. A
+    quick two-finger tap (short duration, minimal movement) resets to
+    fit — the common reset convention, and also the safety net for
+    "panned it somewhere I can't find my way back from."
+  - A window resize (e.g. iPad rotation) resets pan/zoom rather than
+    trying to preserve the transform math across a layout change —
+    simplest safe behavior, not a sophisticated one.
+  - Untested outside a real device, same caveat as the smudge tuning
+    above: the 150ms/8px thresholds are reasoned defaults, not
+    measured against her actual stylus's touch-reporting behavior.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
@@ -488,10 +543,10 @@ Still open:
     README.md
     PROJECT_NOTES.md
     js/
-      canvas/         pointer input, brush engine, rendering
-                        (canvas.js + brush.js, split once tip variety
-                        became a real seam to hold — see architectural
-                        decisions)
+      canvas/         pointer input, brush engine, rendering, pan/zoom
+                        (canvas.js + brush.js + gestures.js, split as
+                        each became a real seam/subsystem of its own —
+                        see architectural decisions)
       timeline/        frame array, thumbnails, reorder logic, playback loop
       storage/          IndexedDB wrapper, schema, undo/redo (raster snapshots)
       export/           GIF/WebM stitching, Web Share
