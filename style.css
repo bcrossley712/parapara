@@ -16,6 +16,14 @@
   --pp-font: system-ui, sans-serif;
 }
 
+*, *::before, *::after {
+  /* Needed for the safe-area padding on .pp-app-shell below to
+     shrink its usable content area instead of adding to its fixed
+     100vh height — without this, padding would push the shell taller
+     than the screen rather than inset its content. */
+  box-sizing: border-box;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -38,6 +46,15 @@ html, body {
   display: flex;
   height: 100vh;
   width: 100vw;
+  /* iOS standalone PWAs paint under the status bar (manifest already
+     has viewport-fit=cover, which is what makes these env() vars
+     resolve to nonzero values) — without this, the whole shell starts
+     at y=0 under the status bar, and everything below gets pushed
+     down by that unaccounted height. Bottom inset is mainly for
+     devices with a home-indicator gesture bar rather than the 9th-gen
+     iPad's physical home button, but harmless to include generically. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .pp-tool-rail {

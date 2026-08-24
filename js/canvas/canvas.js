@@ -22,6 +22,9 @@ import { roundBrush } from './brush.js';
 import {
   distance,
   midpoint,
+  angleBetween,
+  shortestAngleDelta,
+  screenToNaturalPoint,
   isQuickTap,
   computeGestureTransform,
   GESTURE_WINDOW_MS,
@@ -78,6 +81,13 @@ export function initCanvas(container, options = {}) {
   canvas.width = width;
   canvas.height = height;
   canvas.className = 'pp-canvas';
+  // Bug fix: the pan/zoom math in gestures.js (computeGestureTransform)
+  // assumes transform-origin is pinned at the canvas's own top-left
+  // corner — that assumption was never actually enforced anywhere.
+  // CSS defaults transform-origin to 50% 50% (center), so scale() was
+  // zooming around the canvas's center regardless of where the pinch
+  // was, reported as "doesn't zoom where you're pinching."
+  canvas.style.transformOrigin = '0 0';
   container.appendChild(canvas);
 
   // Deliberately NOT passing { willReadFrequently: true } here, even
@@ -131,14 +141,19 @@ export function initCanvas(container, options = {}) {
   let p0 = null; // two points back
   let p1 = null; // one point back
 
-  // --- pan/zoom viewport (two-finger gesture) ---
+  // --- pan/zoom/rotate viewport (two-finger gesture) ---
   //
   // Applied as a CSS transform on the canvas element only — the
   // backing-store bitmap and its 1920x1080 resolution never change.
-  // toCanvasPoint() below reads the canvas's live bounding rect on
-  // every call, so it automatically accounts for whatever transform
-  // is currently applied, with no changes needed there.
+  // toCanvasPoint() below maps screen points to canvas pixels
+  // analytically from this state (via gestures.js's
+  // screenToNaturalPoint), not by reading the canvas's bounding rect —
+  // getBoundingClientRect() on a rotated element returns the
+  // axis-aligned box that merely contains the rotated shape, not its
+  // own tilted frame, so it stopped being usable once rotation was
+  // added.
   let viewportScale = 1;
+  let viewportRotation = 0; // radians
   let viewportX = 0;
   let viewportY = 0;
 
@@ -148,11 +163,13 @@ export function initCanvas(container, options = {}) {
   let natLeft = 0, natTop = 0, natWidth = 0, natHeight = 0;
 
   function applyViewport() {
-    canvas.style.transform = `translate(${viewportX}px, ${viewportY}px) scale(${viewportScale})`;
+    canvas.style.transform =
+      `translate(${viewportX}px, ${viewportY}px) rotate(${viewportRotation}rad) scale(${viewportScale})`;
   }
 
   function resetViewport() {
     viewportScale = 1;
+    viewportRotation = 0;
     viewportX = 0;
     viewportY = 0;
     applyViewport();
@@ -175,10 +192,11 @@ export function initCanvas(container, options = {}) {
   captureNaturalRect();
 
   // Layout may have changed (e.g. iPad rotation) — simplest safe
-  // behavior is to reset pan/zoom rather than try to preserve it
-  // across a resize.
+  // behavior is to reset pan/zoom/rotation rather than try to
+  // preserve the transform across a layout change.
   window.addEventListener('resize', () => {
     viewportScale = 1;
+    viewportRotation = 0;
     viewportX = 0;
     viewportY = 0;
     captureNaturalRect();
@@ -207,12 +225,17 @@ export function initCanvas(container, options = {}) {
   let gesture = null;      // { pointerIds, points, startTime, startScale, startX, startY, startMidpoint, startDistance, totalMovement }
 
   function toCanvasPoint(event) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const local = toLocalPoint(event);
+    const natural = screenToNaturalPoint(local, {
+      natLeft, natTop,
+      scale: viewportScale,
+      rotation: viewportRotation,
+      x: viewportX,
+      y: viewportY,
+    });
     return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
+      x: (natural.x / natWidth) * canvas.width,
+      y: (natural.y / natHeight) * canvas.height,
     };
   }
 
@@ -481,10 +504,18 @@ export function initCanvas(container, options = {}) {
             ]),
             startTime: event.timeStamp,
             startScale: viewportScale,
+            startRotation: viewportRotation,
             startX: viewportX,
             startY: viewportY,
             startMidpoint: midpoint(firstLocal, secondLocal),
             startDistance: Math.max(1, distance(firstLocal, secondLocal)),
+            // Rotation is tracked incrementally (frame-to-frame,
+            // shortest-path) rather than as a single start-to-current
+            // diff — see gestures.js's shortestAngleDelta for why: a
+            // continuous twist past 180° needs this to avoid visibly
+            // snapping.
+            lastAngle: angleBetween(firstLocal, secondLocal),
+            accumulatedRotation: 0,
             totalMovement: 0,
           };
 
@@ -561,18 +592,29 @@ export function initCanvas(container, options = {}) {
       const currentMidpoint = midpoint(pA, pB);
       const currentDistance = Math.max(1, distance(pA, pB));
 
+      // Incremental, shortest-path angle tracking — see the comment
+      // on gesture.lastAngle at gesture creation for why this can't
+      // just be (currentAngle - startAngle).
+      const currentAngle = angleBetween(pA, pB);
+      gesture.accumulatedRotation += shortestAngleDelta(gesture.lastAngle, currentAngle);
+      gesture.lastAngle = currentAngle;
+      const rotation = gesture.startRotation + gesture.accumulatedRotation;
+
       const next = computeGestureTransform({
         natLeft, natTop,
         startScale: gesture.startScale,
+        startRotation: gesture.startRotation,
         startX: gesture.startX,
         startY: gesture.startY,
         startMidpointLocal: gesture.startMidpoint,
         startDistance: gesture.startDistance,
+        rotation,
         currentMidpointLocal: currentMidpoint,
         currentDistance,
       });
 
       viewportScale = next.scale;
+      viewportRotation = rotation;
       viewportX = next.x;
       viewportY = next.y;
       applyViewport();

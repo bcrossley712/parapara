@@ -79,6 +79,19 @@ below is the example that prompted writing this down:
   being undoable (see architectural decisions) were both caught this
   way — worth rechecking new decisions against this as a matter of
   habit, not just when explicitly asked.
+  - **Sharpened after a real miss:** rotation is part of the standard
+    two-finger gesture (Procreate/Clip Studio twist-to-rotate), and
+    was only ever mentioned once in passing, early on — not raised
+    again as its own decision point when "two-finger pinch+pan
+    gesture" was actually chosen as the interaction model, even though
+    it's architecturally coupled to that exact choice (same file, same
+    transform math). It ended up needing a real rework
+    (`gestures.js`'s anchor math, plus a full `toCanvasPoint` rewrite)
+    to retrofit. The lesson: when a standard feature is coupled to
+    something already being built — same gesture, same transform,
+    same code path — flag it explicitly as part of *that* decision, at
+    the moment the coupled thing is being decided, not as a general
+    mention earlier or later in the conversation.
 - **Explain before touching code, and wait for a go-ahead — for any
   change, not just new-scope ones.** This is stricter than it sounds:
   explaining a diagnosis/plan and then editing in the same turn isn't
@@ -501,6 +514,80 @@ code.
   - Untested outside a real device, same caveat as the smudge tuning
     above: the 150ms/8px thresholds are reasoned defaults, not
     measured against her actual stylus's touch-reporting behavior.
+- **Bug fix: Clear button (and rail generally) pushed off-screen on
+  the actual iPad (9th gen).** iOS extends a standalone PWA under its
+  status bar — the manifest already had `viewport-fit=cover` and
+  `display: standalone` set correctly for that, but nothing in the CSS
+  accounted for `env(safe-area-inset-top)` anywhere except the update
+  toast's bottom inset. The whole app shell started at y=0 under the
+  status bar, so everything below was pushed down by that unaccounted
+  height — the rail's last item (Clear, pinned to the bottom via
+  `margin-top: auto`) paid for it by falling off-screen. Fixed with
+  `padding-top`/`padding-bottom: env(safe-area-inset-*, 0px)` on
+  `.pp-app-shell`. That padding only works because `box-sizing:
+  border-box` was also added globally — without it, padding would've
+  added to `.pp-app-shell`'s fixed `height: 100vh` and made the box
+  taller than the screen instead of shrinking its usable content area,
+  actively worse than doing nothing. Bottom inset mainly matters for
+  devices with a home-indicator gesture bar rather than the 9th-gen's
+  physical home button — kept generic rather than hardcoded to this
+  specific iPad.
+- **Bug fix: zoom anchored to the canvas center instead of the pinch
+  point.** The `computeGestureTransform` math in `gestures.js`
+  requires `transform-origin` pinned at the canvas's own top-left
+  corner `(0, 0)` — the whole anchor-point formula is built on that
+  assumption — but nothing ever actually set it. CSS defaults
+  `transform-origin` to `50% 50%` (center), so `scale()` had been
+  scaling around the canvas's center the entire time regardless of
+  where the gesture was, which is exactly "doesn't zoom where you're
+  pinching." Fixed with `canvas.style.transformOrigin = '0 0'` in
+  `canvas.js`, set right where the canvas element is created — kept
+  in JS next to the code that depends on it (rather than in the CSS
+  file) since it's a hard requirement of the gesture math, not a
+  stylistic choice, and shouldn't be editable without that dependency
+  being obvious.
+- **Canvas rotation added to the two-finger gesture.** Raised as a
+  standard-deviation flag that should have been caught earlier — see
+  "Working agreements" above for the sharpened habit this prompted.
+  Free rotation (no snapping), matching Procreate/Clip Studio; the
+  existing two-finger-tap-to-reset now zeroes rotation too, not just
+  pan/zoom.
+  - This wasn't a small addition — it broke a load-bearing assumption
+    in already-shipped code. `toCanvasPoint` (every draw/erase/fill/
+    smudge action routes through it) previously read
+    `canvas.getBoundingClientRect()` to map a touch to a canvas pixel.
+    That's only correct for an unrotated element — `getBoundingClientRect()`
+    on a rotated element returns the axis-aligned box that merely
+    *contains* the rotated shape, not its true tilted frame. Left
+    alone, every stroke placed while rotated would have landed in the
+    wrong spot.
+  - Rewritten to compute the mapping analytically instead: `canvas.js`
+    now tracks `viewportRotation` alongside scale/x/y, and
+    `gestures.js` exports `screenToNaturalPoint`, the inverse of the
+    on-screen transform (`translate(x,y) rotate(r) scale(s)` around
+    the canvas's own top-left, per the transform-origin fix above).
+    `toCanvasPoint` uses this instead of reading the DOM. Confirmed
+    the general (rotation-aware) formula reduces exactly to the
+    already-validated rotation-free version when rotation is 0 — a
+    generalization, not a behavior change for the existing case.
+  - **Rotation tracking is incremental, not baseline-diffed like
+    scale/pan are.** Scale and translate are safely recomputed from
+    the gesture's start values every move event (avoids drift). A raw
+    `currentAngle - startAngle` can't use the same approach: `atan2`
+    jumps by ~2π when the two fingers' angle crosses ±180°, which
+    would make a deliberate twist past 180° visibly snap instead of
+    rotating smoothly. Fixed by accumulating `shortestAngleDelta`
+    between consecutive frames (safe, since real finger movement
+    between two pointermove events is always well under 180°) rather
+    than diffing against the gesture's start angle. This accumulator
+    lives in `canvas.js` (stateful, gesture-dispatch concern);
+    `gestures.js`'s `computeGestureTransform` takes the resolved
+    absolute rotation as an input rather than computing it internally,
+    keeping that function stateless.
+  - Untested outside a real device, same caveat as the rest of the
+    gesture work: the math is verified by hand (including the
+    reduces-to-the-old-formula check above), not by an actual twist
+    gesture on her iPad yet.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
