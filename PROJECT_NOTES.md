@@ -79,6 +79,12 @@ below is the example that prompted writing this down:
   being undoable (see architectural decisions) were both caught this
   way — worth rechecking new decisions against this as a matter of
   habit, not just when explicitly asked.
+- **Explain before touching code, and wait for a go-ahead — for any
+  change, not just new-scope ones.** This is stricter than it sounds:
+  explaining a diagnosis/plan and then editing in the same turn isn't
+  enough, even for a clear bug fix. Lay out what's wrong and what the
+  fix will be, then stop and let the user respond, before any
+  create_file/str_replace/bash edit to the repo.
 - **Confirm before starting new builds/changes** — don't proceed on a
   feature without checking scope/direction first, especially where
   there's real design ambiguity.
@@ -383,16 +389,28 @@ code.
   concept (a flood fill has no radius) — not tracked, and the slider
   disables itself while Fill is active rather than showing a
   meaningless number.
-- **Bug fix: smudge stippled instead of smearing.** Reported after
-  testing — smudge only ran one blend step per pointer sample pair
-  (`smudgeStep`), with no interpolation, unlike draw/erase which
-  already fill gaps between far-apart samples
-  (`stampAlongLine`/`stampAlongQuadratic`). On a fast drag, consecutive
-  points can land farther apart than the brush radius, producing
-  isolated circular blends with visible gaps instead of a continuous
-  smear. Fixed by adding `smudgeAlongLine`, which interpolates
-  `smudgeStep` calls along the segment the same way draw/erase already
-  do.
+- **Smudge interpolates along the drag path, tuned for a gentle
+  single-pass blend.** Smudge samples pixels near the previous point
+  and blends them at the new one (`smudgeStep`), interpolated along
+  the segment (`smudgeAlongLine`) the same way draw/erase fill gaps
+  between far-apart pointer samples — without that, fast drags left
+  isolated blobs instead of a continuous smear. Blend strength
+  (`SMUDGE_STRENGTH = 0.18`) and step spacing (`SMUDGE_SPACING_RATIO =
+  0.5`, separate from draw/erase's `roundBrush.spacingRatio`) are
+  tuned together so one pass lands around ~30% effective blend rather
+  than compounding toward solid color — consecutive overlapping steps
+  multiply, not average, so this took two rounds of retuning to get
+  right. Feel judgment, not device-tested — a couple of deliberate
+  passes should be needed to really homogenize an area, matching how
+  smudge tools elsewhere behave.
+- **Main canvas context intentionally does not set
+  `willReadFrequently: true`,** even though smudge/fill call
+  `getImageData`. That flag tends to push the whole canvas onto a
+  slower software (CPU) rendering path — which would hurt draw/erase
+  (used constantly) to help smudge/fill (used rarely), the wrong
+  trade. If smudge/fill specifically turn out to need it, that's a
+  narrower fix (e.g. bounding fill's read/write to the affected
+  region) rather than a whole-canvas one.
 - **Color picker: custom HSV square + hue slider + hex input.**
   Flagged first — a drawing app with no way to change color at all is
   itself a deviation from every app in this category, not just a

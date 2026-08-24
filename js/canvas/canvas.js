@@ -27,11 +27,26 @@ const DEFAULT_HEIGHT = 1080;
 // reallocating it per stroke.
 export const MAX_BRUSH_SIZE = 60;
 
-// Smudge: how strongly each drag step blends sampled pixels into the
-// new position (0 = no effect, 1 = fully replaces). Fixed for now,
-// not yet exposed as a control — brush size is the only shared
-// control the toolset decision calls for.
-const SMUDGE_STRENGTH = 0.5;
+// Smudge: how strongly each individual step blends sampled pixels
+// into the new position (0 = no effect, 1 = fully replaces), and how
+// far apart those steps land along the path (as a fraction of brush
+// diameter — same idea as brush.js's spacingRatio, just tuned
+// separately since smudge compounds differently than a solid stamp).
+//
+// These compound fast: consecutive steps overlap, so a single
+// continuous pass over one spot applies roughly (1 / spacingRatio)
+// overlapping blends, not one. At the original settings (strength
+// 0.5, spacing 0.2 → ~5 overlaps per pass), that works out to
+// 1-(1-0.5)^5 ≈ 97% effective opacity — a single pass already looked
+// almost like solid paint, reported as "goes to a full color line."
+// These values are tuned for a single light pass landing around
+// ~30% effective blend (1-(1-0.18)^2 ≈ 0.33 at spacing 0.5 → ~2
+// overlaps), so it takes a couple of deliberate passes to build up
+// real blending, matching how smudge tools elsewhere feel. Revisit
+// once tested — this is a feel judgment, not a formula with one right
+// answer.
+const SMUDGE_STRENGTH = 0.18;
+const SMUDGE_SPACING_RATIO = 0.5;
 
 // Default draw/fill color — single source of truth, shared with
 // ui/color-picker.js so the picker's initial state and the canvas's
@@ -55,10 +70,17 @@ export function initCanvas(container, options = {}) {
   canvas.className = 'pp-canvas';
   container.appendChild(canvas);
 
-  // willReadFrequently: smudge calls getImageData on every drag step
-  // and fill calls it once per tap — this hints the browser to keep
-  // pixel reads cheap rather than optimizing purely for drawing.
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  // Deliberately NOT passing { willReadFrequently: true } here, even
+  // though smudge/fill do call getImageData. That hint typically
+  // pushes the whole canvas onto a software (CPU) rendering path
+  // instead of GPU-accelerated — which would slow down every draw/
+  // erase stamp too, not just the occasional pixel read. Draw/erase
+  // happen far more often than smudge/fill, so trading their
+  // performance away to speed up the less-used tools is the wrong
+  // direction. If smudge/fill specifically still feel slow after
+  // this, that's a narrower problem to solve (e.g. bounding fill's
+  // read/write region) rather than reintroducing this.
+  const ctx = canvas.getContext('2d');
 
   // Smudge's scratch buffer: sized once to the largest brush size
   // rather than reallocated per stroke.
@@ -182,7 +204,7 @@ export function initCanvas(container, options = {}) {
   // smudgeStep calls along the segment the same way draw/erase do.
   function smudgeAlongLine(from, to) {
     const size = Math.max(2, Math.round(brushSizes.smudge));
-    const spacing = Math.max(1, size * 0.2);
+    const spacing = Math.max(1, size * SMUDGE_SPACING_RATIO);
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
     const steps = Math.max(1, Math.ceil(dist / spacing));
 
