@@ -291,320 +291,170 @@ timeline. Confirmed in wireframing:
 - Share icon in the top bar as a first-class action, not buried in a
   menu.
 
-Initial repo scaffold built: root files (index.html, manifest.json,
-sw.js, style.css, README.md, PROJECT_NOTES.md) plus placeholder
-entry-point files for each js/ module (canvas, timeline, storage,
-export, audio, ui) — no real logic yet, just documented responsibility
-and TODOs per module. GitHub Actions deploy workflow included. App
-icon set finalized (512/192/32/16 + apple-touch-icon + transparent/
-flat source masters, corners flood-filled from an AI-generated draft
-image). Schema drafted (above) — not yet built/tested against real
-code.
+**Status: build step 1 (drawing engine) is functionally done and
+deployed.** It's running on the real target device (9th-gen iPad,
+installed PWA). `canvas/` and `ui/` have real logic (draw/erase/fill/
+smudge, color picker, two-finger pan/zoom/rotate, update prompt);
+`timeline/`, `storage/`, `export/`, and `audio/` are still placeholder
+entry points. Deploy pipeline and app icon set are done. The schema
+(below) is drafted and locked in but not yet built — that's step 2.
+Details of everything built are under "Built so far."
+
+**iPad test results so far:** fill speed and palm rejection both work
+fine in real use. Pan/zoom/rotate and tap-to-reset work. Smudge feel
+is still off (see below). The status-bar/viewport fix is unconfirmed
+(see below).
+
+**Known open items:**
+- **Smudge feel** — works, but not what she expects. She showed that
+  some brush styles in other apps inherently blend/soften the edges of
+  the stroke, which suggests the smudge feel is tied to having a
+  broader brush set. Deliberately deferred until more brushes and
+  erasers exist (the `brush.js` tip seam is there for it) — don't
+  retune smudge in isolation before then.
+- **Viewport / status bar** — after two fixes (safe-area padding and
+  `black-translucent`), the layout still looked off on the iPad.
+  Suspected cause is a stale service-worker cache, not code; to be
+  rechecked after the next push. If it's still off after a full
+  cache clear, the next suspect is `height: 100vh` on the app shell
+  (on iPad standalone, `100vh` can exceed the visible area; `100dvh`
+  usually fixes that) — a hypothesis, not confirmed.
+- **Brush variety** — she noticed the range of brush sizes, tips
+  (e.g. chisel), and edge-blending styles in other apps. Not
+  scheduled yet; revisit after step 2 so it doesn't pull focus from
+  persistence.
 
 ## Built so far
 
-- **PWA update-refresh prompt.** Added ahead of the drawing engine
-  since testing happens on the deployed GitHub Pages URL from the
-  start, and it's easy to mistake stale cache for a bug otherwise.
-  `sw.js` no longer calls `self.skipWaiting()` automatically on
-  install — a new version now sits in "waiting" until the page tells
-  it to take over. `main.js` registers the service worker and detects
-  a waiting update (both "arrived while this tab was open" and
-  "already waiting at load"); `ui/ui.js` owns the actual prompt
-  (`showUpdatePrompt`) — a small custom-styled toast, not a native
-  dialog, per the working agreement. Clicking refresh posts
-  `SKIP_WAITING` to the new worker, which then triggers a
-  `controllerchange` → automatic page reload. Styling is intentionally
-  minimal for now (dark toast, orange button) — not yet matched to any
-  real design system since one doesn't exist yet.
+Grouped by subsystem: how it works now, and why. The history of how
+each piece got here lives in git.
 
-- **Drawing engine prototype: draw + erase.** First real pass at step
-  1 of the build order — fill and smudge are deliberately deferred
-  until draw/erase feel is confirmed on the actual iPad/stylus.
-  `canvas/canvas.js` owns Pointer Events input and rendering; it
-  doesn't read/write the frame/project schema yet (storage/ is step
-  2) — for now it just owns one in-memory canvas at the default
-  1920×1080, wired directly into `ui/ui.js`'s tool rail. Draw and
-  erase are the same brush engine (erase uses
-  `globalCompositeOperation = 'destination-out'`), matching the
-  planned single-bitmap `strokeLayer` model. Notable choices, revisit
-  once tested on her actual iPad/stylus:
-  - **Smoothing:** quadratic-curve-through-midpoints (draw a curve
-    between the midpoints of consecutive sampled points, not straight
-    segment-to-segment lines). Standard technique for reducing the
-    jagged look of raw pointer samples; cheap, no library.
-  - **Palm rejection:** "first pointer down wins" — only one pointer
-    can be drawing at a time; a second pointer going down while a
-    stroke is active is ignored. Catches a palm landing *after* the
-    stylus already touched down; does not handle every ordering (e.g.
-    palm first). This is the one piece most likely to need real
-    tuning once she's actually using it — flagged as unverified
-    outside a real device, per the working agreement.
-  - **Pressure/tilt:** intentionally not read yet, even though
-    available on PointerEvent — matches the architecture decision to
-    keep the brush engine unaware of them until real Pencil support
-    is added.
-  - `ui/ui.js` tool rail is bare-bones on purpose: Draw/Erase toggle,
-    a brush-size slider (shared control, per the toolset decision),
-    and a dev-only Clear button (no confirm dialog — nothing durable
-    to lose yet, no storage/ until step 2). Fill/smudge/image-import/
-    mic/pan buttons land with their own build steps.
-  - Canvas is letterboxed at a fixed 16:9 (1920×1080 backing store,
-    CSS-scaled to fit) — not yet reading a per-project canvas size
-    from storage, since storage doesn't exist yet.
+### Drawing engine (`canvas/canvas.js`, `canvas/brush.js`)
 
-- **Drawing engine: full toolset now built — draw, erase, fill,
-  smudge.** Second pass, after draw/erase feel was confirmed good.
-  - **Brush-tip seam introduced.** Draw/erase no longer call
-    `ctx.stroke()` directly — `canvas/brush.js` is new, holding a
-    small `stamp(ctx, point, size)` interface (only `roundBrush`
-    exists today), and `canvas.js` samples points along the smoothed
-    path (straight segment for the first, quadratic-midpoint curve
-    after) and stamps the active brush at each one, instead of one
-    native stroke call. This is what makes tip variety (chisel,
-    textured, etc.) a later "add a brush object" change instead of a
-    rendering rewrite — no new tip shapes were added now, this is
-    purely the seam. `canvas.js` exposes `setBrush()` for this even
-    though nothing calls it yet. Switching from native strokes to
-    stamping is a real rendering change (not just a refactor) — worth
-    a specific re-check that it still feels as good as the
-    already-confirmed native-stroke version, since spacing/density
-    tuning (`roundBrush.spacingRatio`) could subtly change the feel.
-  - **Fill:** tap-only flood fill (not a drag), iterative/stack-based
-    (not recursive, to avoid stack depth issues on a 1920×1080
-    region), with a color-distance tolerance (`FILL_TOLERANCE = 32`)
-    so anti-aliased stroke edges don't leave an unfilled fringe.
-    Always fills with the current draw color — no separate
-    "erase-fill" mode. Reads/writes the full canvas pixel buffer per
-    tap (~8MB at 1920×1080); unverified how this performs on the
-    actual iPad, flagging per the working agreement on unverifiable-
-    outside-a-real-device items.
-  - **Smudge:** drag-based, samples a small patch of existing pixels
-    behind the stroke and blends it forward at each step
-    (`SMUDGE_STRENGTH = 0.5`, fixed, not yet a control) — this is what
-    "drags" color rather than stamping flat color like draw/erase.
-    Uses a small reused offscreen scratch canvas (sized to
-    `MAX_BRUSH_SIZE`) rather than allocating one per stroke or per
-    step. Calls `getImageData` every drag step, so the main canvas
-    context is created with `willReadFrequently: true`.
-  - `MAX_BRUSH_SIZE` now lives in `canvas.js` and is imported by
-    `ui.js` for the size slider's `max`, instead of the same number
-    being hardcoded in both places.
-  - `ui/ui.js` tool rail now has all four: Draw/Erase/Fill/Smudge.
-- **Brush size: per-tool memory, not one shared value.** Caught during
-  a standards check (see "Habits worth keeping" below) — sharing one
-  size across draw/erase/smudge doesn't match how Procreate/
-  Sketchbook/etc. behave (each tool remembers its own last-used size
-  independently). `canvas.js` now keeps `brushSizes = { draw, erase,
-  smudge }`; `setBrushSize()` writes to the active tool's slot,
-  `getBrushSize()` reads it back so `ui.js` can sync the slider's
-  displayed value whenever the active tool changes. Fill has no size
-  concept (a flood fill has no radius) — not tracked, and the slider
-  disables itself while Fill is active rather than showing a
-  meaningless number.
-- **Smudge interpolates along the drag path, tuned for a gentle
-  single-pass blend.** Smudge samples pixels near the previous point
-  and blends them at the new one (`smudgeStep`), interpolated along
-  the segment (`smudgeAlongLine`) the same way draw/erase fill gaps
-  between far-apart pointer samples — without that, fast drags left
-  isolated blobs instead of a continuous smear. Blend strength
-  (`SMUDGE_STRENGTH = 0.18`) and step spacing (`SMUDGE_SPACING_RATIO =
-  0.5`, separate from draw/erase's `roundBrush.spacingRatio`) are
-  tuned together so one pass lands around ~30% effective blend rather
-  than compounding toward solid color — consecutive overlapping steps
-  multiply, not average, so this took two rounds of retuning to get
-  right. Feel judgment, not device-tested — a couple of deliberate
-  passes should be needed to really homogenize an area, matching how
-  smudge tools elsewhere behave.
-- **Main canvas context intentionally does not set
-  `willReadFrequently: true`,** even though smudge/fill call
-  `getImageData`. That flag tends to push the whole canvas onto a
-  slower software (CPU) rendering path — which would hurt draw/erase
-  (used constantly) to help smudge/fill (used rarely), the wrong
-  trade. If smudge/fill specifically turn out to need it, that's a
-  narrower fix (e.g. bounding fill's read/write to the affected
-  region) rather than a whole-canvas one.
-- **Color picker: custom HSV square + hue slider + hex input.**
-  Flagged first — a drawing app with no way to change color at all is
-  itself a deviation from every app in this category, not just a
-  missing nice-to-have; it was simply unreached in build order rather
-  than deliberately deferred. Chose the full custom-picker route over
-  a quick preset-swatch row, matching standard-app-grade expectations
-  rather than a placeholder. New file `js/ui/color-picker.js` (same
-  reasoning as `canvas/brush.js` splitting out of `canvas.js` — a
-  gradient canvas with pointer dragging and hex parsing is a real
-  subsystem, not a few lines in `ui.js`). No native
-  `<input type="color">` — same reasoning as the existing ban on
-  native `confirm()`/`alert()`/date-input chrome, extended here.
-  - SV square uses the standard two-gradient-overlay technique (fill
-    hue → white-to-transparent horizontal overlay → transparent-to-
-    black vertical overlay) rendered on its own small canvas, dragged
-    via Pointer Events with capture, consistent with how the drawing
-    canvas itself handles pointer input.
-  - Hue slider is a native `<input type="range">` (0–360, styled with
-    a rainbow gradient track) — range inputs aren't part of the
-    native-chrome ban, unlike color/date inputs, so no need to build a
-    custom drag control for it.
-  - Hex input is a native `<input type="text">`, validated on
-    `change` (invalid entries snap back to the last valid color rather
-    than being accepted).
-  - Opens as a floating panel anchored to a new swatch button in the
-    rail (shows current color), positioned via `getBoundingClientRect`
-    on open rather than a fixed offset. Closes on tapping anywhere
-    outside it, including the canvas.
-  - `canvas.js` now exports `DEFAULT_COLOR` (`'#2b2b2b'`) as the single
-    source of truth for the starting color, imported by both the
-    drawing engine and the picker's initial state — same pattern as
-    `MAX_BRUSH_SIZE`.
-  - Not included, on purpose, to avoid scope creep beyond what was
-    asked: recent/preset swatches, eyedropper, opacity control. Worth
-    revisiting later if she wants them, not assumed now.
-- **Two-finger pan/zoom gesture.** Flagged proactively, not requested
-  first — pan/zoom is close to universal in this app category
-  (Procreate/Sketchbook/etc. and animation-specific apps alike), and
-  wasn't in the original toolset planning at all (pan was listed in
-  early wireframing, zoom wasn't mentioned anywhere). Placed before
-  storage/step 2 on purpose, even though that delays real persistence
-  a bit further — the complexity lives entirely in `canvas.js`'s
-  pointer-coordinate mapping, which storage/layers/image-transform
-  would otherwise build on top of unaware of pan/zoom, meaning a later
-  retrofit would likely touch three subsystems instead of one.
-  - New file `js/canvas/gestures.js` — pure transform math only (no
-    DOM/pointer handling), so the fiddly part (keeping a pinch anchor
-    point visually fixed while scale changes) can be reasoned about
-    independent of dispatch logic.
-  - Pan/zoom is a CSS `transform: translate() scale()` on the canvas
-    element — the backing-store bitmap stays 1920×1080 always.
-    `toCanvasPoint()` already read the canvas's live bounding rect on
-    every call, so it needed *zero* changes to keep working correctly
-    at any zoom level — a fortunate consequence of how it was already
-    written, not something added for this.
-  - **The real problem was disambiguating a pinch from a draw
-    stroke,** not the transform math. Her stylus very likely reports
-    `pointerType: 'touch'`, indistinguishable from an actual finger —
-    the same ambiguity already flagged as unverified for palm
-    rejection, surfacing again here. Resolved by: a touch always
-    starts drawing immediately (no added latency for the common
-    single-finger case), but stays a "pending" gesture candidate for
-    ~150ms (`GESTURE_WINDOW_MS`) as long as it's moved less than 8px
-    (`GESTURE_MOVEMENT_THRESHOLD_PX`). If a second touch joins within
-    that window, it's retroactively treated as a gesture — the first
-    touch's just-drawn mark is reverted from a saved pixel patch
-    (captured before drawing, same idea as smudge's sample/restore,
-    just used to undo instead of blend). If the window expires with no
-    second touch, nothing happens — it was just a normal stroke that
-    was never delayed. `pointerType === 'pen'` (and mouse, for desktop
-    testing) bypasses this entirely and draws immediately, no
-    candidacy — this is also what keeps a real Apple Pencil seamless
-    later: it reports `'pen'` reliably, so it was always the simple
-    code path this was built around, not a special case to add.
-  - Fill is exempt from the revert mechanism — it commits immediately
-    regardless of pointer type, since reverting an arbitrary
-    flood-filled region isn't a cheap small-patch operation.
-  - Ending the gesture via either finger lifting ends it completely —
-    drawing doesn't resume with whichever finger is still down, to
-    avoid a stray mark right as a pinch/pan ends.
-  - Zoom clamped to 1x (can't zoom out past fit-to-screen) – 8x. A
-    quick two-finger tap (short duration, minimal movement) resets to
-    fit — the common reset convention, and also the safety net for
-    "panned it somewhere I can't find my way back from."
-  - A window resize (e.g. iPad rotation) resets pan/zoom rather than
-    trying to preserve the transform math across a layout change —
-    simplest safe behavior, not a sophisticated one.
-  - Untested outside a real device, same caveat as the smudge tuning
-    above: the 150ms/8px thresholds are reasoned defaults, not
-    measured against her actual stylus's touch-reporting behavior.
-- **Bug fix: Clear button (and rail generally) pushed off-screen on
-  the actual iPad (9th gen).** iOS extends a standalone PWA under its
-  status bar — the manifest already had `viewport-fit=cover` and
-  `display: standalone` set correctly for that, but nothing in the CSS
-  accounted for `env(safe-area-inset-top)` anywhere except the update
-  toast's bottom inset. The whole app shell started at y=0 under the
-  status bar, so everything below was pushed down by that unaccounted
-  height — the rail's last item (Clear, pinned to the bottom via
-  `margin-top: auto`) paid for it by falling off-screen. Fixed with
-  `padding-top`/`padding-bottom: env(safe-area-inset-*, 0px)` on
-  `.pp-app-shell`. That padding only works because `box-sizing:
-  border-box` was also added globally — without it, padding would've
-  added to `.pp-app-shell`'s fixed `height: 100vh` and made the box
-  taller than the screen instead of shrinking its usable content area,
-  actively worse than doing nothing. Bottom inset mainly matters for
-  devices with a home-indicator gesture bar rather than the 9th-gen's
-  physical home button — kept generic rather than hardcoded to this
-  specific iPad.
-  - **Follow-up fix: the padding had no visible effect on retest.**
-    Root cause was a separate, older iOS-specific setting fighting the
-    fix above: `<meta name="apple-mobile-web-app-status-bar-style">`
-    was `"default"`, which makes iOS treat the status bar as opaque,
-    OS-reserved space — the page never draws under it at all, so
-    `env(safe-area-inset-top)` correctly resolves to `0px` in that
-    mode. The padding fix wasn't broken, it was adding zero. That env
-    var only does something under the *other* status-bar mode,
-    `"black-translucent"` (status bar becomes a transparent overlay,
-    page draws full-screen underneath, genuinely needs the inset) —
-    the CSS assumed that mode while the meta tag was set to the one
-    that doesn't need it. Fixed by switching the meta tag to
-    `black-translucent`. Contrast check: white status-bar text/icons
-    now show up over whatever the app draws at the very top — fine
-    here since both the rail and canvas-area are dark at the top edge
-    already, but worth remembering if that region's color ever
-    changes.
-- **Bug fix: zoom anchored to the canvas center instead of the pinch
-  point.** The `computeGestureTransform` math in `gestures.js`
-  requires `transform-origin` pinned at the canvas's own top-left
-  corner `(0, 0)` — the whole anchor-point formula is built on that
-  assumption — but nothing ever actually set it. CSS defaults
-  `transform-origin` to `50% 50%` (center), so `scale()` had been
-  scaling around the canvas's center the entire time regardless of
-  where the gesture was, which is exactly "doesn't zoom where you're
-  pinching." Fixed with `canvas.style.transformOrigin = '0 0'` in
-  `canvas.js`, set right where the canvas element is created — kept
-  in JS next to the code that depends on it (rather than in the CSS
-  file) since it's a hard requirement of the gesture math, not a
-  stylistic choice, and shouldn't be editable without that dependency
+- **One in-memory 1920×1080 bitmap**, letterboxed at 16:9 and
+  CSS-scaled to fit. It doesn't read the frame/project schema yet
+  (that's step 2); when storage exists it should paint the active
+  layer's bitmap instead of owning its own.
+- **Tools: draw, erase, fill, smudge.** Draw and erase share one brush
+  path (erase is `globalCompositeOperation = 'destination-out'`).
+- **Brush-tip seam.** Draw/erase don't call `ctx.stroke()`; they
+  *stamp* the active brush along the smoothed path. `brush.js` holds
+  the tip interface (`stamp(ctx, point, size)` plus `spacingRatio`);
+  only `roundBrush` exists, and `canvas.js` exposes `setBrush()`.
+  Adding a chisel/textured/edge-blending tip means adding a brush
+  object, not touching input or smoothing.
+- **Smoothing:** quadratic curve through midpoints of consecutive
+  samples, plus coalesced pointer events so fast strokes keep detail.
+- **Palm rejection:** first pointer down wins; any pointer landing
+  while a stroke is active is ignored. Works in real use on the iPad.
+  It doesn't handle every ordering (e.g. palm first).
+- **Pressure/tilt are deliberately not read**, so Apple Pencil support
+  later is additive, not a rework.
+- **Brush size is remembered per tool** (`brushSizes` for draw, erase,
+  smudge), matching other apps. Fill has no size, so the slider
+  disables itself while Fill is active. `MAX_BRUSH_SIZE` and
+  `DEFAULT_COLOR` are exported from `canvas.js` as the single source
+  of truth for `ui.js` and the picker.
+- **Fill:** tap-only flood fill, iterative (not recursive) so a large
+  region can't blow the stack, with a color tolerance
+  (`FILL_TOLERANCE = 32`) so anti-aliased edges don't leave a fringe.
+  Reads and writes the whole canvas buffer per tap. Speed is fine on
+  the iPad.
+- **Smudge:** samples a small patch behind the stroke and blends it
+  forward, interpolated along the segment (`smudgeAlongLine`) like
+  draw/erase, using a reused scratch canvas. Overlapping steps
+  *multiply* rather than average, so strength and spacing are tuned
+  together (`SMUDGE_STRENGTH = 0.18`, `SMUDGE_SPACING_RATIO = 0.5`,
+  separate from `roundBrush.spacingRatio`) to land one pass near ~30%
+  blend. **The feel is still not what she expects** — deferred until
+  there are more brushes (see Current state).
+- **The canvas context deliberately does not set
+  `willReadFrequently: true`**, even though smudge and fill call
+  `getImageData`. That flag tends to force the whole canvas onto a
+  slower CPU path, hurting draw/erase (constant use) to help
+  smudge/fill (rare). If those two need help, bound fill's
+  read/write region instead.
+
+### Color picker (`ui/color-picker.js`)
+
+- Custom HSV picker: a saturation/value square (two gradient overlays
+  on its own small canvas, dragged with Pointer Events and capture), a
+  hue slider, and a hex input. **No native `<input type="color">`** —
+  the same reasoning as the ban on native dialogs.
+- The hue slider is a native `<input type="range">` (range inputs
+  aren't covered by the ban). The hex input validates on `change` and
+  snaps back to the last valid color on bad input.
+- Opens as a floating panel from a swatch in the rail, positioned from
+  the swatch's rect on open; tapping anywhere outside closes it.
+- Not built, on purpose: preset/recent swatches, eyedropper, opacity.
+  Revisit if she asks.
+
+### Pan / zoom / rotate (`canvas/gestures.js` + dispatch in `canvas.js`)
+
+- **Why before storage:** the cost lives in `canvas.js`'s
+  pointer-coordinate mapping. Building storage, layers, and image
+  transforms on top of a no-zoom assumption would have meant
+  retrofitting all of them. Works on the iPad: zoom follows the
+  pinch point, rotation works, two-finger tap resets.
+- **Mechanism:** a CSS `translate() rotate() scale()` on the canvas
+  element; the bitmap never changes. `gestures.js` is pure math (no
+  DOM), `canvas.js` does the dispatch and state.
+- **`transform-origin` must be `0 0`.** The anchor math assumes it,
+  and CSS defaults to the center, so it's set in JS right where the
+  canvas is created — don't move it to CSS without that dependency
   being obvious.
-- **Canvas rotation added to the two-finger gesture.** Raised as a
-  standard-deviation flag that should have been caught earlier — see
-  "Working agreements" above for the sharpened habit this prompted.
-  Free rotation (no snapping), matching Procreate/Clip Studio; the
-  existing two-finger-tap-to-reset now zeroes rotation too, not just
-  pan/zoom.
-  - This wasn't a small addition — it broke a load-bearing assumption
-    in already-shipped code. `toCanvasPoint` (every draw/erase/fill/
-    smudge action routes through it) previously read
-    `canvas.getBoundingClientRect()` to map a touch to a canvas pixel.
-    That's only correct for an unrotated element — `getBoundingClientRect()`
-    on a rotated element returns the axis-aligned box that merely
-    *contains* the rotated shape, not its true tilted frame. Left
-    alone, every stroke placed while rotated would have landed in the
-    wrong spot.
-  - Rewritten to compute the mapping analytically instead: `canvas.js`
-    now tracks `viewportRotation` alongside scale/x/y, and
-    `gestures.js` exports `screenToNaturalPoint`, the inverse of the
-    on-screen transform (`translate(x,y) rotate(r) scale(s)` around
-    the canvas's own top-left, per the transform-origin fix above).
-    `toCanvasPoint` uses this instead of reading the DOM. Confirmed
-    the general (rotation-aware) formula reduces exactly to the
-    already-validated rotation-free version when rotation is 0 — a
-    generalization, not a behavior change for the existing case.
-  - **Rotation tracking is incremental, not baseline-diffed like
-    scale/pan are.** Scale and translate are safely recomputed from
-    the gesture's start values every move event (avoids drift). A raw
-    `currentAngle - startAngle` can't use the same approach: `atan2`
-    jumps by ~2π when the two fingers' angle crosses ±180°, which
-    would make a deliberate twist past 180° visibly snap instead of
-    rotating smoothly. Fixed by accumulating `shortestAngleDelta`
-    between consecutive frames (safe, since real finger movement
-    between two pointermove events is always well under 180°) rather
-    than diffing against the gesture's start angle. This accumulator
-    lives in `canvas.js` (stateful, gesture-dispatch concern);
-    `gestures.js`'s `computeGestureTransform` takes the resolved
-    absolute rotation as an input rather than computing it internally,
-    keeping that function stateless.
-  - Untested outside a real device, same caveat as the rest of the
-    gesture work: the math is verified by hand (including the
-    reduces-to-the-old-formula check above), not by an actual twist
-    gesture on her iPad yet.
+- **`toCanvasPoint` is computed analytically** from the viewport state
+  (`screenToNaturalPoint` in `gestures.js`), not from
+  `getBoundingClientRect()`. The bounding rect of a rotated element is
+  the axis-aligned box *around* it, so it gives wrong coordinates once
+  rotated. Every draw/erase/fill/smudge action routes through this
+  function — change it carefully.
+- **Rotation is accumulated frame to frame** (`shortestAngleDelta`),
+  not diffed against the start angle, because `atan2` jumps ~2π at
+  ±180° and a long twist would visibly snap. Scale and translate are
+  recomputed from the gesture's start values each move, which avoids
+  drift.
+- **Pinch vs. stroke.** Her stylus almost certainly reports
+  `pointerType: 'touch'`, same as a finger. So a touch starts drawing
+  immediately (no added latency) but stays a gesture candidate for
+  ~150 ms (`GESTURE_WINDOW_MS`) while it has moved under 8 px
+  (`GESTURE_MOVEMENT_THRESHOLD_PX`). If a second touch joins in that
+  window, the first touch's dot is reverted from a saved pixel patch
+  and both become a gesture. `pen` and mouse skip all of this and draw
+  immediately, which is also why a real Apple Pencil will slot in
+  cleanly. The thresholds are the original reasoned defaults, not
+  tuned against her stylus — retune there first if it misfires.
+- **Fill is exempt from the revert** (it commits immediately); a
+  flood-filled region isn't a cheap patch to restore.
+- Lifting either finger ends the gesture; drawing doesn't resume with
+  the other finger. Zoom is clamped 1×–8×. A quick two-finger tap
+  (≤300 ms, ≤12 px movement) resets pan, zoom, and rotation. A window
+  resize also resets the viewport.
+
+### Layout and PWA
+
+- **Update prompt.** `sw.js` doesn't call `skipWaiting()` on install,
+  so a new version waits until the page asks. `main.js` detects a
+  waiting worker (arrived while open, or already waiting at load) and
+  `ui.showUpdatePrompt` shows a small custom toast. Tapping Refresh
+  posts `SKIP_WAITING`; `controllerchange` then reloads the page. A
+  first-ever install doesn't prompt. Because of this, a deployed fix
+  doesn't show on an installed device until that toast is tapped (or
+  the app is fully closed and reopened).
+- **Safe area.** iOS extends a standalone PWA under the status bar.
+  `.pp-app-shell` pads with `env(safe-area-inset-top/bottom)`, which
+  only works because of two other settings: global
+  `box-sizing: border-box` (otherwise the padding makes the fixed
+  `100vh` shell taller than the screen) and
+  `apple-mobile-web-app-status-bar-style: black-translucent` (under
+  `default`, iOS reserves the bar and the insets resolve to `0`).
+  `black-translucent` draws white status-bar text over whatever is at
+  the top edge; that's fine while the rail and stage are dark there.
+  **Still unconfirmed on the iPad** — see Current state.
+- **Tool rail** is bare-bones: Draw / Erase / Fill / Smudge, color
+  swatch, size slider, and a dev-only Clear button (no confirm dialog,
+  since there's nothing durable to lose before storage exists).
+  Image-import, mic, and the rest land with their own steps.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
@@ -627,9 +477,11 @@ most optional piece):
 
 Decided since wireframing:
 - **Toolset for the drawing engine: draw, erase, fill, smudge/
-  shading (blend tool).** Brush size is a shared control across
-  draw/erase/smudge. (See undo/redo note above — smudge is why undo
-  is raster-snapshot-based rather than command-replay-based.)
+  shading (blend tool).** Brush size is remembered per tool for
+  draw/erase/smudge (originally planned as one shared control;
+  changed to match other apps — see "Built so far"). (See undo/redo
+  note above — smudge is why undo is raster-snapshot-based rather
+  than command-replay-based.)
 - **Default fps: 12** (see architectural decisions above).
 - **Multiple drawable layers per frame** (see architectural decisions
   above) — schema locked in, UI deferred to step 2.
@@ -637,6 +489,13 @@ Decided since wireframing:
 Still open:
 - Default export format specifics (container/codec) — not needed
   until step 6.
+- Whether to run step 2 (storage/schema/undo/layers — dense,
+  interdependent state where a subtle bug is expensive to find late)
+  on a higher-capability model than the one used for steps 1's UI and
+  gesture work. Anthropic's own guidance is to start with the most
+  capable generally available model and tune effort, and it names
+  Opus-class for complex agentic coding. Proposed as an experiment:
+  compare the bug-report rate on step 2 against step 1's. Not decided.
 
 ## File layout (confirmed)
 
