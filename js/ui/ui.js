@@ -12,10 +12,20 @@
 // tool rail (image-import/mic/pan) land with their respective build
 // steps. Color picker itself lives in color-picker.js.
 
-import { initCanvas, MAX_BRUSH_SIZE, DEFAULT_COLOR } from '../canvas/canvas.js';
+import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { createColorPicker } from './color-picker.js';
+import { createSettingsPanel } from './settings-panel.js';
 
-export function initUI(container) {
+// options.settings: saved tool settings to start from (raw is fine —
+//   canvas.applySettings cleans them). Omit for defaults.
+// options.onSettingsChange: called after the user changes tool, color
+//   or brush size, so main.js can save. Not called for the initial
+//   setup.
+// options.appActions: for the gear menu — { getVersionLabel,
+//   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
+//   Omitted actions report "unavailable" rather than breaking the UI.
+export function initUI(container, options = {}) {
+  const { settings = null, onSettingsChange = () => {}, appActions = {} } = options;
   container.innerHTML = '';
 
   const shell = document.createElement('div');
@@ -32,11 +42,17 @@ export function initUI(container) {
   container.appendChild(shell);
 
   const canvasApi = initCanvas(canvasArea);
+  canvasApi.applySettings(settings);
+  const startSettings = canvasApi.getSettings();
 
-  const drawBtn = createToolButton('Draw', () => setActiveTool('draw'));
-  const eraseBtn = createToolButton('Erase', () => setActiveTool('erase'));
-  const fillBtn = createToolButton('Fill', () => setActiveTool('fill'));
-  const smudgeBtn = createToolButton('Smudge', () => setActiveTool('smudge'));
+  const pickTool = (tool) => {
+    setActiveTool(tool);
+    onSettingsChange();
+  };
+  const drawBtn = createToolButton('Draw', () => pickTool('draw'));
+  const eraseBtn = createToolButton('Erase', () => pickTool('erase'));
+  const fillBtn = createToolButton('Fill', () => pickTool('fill'));
+  const smudgeBtn = createToolButton('Smudge', () => pickTool('smudge'));
   rail.appendChild(drawBtn);
   rail.appendChild(eraseBtn);
   rail.appendChild(fillBtn);
@@ -50,12 +66,13 @@ export function initUI(container) {
   colorSwatch.type = 'button';
   colorSwatch.className = 'pp-color-swatch';
   colorSwatch.setAttribute('aria-label', 'Color');
-  colorSwatch.style.background = DEFAULT_COLOR;
+  colorSwatch.style.background = startSettings.color;
   rail.appendChild(colorSwatch);
 
-  const picker = createColorPicker(DEFAULT_COLOR, (hex) => {
+  const picker = createColorPicker(startSettings.color, (hex) => {
     canvasApi.setColor(hex);
     colorSwatch.style.background = hex;
+    onSettingsChange();
   });
   picker.element.classList.add('pp-color-picker--hidden');
   shell.appendChild(picker.element);
@@ -93,22 +110,51 @@ export function initUI(container) {
   sizeInput.type = 'range';
   sizeInput.min = '1';
   sizeInput.max = String(MAX_BRUSH_SIZE);
-  sizeInput.value = '6';
+  // Value is set by setActiveTool() below, from the active tool's
+  // remembered size.
   sizeInput.addEventListener('input', () => {
     canvasApi.setBrushSize(Number(sizeInput.value));
+    onSettingsChange();
   });
   sizeControl.appendChild(sizeText);
   sizeControl.appendChild(sizeInput);
   rail.appendChild(sizeControl);
 
-  // Dev-testing convenience, not a real feature. Since 2a, Clear is
-  // saved like any other edit, so it does wipe the saved drawing —
-  // and there's no undo until 2b, which is what makes it recoverable
-  // (no confirm dialog then either; undo is the safety net, as in
-  // other drawing apps).
-  const clearBtn = createToolButton('Clear', () => canvasApi.clear());
-  clearBtn.classList.add('pp-tool-btn--secondary');
-  rail.appendChild(clearBtn);
+  // Gear menu (settings-panel.js) at the bottom of the rail: version,
+  // check for updates, and dev tools. Clear lives in there now, not on
+  // the rail — it's saved like any edit and there's no undo until 2b,
+  // so one stray tap shouldn't be able to wipe her drawing. (No confirm
+  // dialog once undo exists either; undo is the safety net, as in
+  // other drawing apps.)
+  const gearBtn = document.createElement('button');
+  gearBtn.type = 'button';
+  gearBtn.className = 'pp-tool-btn pp-tool-btn--secondary pp-gear-btn';
+  gearBtn.setAttribute('aria-label', 'Settings');
+  gearBtn.innerHTML = GEAR_ICON;
+  rail.appendChild(gearBtn);
+
+  const unavailable = async () => 'unsupported';
+  const settingsPanel = createSettingsPanel({
+    getVersionLabel: appActions.getVersionLabel ?? (async () => 'Unknown'),
+    checkForUpdate: appActions.checkForUpdate ?? unavailable,
+    applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
+    freshReload: appActions.freshReload ?? (async () => window.location.reload()),
+    clearDrawing: () => canvasApi.clear(),
+  });
+  shell.appendChild(settingsPanel.element);
+
+  gearBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (pickerOpen) setPickerOpen(false);
+    settingsPanel.setOpen(!settingsPanel.isOpen, gearBtn);
+  });
+
+  // Same tap-outside-to-close behavior as the color picker.
+  document.addEventListener('pointerdown', (event) => {
+    if (!settingsPanel.isOpen) return;
+    if (settingsPanel.element.contains(event.target) || gearBtn.contains(event.target)) return;
+    settingsPanel.setOpen(false);
+  });
 
   function setActiveTool(tool) {
     canvasApi.setTool(tool);
@@ -139,7 +185,7 @@ export function initUI(container) {
     return btn;
   }
 
-  setActiveTool('draw');
+  setActiveTool(startSettings.tool);
 
   return canvasApi;
 }
@@ -191,3 +237,18 @@ function createToast(id, message, buttonLabel) {
   toast.append(text, btn);
   return toast;
 }
+
+// Gear icon, drawn here rather than pulled from an icon set: four bars
+// crossed at 45° make the eight teeth, a disc makes the body, and the
+// hole is filled with the button's own background color.
+const GEAR_ICON = `
+<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
+  <g fill="currentColor">
+    <rect x="10" y="1.5" width="4" height="21" rx="1"/>
+    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(45 12 12)"/>
+    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(90 12 12)"/>
+    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(135 12 12)"/>
+    <circle cx="12" cy="12" r="7.5"/>
+  </g>
+  <circle cx="12" cy="12" r="3" fill="var(--pp-ink-light)"/>
+</svg>`;

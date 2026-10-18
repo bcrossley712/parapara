@@ -93,6 +93,16 @@ html, body {
   opacity: 0.8;
 }
 
+/* Gear button at the bottom of the rail (js/ui/ui.js). The icon's
+   center hole is filled with --pp-ink-light, so keep this button's
+   background on that token. */
+.pp-gear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 4px;
+}
+
 .pp-brush-size {
   display: flex;
   flex-direction: column;
@@ -245,6 +255,88 @@ html, body {
      closes. Keep it at 16px or above. */
   font-size: 16px;
   text-transform: uppercase;
+}
+
+/* Settings panel (js/ui/settings-panel.js) — floats beside the gear,
+   same look as the color picker. */
+.pp-settings {
+  position: fixed;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 256px;
+  padding: 12px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 14px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.pp-settings--hidden {
+  display: none;
+}
+
+.pp-settings__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pp-settings__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pp-settings__version {
+  opacity: 0.8;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pp-settings__btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pp-settings__btn:disabled {
+  opacity: 0.5;
+}
+
+.pp-settings__status:empty,
+.pp-settings__hint:empty {
+  display: none;
+}
+
+.pp-settings__status {
+  font-size: 13px;
+}
+
+.pp-settings__section {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--pp-ink-light);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.pp-settings__hint {
+  margin-top: -4px;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 /* Toasts (js/ui/ui.js): the PWA update prompt (showUpdatePrompt) and

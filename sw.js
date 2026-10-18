@@ -20,8 +20,10 @@ const APP_SHELL = [
   './manifest.json',
   './style.css',
   './js/main.js',
+  './js/updater.js',
   './js/ui/ui.js',
   './js/ui/color-picker.js',
+  './js/ui/settings-panel.js',
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
   './js/canvas/gestures.js',
@@ -53,14 +55,25 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+  // The settings panel shows which build is running. It asks the
+  // worker controlling the page (not the page's own JS), because that
+  // worker is what decides which cached files the page actually got.
+  if (event.data && event.data.type === 'GET_VERSION' && event.ports[0]) {
+    event.ports[0].postMessage(VERSION);
+  }
 });
 
 self.addEventListener('activate', (event) => {
+  // Deletes only this app's *old* caches. GitHub Pages serves every
+  // project on the account from one origin (bcrossley712.github.io),
+  // and caches are per-origin — so deleting "everything that isn't
+  // ours" would also wipe other apps' offline caches. Keep the
+  // prefix check.
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => key.startsWith('parapara-') && key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       )
     )

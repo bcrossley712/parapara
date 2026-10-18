@@ -1,7 +1,8 @@
 // Parapara! — app entry point
 //
 // Glue between modules: loads the project from storage/, hands it to
-// the canvas, and wires autosave. Modules don't import each other's
+// the canvas, wires autosave, and connects the updater (updater.js) to
+// the update toast and the gear menu. Modules don't import each other's
 // internals; this file moves data between them (see PROJECT_NOTES.md,
 // scope-specific file structure). Screen routing (gallery <-> editor)
 // lands here with step 2d; for now it opens straight into the editor.
@@ -12,8 +13,21 @@ import {
   openLastProject,
   loadLayerBitmap,
   saveLayerBitmap,
+  loadToolSettings,
+  saveToolSettings,
 } from './storage/storage.js';
 import { createAutosaver } from './storage/autosave.js';
+import { initUpdater, formatVersion } from './updater.js';
+
+// Save functions to run before any reload the app causes itself
+// (applying an update, Fresh reload), so a stroke made seconds earlier
+// isn't lost. startEditor() adds to this once saving is set up.
+const flushBeforeReload = [];
+
+const updater = initUpdater({
+  onUpdateReady: () => showUpdatePrompt(() => updater.applyUpdate()),
+  beforeReload: () => Promise.all(flushBeforeReload.map((flush) => flush())),
+});
 
 startEditor();
 
@@ -23,6 +37,7 @@ async function startEditor() {
   // then have a late-arriving load wipe the stroke.
   let session = null;      // { project, frame, layer } once loaded
   let savedImage = null;
+  let savedSettings = null;
   try {
     await initStorage();
     const { project, frames } = await openLastProject();
@@ -31,6 +46,14 @@ async function startEditor() {
     const blob = await loadLayerBitmap(layer.bitmapRef);
     if (blob) savedImage = await createImageBitmap(blob);
     session = { project, frame, layer };
+
+    // Tool settings are a nicety, not her work: if they fail to load,
+    // start with defaults rather than turning saving off.
+    try {
+      savedSettings = await loadToolSettings();
+    } catch (err) {
+      console.warn('Parapara! could not load tool settings:', err);
+    }
   } catch (err) {
     // Anything failing here — storage unavailable, or a saved image
     // that won't decode — means drawing still works but autosave stays
@@ -39,7 +62,20 @@ async function startEditor() {
     console.error('Parapara! could not load saved work:', err);
   }
 
-  const canvasApi = initUI(document.getElementById('app'));
+  // Created below once we know storage works; until then (and if it
+  // doesn't), setting changes simply aren't saved.
+  let settingsSaver = null;
+
+  const canvasApi = initUI(document.getElementById('app'), {
+    settings: savedSettings,
+    onSettingsChange: () => settingsSaver?.schedule(),
+    appActions: {
+      getVersionLabel: async () => formatVersion(await updater.getVersion()),
+      checkForUpdate: () => updater.checkForUpdate(),
+      applyUpdate: () => updater.applyUpdate(),
+      freshReload: () => updater.freshReload(),
+    },
+  });
 
   if (savedImage) {
     canvasApi.setImage(savedImage);
@@ -64,73 +100,29 @@ async function startEditor() {
 
   canvasApi.onChange(() => autosaver.schedule());
 
+  // Tool, color and brush sizes — app-wide, remembered across launches
+  // (see storage.js). Same save-timing rules as the drawing. A failure
+  // is only logged: losing a color choice isn't worth interrupting her.
+  settingsSaver = createAutosaver({
+    save: () => saveToolSettings(canvasApi.getSettings()),
+    delayMs: 300,
+    onError: (err) => console.warn('Parapara! saving tool settings failed:', err),
+  });
+
   // iPadOS can close a backgrounded web app without warning, so save
   // the moment it's hidden rather than waiting out the debounce.
   // visibilitychange is the reliable signal on iOS; pagehide is a
   // backup for an actual unload.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') autosaver.flush();
+    if (document.visibilityState === 'hidden') {
+      autosaver.flush();
+      settingsSaver.flush();
+    }
   });
-  window.addEventListener('pagehide', () => autosaver.flush());
-}
-
-// PWA update-refresh prompt. Registers sw.js, and when a new version
-// has installed and is sitting in "waiting" (see sw.js — it no longer
-// auto-skipWaiting's), shows a prompt rather than swapping the cache
-// out silently. Useful during active development: confirms a push
-// actually landed instead of wondering if you're looking at stale
-// cache.
-function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
-
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').then((registration) => {
-      // Covers the case where a waiting worker already exists at
-      // page load (e.g. update installed in a background tab).
-      if (registration.waiting && navigator.serviceWorker.controller) {
-        showUpdatePrompt(() => {
-          registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-        });
-      }
-
-      // Covers the case where a new worker starts installing during
-      // this page's lifetime.
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        if (!newWorker) return;
-
-        newWorker.addEventListener('statechange', () => {
-          // "installed" + an existing controller means this is an
-          // update to an already-running app, not the first-ever
-          // install (which has no controller yet and shouldn't
-          // prompt).
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            showUpdatePrompt(() => {
-              newWorker.postMessage({ type: 'SKIP_WAITING' });
-            });
-          }
-        });
-      });
-    }).catch((err) => {
-      console.error('Service worker registration failed:', err);
-    });
-
-    // Once the new worker takes control, reload so the page actually
-    // picks up the fresh app shell instead of running old JS against
-    // a swapped cache.
-    //
-    // Only when an older worker was already in control, though: on the
-    // very first install, sw.js's clients.claim() also fires
-    // controllerchange, and reloading then would interrupt her first
-    // session (possibly mid-stroke) for no reason.
-    const hadController = Boolean(navigator.serviceWorker.controller);
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || refreshing) return;
-      refreshing = true;
-      window.location.reload();
-    });
+  window.addEventListener('pagehide', () => {
+    autosaver.flush();
+    settingsSaver.flush();
   });
-}
 
-registerServiceWorker();
+  flushBeforeReload.push(() => autosaver.flush(), () => settingsSaver.flush());
+}

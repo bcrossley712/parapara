@@ -23,6 +23,7 @@ const STORE_BLOBS = 'blobs';   // layer bitmaps (and, later, images/audio)
 const STORE_META = 'meta';     // small app-level records, e.g. last project
 
 const META_LAST_PROJECT = 'lastProjectId';
+const META_TOOL_SETTINGS = 'toolSettings';
 
 const DEFAULT_CANVAS = { width: 1920, height: 1080 };
 const DEFAULT_FPS = 12;
@@ -268,6 +269,28 @@ export async function saveProject(project) {
     s[STORE_PROJECTS].put(record);
   });
   return record;
+}
+
+// --- tool settings (app-wide, not per project) ---
+//
+// Active tool, color and per-tool brush sizes, remembered across
+// launches and shared by every project — like Sketchbook/Procreate,
+// where your brush and color come with you into a different drawing.
+// Stored as-is; validating it is canvas.js's job
+// (sanitizeToolSettings), since that's where the tools are defined.
+
+// Returns the saved settings object, or null if none saved yet.
+export async function loadToolSettings() {
+  const record = await withTransaction([STORE_META], 'readonly', (s) =>
+    promisifyRequest(s[STORE_META].get(META_TOOL_SETTINGS))
+  );
+  return record?.value ?? null;
+}
+
+export async function saveToolSettings(settings) {
+  await withTransaction([STORE_META], 'readwrite', (s) => {
+    s[STORE_META].put({ key: META_TOOL_SETTINGS, value: settings });
+  });
 }
 
 export async function saveFrame(frame) {

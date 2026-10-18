@@ -89,7 +89,9 @@ test('Clear is saved like any other edit', async ({ page }) => {
   await drawStroke(page);
   await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
 
-  await page.getByRole('button', { name: 'Clear' }).click();
+  // Clear lives in the gear menu (moved off the rail — no undo yet).
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Clear drawing' }).click();
   await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
   await reloadApp(page);
 

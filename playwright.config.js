@@ -12,6 +12,9 @@ const PORT = 8765;
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: false,
+  // One test at a time: the update tests change the test server's
+  // simulated deploy version, which every open page would notice.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: process.env.CI ? 'github' : 'list',

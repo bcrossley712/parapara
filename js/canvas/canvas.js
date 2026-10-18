@@ -65,6 +65,43 @@ const SMUDGE_SPACING_RATIO = 0.5;
 // actual starting color can't drift apart.
 export const DEFAULT_COLOR = '#2b2b2b';
 
+// --- tool settings (remembered across launches; see main.js) ---
+//
+// Tools, and which of them have a size. Fill has no size (a flood
+// fill has no radius).
+const TOOLS = ['draw', 'erase', 'fill', 'smudge'];
+const SIZED_TOOLS = ['draw', 'erase', 'smudge'];
+const DEFAULT_TOOL = 'draw';
+const DEFAULT_BRUSH_SIZE = 6;
+
+// Turns whatever was saved (possibly from an older app version, or
+// corrupted) into valid settings. Each field is checked on its own: a
+// bad color doesn't throw away a good tool or sizes, and anything
+// missing or invalid falls back to its default. Pure — no DOM — so
+// it's unit-tested directly.
+export function sanitizeToolSettings(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+
+  const tool = TOOLS.includes(input.tool) ? input.tool : DEFAULT_TOOL;
+
+  const color = typeof input.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(input.color)
+    ? input.color.toLowerCase()
+    : DEFAULT_COLOR;
+
+  const savedSizes = input.brushSizes && typeof input.brushSizes === 'object'
+    ? input.brushSizes
+    : {};
+  const brushSizes = {};
+  for (const name of SIZED_TOOLS) {
+    const size = savedSizes[name];
+    brushSizes[name] = Number.isInteger(size) && size >= 1 && size <= MAX_BRUSH_SIZE
+      ? size
+      : DEFAULT_BRUSH_SIZE;
+  }
+
+  return { tool, color, brushSizes };
+}
+
 // Fill: per-channel color-distance tolerance for what counts as "the
 // same region" to flood. Anti-aliased line edges are never a single
 // exact color, so a tolerance of 0 would leave a ring of unfilled
@@ -108,7 +145,7 @@ export function initCanvas(container, options = {}) {
   scratchCanvas.height = MAX_BRUSH_SIZE;
   const scratchCtx = scratchCanvas.getContext('2d');
 
-  let tool = 'draw';      // 'draw' | 'erase' | 'fill' | 'smudge'
+  let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
   let brush = roundBrush; // only tip today — see brush.js for the seam
   let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
 
@@ -117,7 +154,7 @@ export function initCanvas(container, options = {}) {
   // etc. behave) rather than one shared size that carries between
   // tools. Fill has no size concept (a flood fill has no radius), so
   // it isn't tracked here.
-  const brushSizes = { draw: 6, erase: 6, smudge: 6 };
+  const brushSizes = sanitizeToolSettings(null).brushSizes; // defaults
 
   // Pressure/tilt from PointerEvent aren't read yet — deliberately,
   // per the architecture note that the brush engine shouldn't bake in
@@ -750,6 +787,23 @@ export function initCanvas(container, options = {}) {
     setColor(hex) {
       color = hex;
     },
+
+    // Current tool settings, in the shape sanitizeToolSettings()
+    // returns — what main.js saves, and what ui.js syncs its controls
+    // from after applySettings().
+    getSettings() {
+      return { tool, color, brushSizes: { ...brushSizes } };
+    },
+
+    // Applies saved settings, cleaning them first (see
+    // sanitizeToolSettings), so callers can pass raw stored data.
+    applySettings(raw) {
+      const clean = sanitizeToolSettings(raw);
+      tool = clean.tool;
+      color = clean.color;
+      Object.assign(brushSizes, clean.brushSizes);
+    },
+
     clear() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       notifyChange();

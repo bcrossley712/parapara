@@ -103,6 +103,11 @@ below is the example that prompted writing this down:
   there's real design ambiguity.
 - **Confirm before packaging/sending files** — and when sending, only
   include files actually touched by the change, not the whole project.
+- **Remembered state is part of any persistence decision.** When
+  scoping anything that saves, ask what else her other apps keep
+  across launches (tool, color, sizes, last-open project, view) and
+  raise it then — tool settings were missed in 2a and caught on the
+  device instead.
 - **Hold files until a push is due.** Don't hand over files after each
   change; keep working in the cloned repo and send files only when
   it's time to push to GitHub — either ask if he's ready to push,
@@ -376,8 +381,9 @@ before the next starts:
 
 - **2a. Saving.** Schema + IndexedDB wrapper; one project, one frame,
   autosaves and survives relaunch. **Built** (see "Storage" under
-  Built so far); tested in Node and headless Chromium, **awaiting
-  iPad confirmation**.
+  Built so far). Drawing persistence **confirmed on the iPad**; the
+  follow-up that remembers tool settings is built and tested, awaiting
+  iPad confirmation.
 - **2b. Undo/redo** per the revised design (see architectural
   decisions), plus the Sketchbook gesture mapping and buttons. Clear
   becomes undoable here.
@@ -486,8 +492,28 @@ each piece got here lives in git.
   come in 2c.
 - **Clear is saved like any edit**, so until undo exists (2b) it
   wipes the saved drawing for real.
-- **Tests:** `tests/unit/storage.test.js`, `tests/unit/autosave.test.js`
-  and `tests/e2e/saving.spec.js` (see "Testing"). Device-only and
+- **Tool settings are remembered across launches** — active tool,
+  color, and per-tool brush sizes. Added after 2a shipped, when she'd
+  have had to re-pick her color every launch (a miss: Sketchbook and
+  Procreate both remember these, and it should have been raised when
+  2a was scoped).
+  - **App-wide, not per project** (one `meta` record,
+    `toolSettings`): her brush and color follow her into another
+    drawing, as in Sketchbook/Procreate.
+  - **Pan/zoom/rotation are not remembered** — the view resets on
+    launch.
+  - **Validation lives in `canvas.js` (`sanitizeToolSettings`)**, since
+    that's where tools and size limits are defined; storage saves and
+    loads the record as-is. Each field falls back independently, so a
+    bad value can't break startup or discard the good ones.
+  - `ui.js` starts its controls from `canvas.getSettings()` after
+    `applySettings()`, and calls `onSettingsChange` on user changes
+    only; `main.js` saves via its own autosaver (300 ms) and flushes
+    on hide. A settings load/save failure is only logged — it never
+    turns off drawing saves or shows a notice.
+- **Tests:** `tests/unit/storage.test.js`, `autosave.test.js`,
+  `tool-settings.test.js`, and `tests/e2e/saving.spec.js`,
+  `tool-settings.spec.js` (see "Testing"). Device-only and
   unverified: iOS keeping the data across a full relaunch, whether
   `persist()` is granted, and whether the hide-flush finishes before
   iPadOS suspends the app.
@@ -552,17 +578,50 @@ each piece got here lives in git.
 
 ### Layout and PWA
 
-- **Update prompt.** `sw.js` doesn't call `skipWaiting()` on install,
-  so a new version waits until the page asks. `main.js` detects a
-  waiting worker (arrived while open, or already waiting at load) and
-  `ui.showUpdatePrompt` shows a small custom toast. Tapping Refresh
-  posts `SKIP_WAITING`; `controllerchange` then reloads the page. A
-  first-ever install doesn't prompt — and doesn't reload either:
-  `clients.claim()` fires `controllerchange` on first install too, so
-  the reload only happens if a worker was already in control at page
-  load. Because of this, a deployed fix
-  doesn't show on an installed device until that toast is tapped (or
-  the app is fully closed and reopened).
+- **Updates (`js/updater.js`, no UI).** `sw.js` doesn't call
+  `skipWaiting()` on install, so a new version waits until the page
+  asks. The updater notices a waiting worker (already waiting at load,
+  mid-install at load, or found later) and `main.js` shows the toast
+  (`ui.showUpdatePrompt`). Refresh → `applyUpdate()`: flush unsaved
+  work, post `SKIP_WAITING`, reload on `controllerchange` (3 s fallback
+  reload if that never fires). A first-ever install doesn't prompt or
+  reload: `clients.claim()` fires `controllerchange` then too, so a
+  reload only follows if a worker controlled the page at load or an
+  update was explicitly requested.
+  - **Checks on return to the foreground** (at most once a minute),
+    not just on launch — iPadOS keeps home-screen apps suspended for
+    days. Added after an update toast vanished on the iPad without the
+    update landing. The exact iOS cause wasn't pinned down: this gap
+    is real and test-verified; the "mid-install at load" watch is
+    defensive (Chromium handled that case anyway; WebKit untested).
+  - **Every reload the app causes flushes autosave first**
+    (`beforeReload`, capped at 3 s so a stuck save can't block it).
+  - **Version:** the page asks the *controlling* worker (`GET_VERSION`
+    message in `sw.js`), since that's what decides which files it got.
+    `formatVersion` shows `<sha7> · <local date/time>`; "Development
+    build" when unstamped; "Unknown" for builds before this existed.
+- **Shared origin — scope everything to this app.** GitHub Pages
+  serves every project on the account from `bcrossley712.github.io`,
+  and caches and service-worker registrations are per-origin. `sw.js`
+  activate used to delete *every* cache but its own, which wiped other
+  apps' offline caches on each Parapara! update — fixed to delete only
+  old `parapara-` caches. Fresh reload likewise touches only
+  `parapara-` caches and this scope's registration. (Worth checking
+  other projects that copied the old activate handler.)
+- **Gear menu (`js/ui/settings-panel.js`)**, bottom of the rail,
+  floating panel styled like the color picker; tap outside closes.
+  Matches Sketchbook/Procreate keeping app-level actions behind one
+  gear/wrench. Contents:
+  - Version, and **Check for updates** (permanent) — applies a found
+    update immediately; otherwise "You're up to date." / "Couldn't
+    check. Are you online?".
+  - **Developer section (temporary, remove before calling the app
+    done):** *Fresh reload* — unregisters this app's service worker,
+    deletes its caches, re-fetches every loaded file with
+    `cache: 'reload'` (a plain reload can still hit GitHub's 10-minute
+    HTTP cache), then reloads. IndexedDB (drawings, settings) is never
+    touched. *Clear drawing* — moved off the rail since there's no
+    undo until 2b.
 - **App shell sizing.** `.pp-app-shell` is `position: fixed;
   inset: 0`, not `100vh`/`100vw`. In an installed iPad PWA with
   `black-translucent`, `100vh` doesn't match the visible area, which
@@ -592,10 +651,11 @@ each piece got here lives in git.
   `main.js`; a missing one isn't versioned and can mismatch the rest.
   Add new modules there as they're imported.
 - **Tool rail** is bare-bones: Draw / Erase / Fill / Smudge, color
-  swatch, size slider, and a dev-only Clear button (no confirm
-  dialog — undo in 2b becomes its safety net, as in other apps; until
-  then it wipes the saved drawing).
-  Image-import, mic, and the rest land with their own steps.
+  swatch, size slider, and the gear at the bottom. Clear is in the
+  gear's Developer section (no confirm dialog — undo in 2b becomes its
+  safety net, as in other apps; until then it wipes the saved
+  drawing). Image-import, mic, and the rest land with their own
+  steps.
 
 Agreed build order (core app before backend, since the backend is the
 most optional piece):
@@ -666,6 +726,15 @@ to the change": real logic gets tests; CSS/copy/layout doesn't).
   database, no service worker). Mouse input is used for strokes
   because it draws immediately; touch-gesture logic isn't covered by
   e2e yet.
+  - **Simulated deploys:** `serve.js` stamps `sw.js` with a version
+    that `GET /__test__/state?version=…&slowInstallMs=…` changes
+    mid-test (`slowInstallMs` delays install fetches to hold a worker
+    mid-install). Test-server only; never on the real site. Because of
+    this shared server state, Playwright runs with `workers: 1`.
+  - **When adding a test for a fix, check it fails without the fix.**
+    The mid-install update test passes in Chromium even without its
+    fix — kept as a behavior guard, but it proves nothing about that
+    line (see Updates above).
 - **CI (`.github/workflows/deploy.yml`):** test job → build job →
   deploy job. A failing test stops the deploy; installed iPads keep
   the last good version. On failure, the Playwright report is uploaded
@@ -705,9 +774,12 @@ to the change": real logic gets tests; CSS/copy/layout doesn't).
       export/           GIF/WebM stitching, Web Share
       audio/            record/import, trim, Web Audio playback
       ui/               toolbar, buttons, DOM glue
-                        (ui.js + color-picker.js, same splitting
+                        (ui.js + color-picker.js + settings-panel.js,
+                        same splitting
                         reasoning as canvas/ above)
       main.js           app entry, screen routing (gallery <-> editor)
+      updater.js        service-worker registration, updates, version,
+                        fresh reload (no UI; main.js wires it)
     icons/            app icon set
 
 NOTE: this corrects an earlier drift in this file, which had listed
