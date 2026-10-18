@@ -25,6 +25,8 @@ const APP_SHELL = [
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
   './js/canvas/gestures.js',
+  './js/storage/storage.js',
+  './js/storage/autosave.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

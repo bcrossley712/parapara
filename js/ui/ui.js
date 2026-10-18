@@ -101,9 +101,11 @@ export function initUI(container) {
   sizeControl.appendChild(sizeInput);
   rail.appendChild(sizeControl);
 
-  // Dev-testing convenience for this pass, not a real "new project"
-  // feature — no confirmation dialog since there's nothing durable to
-  // lose yet (no storage/ until step 2).
+  // Dev-testing convenience, not a real feature. Since 2a, Clear is
+  // saved like any other edit, so it does wipe the saved drawing —
+  // and there's no undo until 2b, which is what makes it recoverable
+  // (no confirm dialog then either; undo is the safety net, as in
+  // other drawing apps).
   const clearBtn = createToolButton('Clear', () => canvasApi.clear());
   clearBtn.classList.add('pp-tool-btn--secondary');
   rail.appendChild(clearBtn);
@@ -151,18 +153,41 @@ export function showUpdatePrompt(onRefresh) {
   // Avoid stacking a second toast if this somehow fires twice.
   if (document.getElementById('pp-update-toast')) return;
 
-  const toast = document.createElement('div');
-  toast.id = 'pp-update-toast';
-  toast.className = 'pp-update-toast';
-  toast.innerHTML = `
-    <span class="pp-update-toast__text">New version available</span>
-    <button type="button" class="pp-update-toast__btn">Refresh</button>
-  `;
-
-  toast.querySelector('.pp-update-toast__btn').addEventListener('click', () => {
+  const toast = createToast('pp-update-toast', 'New version available', 'Refresh');
+  toast.querySelector('.pp-toast__btn').addEventListener('click', () => {
     toast.remove();
     onRefresh();
   });
-
   document.body.appendChild(toast);
+}
+
+// General-purpose message toast with an OK button (e.g. "couldn't
+// save"). Custom-styled, same reasoning as the update prompt. Shows at
+// most one at a time — a repeat of the same failure (every stroke while
+// the iPad is out of space) updates the text instead of stacking.
+export function showNotice(message) {
+  const existing = document.getElementById('pp-notice-toast');
+  if (existing) {
+    existing.querySelector('.pp-toast__text').textContent = message;
+    return;
+  }
+  const toast = createToast('pp-notice-toast', message, 'OK');
+  toast.classList.add('pp-toast--notice');
+  toast.querySelector('.pp-toast__btn').addEventListener('click', () => toast.remove());
+  document.body.appendChild(toast);
+}
+
+function createToast(id, message, buttonLabel) {
+  const toast = document.createElement('div');
+  toast.id = id;
+  toast.className = 'pp-toast';
+  const text = document.createElement('span');
+  text.className = 'pp-toast__text';
+  text.textContent = message;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pp-toast__btn';
+  btn.textContent = buttonLabel;
+  toast.append(text, btn);
+  return toast;
 }

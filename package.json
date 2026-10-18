@@ -1,0 +1,15 @@
+{
+  "name": "parapara",
+  "private": true,
+  "description": "Parapara! — dev/test tooling only. The app itself has no build step and no runtime dependencies; nothing here ships to the iPad.",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0",
+    "fake-indexeddb": "^6.2.6"
+  }
+}

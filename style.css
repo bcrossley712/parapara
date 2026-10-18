@@ -247,8 +247,10 @@ html, body {
   text-transform: uppercase;
 }
 
-/* PWA update-available toast (js/ui/ui.js showUpdatePrompt) */
-.pp-update-toast {
+/* Toasts (js/ui/ui.js): the PWA update prompt (showUpdatePrompt) and
+   general notices such as save errors (showNotice). Same look; the
+   notice sits at the top so the two can never overlap. */
+.pp-toast {
   position: fixed;
   left: 50%;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -256,6 +258,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
+  max-width: calc(100vw - 32px);
   padding: 10px 14px;
   border-radius: 12px;
   background: var(--pp-ink);
@@ -266,7 +269,13 @@ html, body {
   z-index: 1000;
 }
 
-.pp-update-toast__btn {
+.pp-toast--notice {
+  bottom: auto;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+}
+
+.pp-toast__btn {
+  flex-shrink: 0;
   border: none;
   border-radius: 8px;
   padding: 6px 12px;
@@ -278,6 +287,6 @@ html, body {
   cursor: pointer;
 }
 
-.pp-update-toast__btn:active {
+.pp-toast__btn:active {
   background: var(--pp-accent-active);
 }

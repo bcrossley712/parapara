@@ -1,0 +1,147 @@
+// End-to-end tests for step 2a (saving): the real app in headless
+// Chromium. Each test gets a fresh browser context, so it starts with
+// an empty database and no service worker.
+//
+// Run: npm run test:e2e
+//
+// Not covered here (device-only): whether iOS keeps the data across a
+// full relaunch, whether storage persistence is granted, and whether
+// the background save finishes before iPadOS suspends the app.
+
+import { test, expect } from '@playwright/test';
+
+// Counts painted (non-transparent) canvas pixels in a box around where
+// drawStroke() draws. The canvas is transparent where nothing is
+// drawn (the white comes from CSS), so alpha > 0 means "painted."
+async function paintedPixels(page) {
+  return page.evaluate(() => {
+    const c = document.querySelector('.pp-canvas');
+    const d = c.getContext('2d').getImageData(500, 400, 900, 300).data;
+    let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+    return n;
+  });
+}
+
+// A horizontal mouse stroke across the middle of the canvas, given in
+// canvas-pixel coordinates (1920x1080) and mapped to screen points.
+// Mouse input draws immediately (no touch gesture window), which keeps
+// the test deterministic.
+async function drawStroke(page) {
+  const box = await page.locator('.pp-canvas').boundingBox();
+  const sx = (x) => box.x + (x / 1920) * box.width;
+  const sy = (y) => box.y + (y / 1080) * box.height;
+  await page.mouse.move(sx(600), sy(550));
+  await page.mouse.down();
+  for (let i = 1; i < 30; i++) {
+    await page.mouse.move(sx(600 + i * 25), sy(550 + (i % 5) * 4));
+  }
+  await page.mouse.up();
+}
+
+async function openApp(page) {
+  await page.goto('/index.html');
+  await page.locator('.pp-canvas').waitFor();
+}
+
+async function reloadApp(page) {
+  await page.reload();
+  await page.locator('.pp-canvas').waitFor();
+  await page.waitForTimeout(300); // let the saved image paint
+}
+
+// Waits out the autosave debounce (500 ms) plus PNG encode and write.
+const AUTOSAVE_SETTLE_MS = 1200;
+
+test('a drawing survives a reload', async ({ page }) => {
+  await openApp(page);
+  expect(await paintedPixels(page)).toBe(0);
+
+  await drawStroke(page);
+  const painted = await paintedPixels(page);
+  expect(painted).toBeGreaterThan(500);
+
+  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await reloadApp(page);
+
+  // PNG round-trip is lossless; allow a sliver for edge resampling.
+  const after = await paintedPixels(page);
+  expect(Math.abs(after - painted)).toBeLessThan(painted * 0.02);
+});
+
+test('hiding the app saves immediately, without waiting for the debounce', async ({ page }) => {
+  await openApp(page);
+  await drawStroke(page);
+  const painted = await paintedPixels(page);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(400); // under the 500 ms debounce
+  await reloadApp(page);
+
+  expect(await paintedPixels(page)).toBe(painted);
+});
+
+test('Clear is saved like any other edit', async ({ page }) => {
+  await openApp(page);
+  await drawStroke(page);
+  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await reloadApp(page);
+
+  expect(await paintedPixels(page)).toBe(0);
+});
+
+test('reloading reuses one project instead of creating new ones', async ({ page }) => {
+  await openApp(page);
+  await reloadApp(page);
+  await reloadApp(page);
+
+  const count = await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const q = req.result.transaction('projects').objectStore('projects').count();
+      q.onsuccess = () => resolve(q.result);
+    };
+  }));
+  expect(count).toBe(1);
+});
+
+test('without storage, drawing still works and a notice explains saving is off', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: undefined });
+  });
+  await openApp(page);
+
+  await expect(page.locator('#pp-notice-toast')).toBeVisible();
+  await drawStroke(page);
+  expect(await paintedPixels(page)).toBeGreaterThan(500);
+});
+
+test('first launch does not reload the page when the service worker takes control', async ({ page }) => {
+  let loads = 0;
+  page.on('load', () => { loads++; });
+  await openApp(page);
+  // Give the service worker time to install, activate and claim.
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 5000 });
+  await page.waitForTimeout(500);
+  expect(loads).toBe(1);
+});
+
+test('no errors in the console during normal use', async ({ page }) => {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+
+  await openApp(page);
+  await drawStroke(page);
+  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await reloadApp(page);
+
+  expect(errors).toEqual([]);
+});

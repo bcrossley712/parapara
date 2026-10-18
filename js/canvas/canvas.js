@@ -6,13 +6,12 @@
 // Onion-skin rendering of neighboring frames lands with timeline/
 // (step 4).
 //
-// No frame/project data model wired in yet (that's storage/, step 2)
-// — this owns a single in-memory canvas sized to the agreed default
-// (1920x1080, see architectural decisions) and is used directly by
-// ui/ui.js for now. Once storage/ exists, this should read/write the
-// active layer's bitmap instead of owning its own single bitmap (see
-// the layers decision in PROJECT_NOTES.md — this prototype stays
-// single-layer until step 2 builds the real layers UI).
+// Still a single canvas sized to the agreed default (1920x1080, see
+// architectural decisions), which for now stands in for the active
+// layer ("Layer 1"). It doesn't know about storage: main.js loads the
+// saved PNG in via setImage(), and saves via onChange() + exportPNG()
+// (see the API at the bottom). Real per-layer surfaces arrive with the
+// layers panel (step 2c).
 //
 // Talks to other modules only through the shared frame/project data
 // shapes (see PROJECT_NOTES.md schema) once those exist — no reaching
@@ -468,6 +467,19 @@ export function initCanvas(container, options = {}) {
     activePointerId = null;
     p0 = null;
     p1 = null;
+    // Every committed edit ends here — draw/erase/smudge strokes, and
+    // fills too (a fill's pointerup also routes through endStroke). A
+    // touch that turned into a two-finger gesture never reaches this,
+    // so a reverted dot doesn't count as a change.
+    notifyChange();
+  }
+
+  // --- change notification (used by main.js to schedule autosave) ---
+
+  const changeListeners = new Set();
+
+  function notifyChange() {
+    for (const listener of changeListeners) listener();
   }
 
   // --- revert-patch helpers, used only for the touch/gesture disambiguation below ---
@@ -740,6 +752,43 @@ export function initCanvas(container, options = {}) {
     },
     clear() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      notifyChange();
+    },
+
+    // --- persistence seam (step 2a) ---
+    //
+    // The canvas doesn't know about storage; main.js moves pixels
+    // between the two through these. For now this one canvas *is* the
+    // active layer ("Layer 1"); 2c replaces that with real per-layer
+    // surfaces behind the same idea.
+
+    // Calls `listener()` after every committed edit (stroke end, fill,
+    // clear). Returns an unsubscribe function.
+    onChange(listener) {
+      changeListeners.add(listener);
+      return () => changeListeners.delete(listener);
+    },
+
+    // The current pixels as a PNG Blob. toBlob encodes asynchronously,
+    // so this doesn't block drawing.
+    exportPNG() {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Canvas PNG export failed'));
+        }, 'image/png');
+      });
+    },
+
+    // Replaces the pixels with an already-decoded image (ImageBitmap,
+    // or anything drawImage accepts), or clears to blank for null.
+    // Synchronous on purpose: main.js decodes the saved PNG *before*
+    // the canvas is on screen, so there's no window where a stroke
+    // could land and then be wiped by a late-arriving load. Doesn't
+    // fire onChange — loading isn't an edit.
+    setImage(image) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (image) ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     },
   };
 }

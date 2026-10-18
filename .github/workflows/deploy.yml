@@ -1,8 +1,13 @@
 name: Deploy to GitHub Pages
 
+# On every push to main: run the tests, and deploy only if they pass.
+# A failing test stops the deploy, and installed iPads simply keep the
+# last working version. See PROJECT_NOTES.md "Testing".
+
 on:
   push:
     branches: [main]
+  workflow_dispatch: # allows a manual re-run from the Actions tab
 
 permissions:
   contents: read
@@ -14,22 +19,87 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install test tools
+        run: npm ci
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      # On failure, keep Playwright's report (screenshots, traces) so the
+      # next conversation can see what broke.
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Publish only the app. Excluding (rather than listing what to
+      # include) means a new app file can never be silently left off
+      # the site — the worst case of forgetting an exclusion is a stray
+      # dev file being publicly reachable, which is harmless.
+      - name: Assemble site (app files only)
+        run: |
+          mkdir _site
+          tar -cf - \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./.gitignore' \
+            --exclude='./_site' \
+            --exclude='./node_modules' \
+            --exclude='./tests' \
+            --exclude='./test-results' \
+            --exclude='./playwright-report' \
+            --exclude='./package.json' \
+            --exclude='./package-lock.json' \
+            --exclude='./playwright.config.js' \
+            --exclude='./PROJECT_NOTES.md' \
+            --exclude='./README.md' \
+            . | tar -xf - -C _site
+          echo "Published files:"
+          find _site -type f | sort
+
       - name: Stamp service worker version
         run: |
           VERSION="${{ github.sha }}-$(date -u +%Y%m%d%H%M%S)"
-          sed -i "s/__VERSION__/${VERSION}/" sw.js
+          sed -i "s/__VERSION__/${VERSION}/" _site/sw.js
+          if grep -q "__VERSION__" _site/sw.js; then
+            echo "Version stamp failed" && exit 1
+          fi
           echo "Stamped sw.js with version: ${VERSION}"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
   deploy:
     needs: build

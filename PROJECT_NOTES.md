@@ -103,6 +103,15 @@ below is the example that prompted writing this down:
   there's real design ambiguity.
 - **Confirm before packaging/sending files** — and when sending, only
   include files actually touched by the change, not the whole project.
+- **Hold files until a push is due.** Don't hand over files after each
+  change; keep working in the cloned repo and send files only when
+  it's time to push to GitHub — either ask if he's ready to push,
+  recommend pushing, or wait for him to ask. This includes
+  `PROJECT_NOTES.md` edits: they ride along with the next push rather
+  than being sent on their own.
+- **When sending, state each file's repo path** (e.g.
+  `js/storage/autosave.js`), not just its name — several files share
+  names across folders, and new files have no obvious home.
 - **When packaging, include only files changed since the last actual
   delivery** (last time files were handed over for download) — not
   since the last git push. Those are different events.
@@ -112,9 +121,11 @@ below is the example that prompted writing this down:
   Okay to skip deep terminal hand-holding, but don't assume framework/
   tooling fluency beyond that.
 - **Stack: vanilla JS with native ES modules, no bundler/build step
-  for the app code itself.** GitHub Actions is only used to stamp a
-  cache-busting version into the service worker at deploy time — not
-  to compile or bundle anything.
+  for the app code itself.** GitHub Actions runs the tests, copies the
+  app files into the published site, and stamps a cache-busting
+  version into the service worker — it never compiles or bundles
+  anything. npm exists only for test tooling (see "Testing"); the app
+  has no runtime dependencies and nothing from npm ships to the iPad.
 - **Scope-specific file structure, on purpose.** This is an explicit
   requirement, not just good practice: keep `canvas/`, `timeline/`,
   `storage/`, `export/`, `audio/`, and `ui/` cleanly separated so a
@@ -326,6 +337,8 @@ recipients) — not a public product, low-stakes threat model.
   deploy**, same pattern as prior projects — so aggressive PWA caching
   doesn't make a real deploy invisible to an already-installed device.
   No other build step; this is a text substitution, not a compile.
+- **Tests gate every deploy, and only app files are published.** See
+  "Testing" below.
 
 ## Current state
 
@@ -348,11 +361,10 @@ timeline. Confirmed in wireframing:
 **Status: build step 1 (drawing engine) is functionally done and
 deployed.** It's running on the real target device (9th-gen iPad,
 installed PWA). `canvas/` and `ui/` have real logic (draw/erase/fill/
-smudge, color picker, two-finger pan/zoom/rotate, update prompt);
-`timeline/`, `storage/`, `export/`, and `audio/` are still placeholder
-entry points. Deploy pipeline and app icon set are done. The schema
-(below) is drafted but not yet built — that's step 2, now planned in
-detail (see "Next" below).
+smudge, color picker, two-finger pan/zoom/rotate, update prompt), and
+`storage/` has the 2a saving layer; `timeline/`, `export/`, and
+`audio/` are still placeholder entry points. Deploy pipeline and app
+icon set are done. Step 2 is in progress (see "Next" below).
 Details of everything built are under "Built so far."
 
 **iPad test results so far:** fill speed and palm rejection both work
@@ -363,8 +375,9 @@ fix is confirmed on the device. Smudge feel is still off (see below).
 before the next starts:
 
 - **2a. Saving.** Schema + IndexedDB wrapper; one project, one frame,
-  autosaves and survives relaunch. The canvas paints the active
-  layer's bitmap from storage instead of owning its own.
+  autosaves and survives relaunch. **Built** (see "Storage" under
+  Built so far); tested in Node and headless Chromium, **awaiting
+  iPad confirmation**.
 - **2b. Undo/redo** per the revised design (see architectural
   decisions), plus the Sketchbook gesture mapping and buttons. Clear
   becomes undoable here.
@@ -441,6 +454,44 @@ each piece got here lives in git.
   smudge/fill (rare). If those two need help, bound fill's
   read/write region instead.
 
+### Storage (`storage/storage.js`, `storage/autosave.js`) — step 2a
+
+- **Four object stores:** `projects`, `frames`, `blobs` (layer
+  bitmaps), `meta` (last-opened project). `frames` and `blobs` have a
+  `projectId` index already, so 2d's project delete needs no schema
+  upgrade. Store/index changes need a `DB_VERSION` bump and a new
+  upgrade branch — never edit the version-1 branch.
+- **`bitmapRef` is assigned when a layer is created and never
+  changes;** no blob under it means "blank." So a stroke save only
+  writes the blob store, never the frame record.
+- **Bitmaps are stored as ArrayBuffer + MIME type, not Blob** — older
+  WebKit had bugs storing Blobs in IndexedDB.
+- **`withTransaction` resolves on transaction *complete*,** so "saved"
+  means committed. Don't await non-IndexedDB work inside one (it
+  auto-commits early); `saveLayerBitmap` reads the blob first.
+- **Autosave (`autosave.js`) is pure timing, no canvas/schema
+  knowledge:** debounced 500 ms after the last edit, saves never
+  overlap (an edit mid-save gets exactly one follow-up save), and
+  `flush()` saves immediately. A failure shows a notice and leaves the
+  work unsaved for the next edit to retry — no automatic retry loop.
+- **Wiring lives in `main.js`.** It loads and *decodes* the saved PNG
+  before the canvas exists (so a late load can't wipe a fresh stroke),
+  then hooks `canvas.onChange()` → autosave, and flushes on
+  `visibilitychange` → hidden (iPadOS can kill backgrounded apps).
+- **If loading fails, autosave stays off** and a notice says so —
+  saving a blank canvas over a drawing that merely failed to load
+  would destroy it.
+- **The canvas still stands in for "Layer 1".** Its persistence seam
+  is `onChange` / `exportPNG` / `setImage`; real per-layer surfaces
+  come in 2c.
+- **Clear is saved like any edit**, so until undo exists (2b) it
+  wipes the saved drawing for real.
+- **Tests:** `tests/unit/storage.test.js`, `tests/unit/autosave.test.js`
+  and `tests/e2e/saving.spec.js` (see "Testing"). Device-only and
+  unverified: iOS keeping the data across a full relaunch, whether
+  `persist()` is granted, and whether the hide-flush finishes before
+  iPadOS suspends the app.
+
 ### Color picker (`ui/color-picker.js`)
 
 - Custom HSV picker: a saturation/value square (two gradient overlays
@@ -506,7 +557,10 @@ each piece got here lives in git.
   waiting worker (arrived while open, or already waiting at load) and
   `ui.showUpdatePrompt` shows a small custom toast. Tapping Refresh
   posts `SKIP_WAITING`; `controllerchange` then reloads the page. A
-  first-ever install doesn't prompt. Because of this, a deployed fix
+  first-ever install doesn't prompt — and doesn't reload either:
+  `clients.claim()` fires `controllerchange` on first install too, so
+  the reload only happens if a worker was already in control at page
+  load. Because of this, a deployed fix
   doesn't show on an installed device until that toast is tapped (or
   the app is fully closed and reopened).
 - **App shell sizing.** `.pp-app-shell` is `position: fixed;
@@ -538,8 +592,9 @@ each piece got here lives in git.
   `main.js`; a missing one isn't versioned and can mismatch the rest.
   Add new modules there as they're imported.
 - **Tool rail** is bare-bones: Draw / Erase / Fill / Smudge, color
-  swatch, size slider, and a dev-only Clear button (no confirm dialog,
-  since there's nothing durable to lose before storage exists).
+  swatch, size slider, and a dev-only Clear button (no confirm
+  dialog — undo in 2b becomes its safety net, as in other apps; until
+  then it wipes the saved drawing).
   Image-import, mic, and the rest land with their own steps.
 
 Agreed build order (core app before backend, since the backend is the
@@ -582,6 +637,49 @@ Decided during step 2 planning:
   bug behind the viewport issue. Still worth comparing the bug-report
   rate on step 2 against step 1's.
 
+## Testing
+
+Tests live in the repo so each new conversation inherits them instead
+of re-creating throwaway scripts. **Run them before handing off any
+change, and add tests for new logic** (per "Match verification effort
+to the change": real logic gets tests; CSS/copy/layout doesn't).
+
+- **Commands:** `npm install` once, then `npm run test:unit`
+  (seconds), `npm run test:e2e` (headless Chromium, ~15 s), or
+  `npm test` for both.
+- **In a Claude sandbox:** a matching Chromium is usually preinstalled
+  at `/opt/pw-browsers`; run e2e with
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
+  `@playwright/test` is pinned to exactly `1.56.0` because that's the
+  version matching that browser build — bump the pin only alongside a
+  browser that matches it. CI downloads its own browser either way.
+- **Unit tests (`tests/unit/`)** use Node's built-in runner (no
+  framework) and `fake-indexeddb` for storage. They import the real
+  app modules directly — keep logic in modules that don't touch the
+  DOM at import time, so they stay testable this way.
+  `sw-precache.test.js` enforces the pre-cache rule: it fails if any
+  module reachable from `main.js` is missing from `APP_SHELL`, and
+  names the file to add.
+- **E2E tests (`tests/e2e/`)** run the real app in headless Chromium
+  at the iPad's 1080×810 viewport, served by `tests/e2e/serve.js` (no
+  Python/extra deps). Each test gets a fresh browser context (empty
+  database, no service worker). Mouse input is used for strokes
+  because it draws immediately; touch-gesture logic isn't covered by
+  e2e yet.
+- **CI (`.github/workflows/deploy.yml`):** test job → build job →
+  deploy job. A failing test stops the deploy; installed iPads keep
+  the last good version. On failure, the Playwright report is uploaded
+  as a workflow artifact for 7 days.
+- **Published site = app files only.** The build job copies the repo
+  into `_site/` *excluding* dev files (tests, npm files, notes,
+  README, `.github`). Exclude-list on purpose: a forgotten exclusion
+  only leaks a harmless dev file, whereas a forgotten inclusion would
+  silently break the app. **New dev-only files at the repo root should
+  be added to that exclude list.**
+- **Can't be tested outside the device:** real iOS storage eviction,
+  touch/stylus feel, iPadOS gesture conflicts, Safari-only rendering
+  quirks. Say so when handing off.
+
 ## File layout (confirmed)
 
     index.html
@@ -590,13 +688,20 @@ Decided during step 2 planning:
     style.css
     README.md
     PROJECT_NOTES.md
+    package.json      test tooling only (see "Testing")
+    playwright.config.js
+    tests/
+      unit/           Node built-in runner + fake-indexeddb
+      e2e/            Playwright specs + serve.js static server
     js/
       canvas/         pointer input, brush engine, rendering, pan/zoom
                         (canvas.js + brush.js + gestures.js, split as
                         each became a real seam/subsystem of its own —
                         see architectural decisions)
       timeline/        frame array, thumbnails, reorder logic, playback loop
-      storage/          IndexedDB wrapper, schema, undo/redo (raster snapshots)
+      storage/          IndexedDB wrapper + schema (storage.js), autosave
+                        timing (autosave.js); undo/redo history lands
+                        here in 2b (in-memory only)
       export/           GIF/WebM stitching, Web Share
       audio/            record/import, trim, Web Audio playback
       ui/               toolbar, buttons, DOM glue
