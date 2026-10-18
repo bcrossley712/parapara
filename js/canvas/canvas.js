@@ -194,13 +194,23 @@ export function initCanvas(container, options = {}) {
   // Layout may have changed (e.g. iPad rotation) — simplest safe
   // behavior is to reset pan/zoom/rotation rather than try to
   // preserve the transform across a layout change.
-  window.addEventListener('resize', () => {
+  //
+  // Watches the canvas area itself, not window 'resize': on iOS the
+  // safe-area padding and post-rotation layout can settle after the
+  // last window resize event (or without one at all), which would
+  // leave natLeft/natTop/natWidth/natHeight stale and make strokes
+  // land offset from the stylus. ResizeObserver fires whenever the
+  // area's box actually changes, plus once right after observe() —
+  // which also corrects the initial measurement if it ran before
+  // layout had settled.
+  const areaObserver = new ResizeObserver(() => {
     viewportScale = 1;
     viewportRotation = 0;
     viewportX = 0;
     viewportY = 0;
     captureNaturalRect();
   });
+  areaObserver.observe(container);
 
   // --- touch-vs-gesture disambiguation ---
   //

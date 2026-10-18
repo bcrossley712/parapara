@@ -8,6 +8,12 @@
 const VERSION = '__VERSION__';
 const CACHE_NAME = `parapara-${VERSION}`;
 
+// Every file the app loads at startup belongs here — including every
+// ES module reachable from main.js. A module left off this list isn't
+// versioned with the rest: it falls through to the network on each
+// launch, so an installed device can run a new ui.js against an old
+// canvas.js (or fail offline). Add new modules here as they get
+// imported.
 const APP_SHELL = [
   './',
   './index.html',
@@ -15,13 +21,24 @@ const APP_SHELL = [
   './style.css',
   './js/main.js',
   './js/ui/ui.js',
+  './js/ui/color-picker.js',
+  './js/canvas/canvas.js',
+  './js/canvas/brush.js',
+  './js/canvas/gestures.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      // cache: 'reload' skips the browser's HTTP cache and goes to the
+      // network. Without it, cache.addAll() can be served from the HTTP
+      // cache (GitHub Pages allows 10 minutes), so a new version's
+      // cache could be filled with the *previous* deploy's files —
+      // a new version number with old CSS/JS inside it.
+      cache.addAll(APP_SHELL.map((url) => new Request(url, { cache: 'reload' })))
+    )
   );
   // Deliberately NOT calling self.skipWaiting() here. A new SW stays
   // in "waiting" state until the page tells it to take over (see the

@@ -302,8 +302,8 @@ Details of everything built are under "Built so far."
 
 **iPad test results so far:** fill speed and palm rejection both work
 fine in real use. Pan/zoom/rotate and tap-to-reset work. Smudge feel
-is still off (see below). The status-bar/viewport fix is unconfirmed
-(see below).
+is still off (see below). The viewport fix (third attempt) is
+unconfirmed (see below).
 
 **Known open items:**
 - **Smudge feel** — works, but not what she expects. She showed that
@@ -312,13 +312,16 @@ is still off (see below). The status-bar/viewport fix is unconfirmed
   broader brush set. Deliberately deferred until more brushes and
   erasers exist (the `brush.js` tip seam is there for it) — don't
   retune smudge in isolation before then.
-- **Viewport / status bar** — after two fixes (safe-area padding and
-  `black-translucent`), the layout still looked off on the iPad.
-  Suspected cause is a stale service-worker cache, not code; to be
-  rechecked after the next push. If it's still off after a full
-  cache clear, the next suspect is `height: 100vh` on the app shell
-  (on iPad standalone, `100vh` can exceed the visible area; `100dvh`
-  usually fixes that) — a hypothesis, not confirmed.
+- **Viewport / status bar** — symptom on the iPad: the app was pushed
+  off the bottom by about the status-bar height (Clear button half
+  off-screen). Third fix shipped, **awaiting device confirmation**:
+  the shell is now `position: fixed; inset: 0` instead of `100vh`
+  (see "Layout and PWA"), and the service worker now pre-caches with
+  `cache: 'reload'`. The second change matters for judging the
+  earlier fixes: before it, a new SW version could be filled with the
+  previous deploy's CSS from the HTTP cache, so those fixes may never
+  have actually reached the device. If it's still off, get a
+  screenshot before guessing further.
 - **Brush variety** — she noticed the range of brush sizes, tips
   (e.g. chisel), and edge-blending styles in other apps. Not
   scheduled yet; revisit after step 2 so it doesn't pull focus from
@@ -441,16 +444,32 @@ each piece got here lives in git.
   first-ever install doesn't prompt. Because of this, a deployed fix
   doesn't show on an installed device until that toast is tapped (or
   the app is fully closed and reopened).
+- **App shell sizing.** `.pp-app-shell` is `position: fixed;
+  inset: 0`, not `100vh`/`100vw`. In an installed iPad PWA with
+  `black-translucent`, `100vh` doesn't match the visible area, which
+  pushed the bottom of the rail off-screen. Don't reintroduce `vh`
+  (or `dvh`) units for full-screen layout without testing on the
+  device. **Still unconfirmed on the iPad** — see Current state.
 - **Safe area.** iOS extends a standalone PWA under the status bar.
-  `.pp-app-shell` pads with `env(safe-area-inset-top/bottom)`, which
-  only works because of two other settings: global
-  `box-sizing: border-box` (otherwise the padding makes the fixed
-  `100vh` shell taller than the screen) and
+  The shell pads with `env(safe-area-inset-*)` on all four sides,
+  which only works because of two other settings: global
+  `box-sizing: border-box` (otherwise the padding makes the shell
+  taller than the screen) and
   `apple-mobile-web-app-status-bar-style: black-translucent` (under
   `default`, iOS reserves the bar and the insets resolve to `0`).
   `black-translucent` draws white status-bar text over whatever is at
   the top edge; that's fine while the rail and stage are dark there.
-  **Still unconfirmed on the iPad** — see Current state.
+- **Text inputs stay at `font-size: 16px` or larger.** Below that,
+  iOS zooms the page on focus and the zoom can stick.
+- **Canvas re-measures with a `ResizeObserver`** on the canvas area,
+  not `window` resize. iOS layout (safe area, rotation) can settle
+  without a resize event, which would leave `toCanvasPoint`'s
+  reference box stale and offset strokes.
+- **Service worker pre-cache.** Install uses `cache: 'reload'` so a
+  new version never captures the previous deploy's files from the
+  HTTP cache. `APP_SHELL` must list every ES module reachable from
+  `main.js`; a missing one isn't versioned and can mismatch the rest.
+  Add new modules there as they're imported.
 - **Tool rail** is bare-bones: Draw / Erase / Fill / Smudge, color
   swatch, size slider, and a dev-only Clear button (no confirm dialog,
   since there's nothing durable to lose before storage exists).

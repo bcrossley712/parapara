@@ -18,9 +18,9 @@
 
 *, *::before, *::after {
   /* Needed for the safe-area padding on .pp-app-shell below to
-     shrink its usable content area instead of adding to its fixed
-     100vh height — without this, padding would push the shell taller
-     than the screen rather than inset its content. */
+     shrink its usable content area instead of adding to its
+     screen-sized box — without this, padding would push the shell
+     taller than the screen rather than inset its content. */
   box-sizing: border-box;
 }
 
@@ -33,28 +33,31 @@ html, body {
   touch-action: none;
 }
 
-#app {
-  height: 100vh;
-  width: 100vw;
-}
-
 /* App shell: tool rail + canvas area (js/ui/ui.js initUI).
    Deliberately minimal for the drawing-engine testing pass — not the
    real toolkit look, just enough to drive draw/erase and be usable
    with a thumb on an iPad. */
 .pp-app-shell {
   display: flex;
-  height: 100vh;
-  width: 100vw;
-  /* iOS standalone PWAs paint under the status bar (manifest already
-     has viewport-fit=cover, which is what makes these env() vars
-     resolve to nonzero values) — without this, the whole shell starts
-     at y=0 under the status bar, and everything below gets pushed
-     down by that unaccounted height. Bottom inset is mainly for
-     devices with a home-indicator gesture bar rather than the 9th-gen
-     iPad's physical home button, but harmless to include generically. */
+  /* Pinned to the screen edges instead of sized with 100vh/100vw.
+     In an installed iPad PWA with black-translucent, iOS's idea of
+     100vh doesn't match the visible area (off by the status-bar
+     height), which pushed the bottom of the rail off-screen. A
+     fixed, inset:0 box always matches the real viewport, and it also
+     can't be scrolled or nudged by page-level overflow. Don't go back
+     to vh units here without re-testing on the device. */
+  position: fixed;
+  inset: 0;
+  /* iOS standalone PWAs paint under the status bar (index.html has
+     viewport-fit=cover, which is what makes these env() vars resolve
+     to nonzero values) — the padding keeps content out from under it.
+     Bottom/left/right insets are for devices with a home-indicator
+     bar or notch rather than the 9th-gen iPad's home button; they
+     resolve to 0 there and are harmless. */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 .pp-tool-rail {
@@ -237,7 +240,10 @@ html, body {
   background: var(--pp-ink-light);
   color: var(--pp-bg);
   font-family: var(--pp-font);
-  font-size: 14px;
+  /* 16px minimum: iOS zooms the whole page when a text field under
+     16px gets focus, and that zoom can stick after the keyboard
+     closes. Keep it at 16px or above. */
+  font-size: 16px;
   text-transform: uppercase;
 }
 
