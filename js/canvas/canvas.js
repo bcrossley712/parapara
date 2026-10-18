@@ -6,12 +6,20 @@
 // Onion-skin rendering of neighboring frames lands with timeline/
 // (step 4).
 //
-// Still a single canvas sized to the agreed default (1920x1080, see
-// architectural decisions), which for now stands in for the active
-// layer ("Layer 1"). It doesn't know about storage: main.js loads the
-// saved PNG in via setImage(), and saves via onChange() + exportPNG()
-// (see the API at the bottom). Real per-layer surfaces arrive with the
-// layers panel (step 2c).
+// Layers (step 2c): one <canvas> per layer, stacked bottom-to-top
+// inside a wrapper element (.pp-canvas). The wrapper carries the
+// pan/zoom/rotate transform and receives all pointer input; layer
+// visibility and opacity are plain CSS on each layer canvas, so the
+// browser composites them. Only the open frame's layers exist — layers
+// are shared across frames (see PROJECT_NOTES.md "Schema"), so moving
+// to another frame reuses the same layer canvases with new pixels.
+// Tools paint on the active layer only; fill *reads* every visible
+// layer (so a color layer fills up to line art on another layer) but
+// writes only the active one. Smudge reads and writes the active layer.
+//
+// It doesn't know about storage: main.js hands it decoded images via
+// loadFrame(), and saves via onChange() + exportPNG(layerId) (see the
+// API at the bottom).
 //
 // Undo capture (step 2b): an offscreen "committed copy" holds the
 // active layer as of the last committed edit. While a stroke paints,
@@ -128,22 +136,34 @@ export function initCanvas(container, options = {}) {
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.className = 'pp-canvas';
+  // The wrapper: what she sees as "the canvas". Sized in JS to fit the
+  // canvas area (fitStack) since a <div> has no intrinsic size.
+  const stack = document.createElement('div');
+  stack.className = 'pp-canvas';
   // Bug fix: the pan/zoom math in gestures.js (computeGestureTransform)
-  // assumes transform-origin is pinned at the canvas's own top-left
-  // corner — that assumption was never actually enforced anywhere.
-  // CSS defaults transform-origin to 50% 50% (center), so scale() was
-  // zooming around the canvas's center regardless of where the pinch
-  // was, reported as "doesn't zoom where you're pinching."
-  canvas.style.transformOrigin = '0 0';
-  container.appendChild(canvas);
+  // assumes transform-origin is pinned at the transformed element's own
+  // top-left corner — that assumption was never actually enforced
+  // anywhere. CSS defaults transform-origin to 50% 50% (center), so
+  // scale() was zooming around the center regardless of where the pinch
+  // was, reported as "doesn't zoom where you're pinching." The wrapper
+  // is what transforms now, so it's pinned here.
+  stack.style.transformOrigin = '0 0';
+  container.appendChild(stack);
 
-  // Deliberately NOT passing { willReadFrequently: true } here, even
-  // though smudge/fill do call getImageData. That hint typically
-  // pushes the whole canvas onto a software (CPU) rendering path
+  // Layer surfaces, by layer id: { canvas, ctx, visible, opacity }.
+  // `order` is bottom-to-top, matching the DOM order inside the stack.
+  const surfaces = new Map();
+  let order = [];
+  let activeLayerId = null;
+
+  // The active layer's canvas and context — what every tool paints on.
+  // null until main.js calls loadFrame().
+  let canvas = null;
+  let ctx = null;
+
+  // Deliberately NOT passing { willReadFrequently: true } to layer
+  // contexts, even though smudge/fill do call getImageData. That hint
+  // typically pushes the canvas onto a software (CPU) rendering path
   // instead of GPU-accelerated — which would slow down every draw/
   // erase stamp too, not just the occasional pixel read. Draw/erase
   // happen far more often than smudge/fill, so trading their
@@ -151,7 +171,19 @@ export function initCanvas(container, options = {}) {
   // direction. If smudge/fill specifically still feel slow after
   // this, that's a narrower problem to solve (e.g. bounding fill's
   // read/write region) rather than reintroducing this.
-  const ctx = canvas.getContext('2d');
+  function createSurface(id) {
+    const el = document.createElement('canvas');
+    el.width = width;
+    el.height = height;
+    el.className = 'pp-layer';
+    el.dataset.layerId = id;
+    return { canvas: el, ctx: el.getContext('2d'), visible: true, opacity: 1 };
+  }
+
+  function applySurfaceStyle(surface) {
+    surface.canvas.style.visibility = surface.visible ? '' : 'hidden';
+    surface.canvas.style.opacity = String(surface.opacity);
+  }
 
   // Smudge's scratch buffer: sized once to the largest brush size
   // rather than reallocated per stroke.
@@ -206,7 +238,7 @@ export function initCanvas(container, options = {}) {
     if (!rect) return;
     const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
     syncCommitted(rect);
-    notifyChange({ rect, before });
+    notifyChange({ rect, before, layerId: activeLayerId });
   }
 
   let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
@@ -243,8 +275,8 @@ export function initCanvas(container, options = {}) {
 
   // --- pan/zoom/rotate viewport (two-finger gesture) ---
   //
-  // Applied as a CSS transform on the canvas element only — the
-  // backing-store bitmap and its 1920x1080 resolution never change.
+  // Applied as a CSS transform on the wrapper only — the layers'
+  // backing-store bitmaps and their 1920x1080 resolution never change.
   // toCanvasPoint() below maps screen points to canvas pixels
   // analytically from this state (via gestures.js's
   // screenToNaturalPoint), not by reading the canvas's bounding rect —
@@ -263,7 +295,7 @@ export function initCanvas(container, options = {}) {
   let natLeft = 0, natTop = 0, natWidth = 0, natHeight = 0;
 
   function applyViewport() {
-    canvas.style.transform =
+    stack.style.transform =
       `translate(${viewportX}px, ${viewportY}px) rotate(${viewportRotation}rad) scale(${viewportScale})`;
   }
 
@@ -275,13 +307,23 @@ export function initCanvas(container, options = {}) {
     applyViewport();
   }
 
+  // Sizes the wrapper to the largest box with the canvas's aspect ratio
+  // that fits the canvas area — what max-width/max-height did when the
+  // canvas element itself was the thing on screen.
+  function fitStack() {
+    const fit = Math.min(container.clientWidth / width, container.clientHeight / height);
+    stack.style.width = `${width * fit}px`;
+    stack.style.height = `${height * fit}px`;
+  }
+
   function captureNaturalRect() {
+    fitStack();
     const areaRect = container.getBoundingClientRect();
     // Clear the transform first so the measured rect is the natural
     // (untransformed) box, not whatever pan/zoom happens to be
     // applied right now.
-    canvas.style.transform = '';
-    const canvasRect = canvas.getBoundingClientRect();
+    stack.style.transform = '';
+    const canvasRect = stack.getBoundingClientRect();
     natLeft = canvasRect.left - areaRect.left;
     natTop = canvasRect.top - areaRect.top;
     natWidth = canvasRect.width;
@@ -371,8 +413,8 @@ export function initCanvas(container, options = {}) {
       y: viewportY,
     });
     return {
-      x: (natural.x / natWidth) * canvas.width,
-      y: (natural.y / natHeight) * canvas.height,
+      x: (natural.x / natWidth) * width,
+      y: (natural.y / natHeight) * height,
     };
   }
 
@@ -494,13 +536,42 @@ export function initCanvas(container, options = {}) {
       && Math.abs(a1 - a2) <= tolerance;
   }
 
+  // What fill "sees": every visible layer composited at its opacity,
+  // so a fill on a color layer stops at line art on another layer
+  // (Sketchbook's sample-all-layers). Hidden layers don't count. When
+  // the active layer is the only visible one at full opacity, that's
+  // just its own pixels — no composite needed.
+  function readFillSample() {
+    const visible = order.map((id) => surfaces.get(id)).filter((s) => s.visible);
+    if (visible.length === 1 && visible[0].ctx === ctx && visible[0].opacity === 1) {
+      return ctx.getImageData(0, 0, width, height);
+    }
+    const temp = document.createElement('canvas');
+    temp.width = width;
+    temp.height = height;
+    const tctx = temp.getContext('2d');
+    for (const surface of visible) {
+      tctx.globalAlpha = surface.opacity;
+      tctx.drawImage(surface.canvas, 0, 0);
+    }
+    const sample = tctx.getImageData(0, 0, width, height);
+    // Release the backing store now rather than whenever GC runs —
+    // iPad Safari counts canvas memory hard.
+    temp.width = 0;
+    temp.height = 0;
+    return sample;
+  }
+
   function floodFill(point) {
     const startX = Math.round(point.x);
     const startY = Math.round(point.y);
     if (startX < 0 || startY < 0 || startX >= width || startY >= height) return;
 
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
+    // `data` decides the region (all visible layers); `target` is the
+    // active layer, where the fill color is written. Same object when
+    // the sample is just the active layer.
+    const sampleData = readFillSample();
+    const data = sampleData.data;
 
     const startIdx = (startY * width + startX) * 4;
     const startR = data[startIdx];
@@ -515,6 +586,9 @@ export function initCanvas(container, options = {}) {
     if (colorsClose(startR, startG, startB, startA, fillColor.r, fillColor.g, fillColor.b, 255, 0)) {
       return;
     }
+
+    const targetData = ctx.getImageData(0, 0, width, height);
+    const target = targetData.data;
 
     // Iterative (stack-based) rather than recursive — a recursive
     // flood fill can blow the call stack on a large open region at
@@ -531,10 +605,10 @@ export function initCanvas(container, options = {}) {
       if (x < minX) minX = x; else if (x > maxX) maxX = x;
       if (y < minY) minY = y; else if (y > maxY) maxY = y;
       const idx = (y * width + x) * 4;
-      data[idx] = fillColor.r;
-      data[idx + 1] = fillColor.g;
-      data[idx + 2] = fillColor.b;
-      data[idx + 3] = 255;
+      target[idx] = fillColor.r;
+      target[idx + 1] = fillColor.g;
+      target[idx + 2] = fillColor.b;
+      target[idx + 3] = 255;
 
       const neighbors = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
       for (const [nx, ny] of neighbors) {
@@ -553,7 +627,7 @@ export function initCanvas(container, options = {}) {
     // Write back only the filled box: same pixels, less to upload.
     const w = maxX - minX + 1;
     const h = maxY - minY + 1;
-    ctx.putImageData(imageData, 0, 0, minX, minY, w, h);
+    ctx.putImageData(targetData, 0, 0, minX, minY, w, h);
     markDirty({ x: minX, y: minY, w, h });
   }
 
@@ -623,8 +697,8 @@ export function initCanvas(container, options = {}) {
 
   const changeListeners = new Set();
 
-  // change = { rect, before }: the committed rect and its pixels
-  // before the edit (ImageData).
+  // change = { rect, before, layerId }: the committed rect, its pixels
+  // before the edit (ImageData), and the layer it was on.
   function notifyChange(change) {
     for (const listener of changeListeners) listener(change);
   }
@@ -639,6 +713,7 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerDown(event) {
+    if (!ctx) return; // no frame loaded yet
     if (event.pointerType === 'touch') {
       if (gesture) {
         // A third finger landing right after a two-finger gesture
@@ -652,7 +727,7 @@ export function initCanvas(container, options = {}) {
           && gesture.totalMovement <= THREE_FINGER_JOIN_MAX_MOVEMENT_PX
         ) {
           const local = toLocalPoint(event);
-          canvas.setPointerCapture(event.pointerId);
+          stack.setPointerCapture(event.pointerId);
           gesture.pointerIds.push(event.pointerId);
           gesture.points.set(event.pointerId, local);
           gesture.startPoints.set(event.pointerId, local);
@@ -672,14 +747,14 @@ export function initCanvas(container, options = {}) {
           // Revert whatever the first finger had started drawing (or
           // filling) from the committed copy.
           revertUncommitted();
-          if (canvas.hasPointerCapture?.(pendingTouch.pointerId)) {
-            canvas.releasePointerCapture(pendingTouch.pointerId);
+          if (stack.hasPointerCapture?.(pendingTouch.pointerId)) {
+            stack.releasePointerCapture(pendingTouch.pointerId);
           }
 
           const firstLocal = pendingTouch.lastLocal;
           const secondLocal = toLocalPoint(event);
 
-          canvas.setPointerCapture(event.pointerId);
+          stack.setPointerCapture(event.pointerId);
           gesture = {
             pointerIds: [pendingTouch.pointerId, event.pointerId],
             points: new Map([
@@ -726,7 +801,7 @@ export function initCanvas(container, options = {}) {
 
       const point = toCanvasPoint(event);
       activePointerId = event.pointerId;
-      canvas.setPointerCapture(event.pointerId);
+      stack.setPointerCapture(event.pointerId);
 
       const local = toLocalPoint(event);
       pendingTouch = {
@@ -753,7 +828,7 @@ export function initCanvas(container, options = {}) {
     if (activePointerId !== null || gesture || pendingTouch) return;
 
     activePointerId = event.pointerId;
-    canvas.setPointerCapture(event.pointerId);
+    stack.setPointerCapture(event.pointerId);
 
     if (tool === 'fill') {
       floodFill(toCanvasPoint(event));
@@ -853,7 +928,7 @@ export function initCanvas(container, options = {}) {
       }
 
       for (const id of gesture.pointerIds) {
-        if (canvas.hasPointerCapture?.(id)) canvas.releasePointerCapture(id);
+        if (stack.hasPointerCapture?.(id)) stack.releasePointerCapture(id);
       }
       const ended = gesture;
       gesture = null;
@@ -889,8 +964,8 @@ export function initCanvas(container, options = {}) {
     }
 
     if (event.pointerId !== activePointerId) return;
-    if (canvas.hasPointerCapture?.(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
+    if (stack.hasPointerCapture?.(event.pointerId)) {
+      stack.releasePointerCapture(event.pointerId);
     }
     endStroke();
   }
@@ -915,25 +990,41 @@ export function initCanvas(container, options = {}) {
     else if (kind === 'swipe-right') emitGesture('redo');
   }
 
-  canvas.addEventListener('pointerdown', onPointerDown);
-  canvas.addEventListener('pointermove', onPointerMove);
-  canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', onPointerUp);
+  stack.addEventListener('pointerdown', onPointerDown);
+  stack.addEventListener('pointermove', onPointerMove);
+  stack.addEventListener('pointerup', onPointerUp);
+  stack.addEventListener('pointercancel', onPointerUp);
   // Pointer capture should keep move/up events routed here even if
   // the pointer slides off the canvas edge mid-stroke/gesture, but
   // this is a belt-and-suspenders fallback in case capture isn't
   // honored.
-  canvas.addEventListener('pointerleave', (event) => {
+  stack.addEventListener('pointerleave', (event) => {
     const isTracked = event.pointerId === activePointerId
       || (pendingTouch && event.pointerId === pendingTouch.pointerId)
       || (gesture && gesture.pointerIds.includes(event.pointerId));
-    if (isTracked && !canvas.hasPointerCapture?.(event.pointerId)) {
+    if (isTracked && !stack.hasPointerCapture?.(event.pointerId)) {
       onPointerUp(event);
     }
   });
 
+  // Makes `id` the layer the tools paint on, and resyncs the committed
+  // copy to it (the copy only ever mirrors the active layer).
+  function activate(id) {
+    const surface = surfaces.get(id);
+    if (!surface) return false;
+    if (canvas) canvas.classList.remove('pp-layer--active');
+    activeLayerId = id;
+    canvas = surface.canvas;
+    ctx = surface.ctx;
+    canvas.classList.add('pp-layer--active');
+    dirty = null;
+    syncCommitted({ x: 0, y: 0, w: width, h: height });
+    return true;
+  }
+
   return {
-    canvasElement: canvas,
+    // The wrapper element (what's on screen as "the canvas").
+    canvasElement: stack,
     setTool(next) {
       tool = next;
     },
@@ -979,12 +1070,12 @@ export function initCanvas(container, options = {}) {
     // Undoable like any edit. Clearing an already-blank layer is a
     // no-op, so it doesn't add an undo step that does nothing.
     clear() {
-      if (isBusy()) return;
+      if (isBusy() || !ctx) return;
       const before = committedCtx.getImageData(0, 0, width, height);
       if (!hasPaint(before.data)) return;
       ctx.clearRect(0, 0, width, height);
       committedCtx.clearRect(0, 0, width, height);
-      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before });
+      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: activeLayerId });
     },
 
     // --- undo/redo seam (step 2b) ---
@@ -994,14 +1085,21 @@ export function initCanvas(container, options = {}) {
     // finger can't swap pixels out from under a live stroke.
     isBusy,
 
-    // Writes `patch` (ImageData) at rect and returns the pixels it
-    // replaced, keeping the committed copy in sync. Undo and redo are
-    // both this one call. Doesn't fire onChange — main.js schedules
-    // the save itself.
-    swapRegion(rect, patch) {
-      const replaced = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
-      ctx.putImageData(patch, rect.x, rect.y);
-      committedCtx.putImageData(patch, rect.x, rect.y);
+    // Writes `patch` (ImageData) at rect on layer `layerId` (default:
+    // the active layer) and returns the pixels it replaced. Undo and
+    // redo are both this one call. The layer may not be the active one
+    // — then it's written directly and the committed copy is left
+    // alone; for the active layer the copy is kept in sync. Returns
+    // null if that layer isn't loaded. Doesn't fire onChange — main.js
+    // schedules the save itself.
+    swapRegion(rect, patch, layerId = activeLayerId) {
+      const surface = surfaces.get(layerId);
+      if (!surface) return null;
+      const isActive = layerId === activeLayerId;
+      const source = isActive ? committedCtx : surface.ctx;
+      const replaced = source.getImageData(rect.x, rect.y, rect.w, rect.h);
+      surface.ctx.putImageData(patch, rect.x, rect.y);
+      if (isActive) committedCtx.putImageData(patch, rect.x, rect.y);
       return replaced;
     },
 
@@ -1012,43 +1110,108 @@ export function initCanvas(container, options = {}) {
       return () => gestureListeners.delete(listener);
     },
 
-    // --- persistence seam (step 2a) ---
+    // --- persistence seam (step 2a) and layers (step 2c) ---
     //
-    // The canvas doesn't know about storage; main.js moves pixels
-    // between the two through these. For now this one canvas *is* the
-    // active layer ("Layer 1"); 2c replaces that with real per-layer
-    // surfaces behind the same idea.
+    // The canvas doesn't know about storage or the schema beyond the
+    // layer fields it renders; main.js moves pixels between the two
+    // through these.
 
-    // Calls `listener({ rect, before })` after every committed edit
-    // (stroke end, fill, clear) — before is the rect's ImageData from
-    // before the edit. Returns an unsubscribe function.
+    // Calls `listener({ rect, before, layerId })` after every committed
+    // edit (stroke end, fill, clear) — before is the rect's ImageData
+    // from before the edit. Returns an unsubscribe function.
     onChange(listener) {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
     },
 
-    // The current pixels as a PNG Blob. toBlob encodes asynchronously,
-    // so this doesn't block drawing.
-    exportPNG() {
+    // A layer's pixels (default: the active layer) as a PNG Blob.
+    // toBlob encodes asynchronously, so this doesn't block drawing.
+    exportPNG(layerId = activeLayerId) {
+      const surface = surfaces.get(layerId);
+      if (!surface) return Promise.reject(new Error(`Layer ${layerId} is not loaded`));
       return new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
+        surface.canvas.toBlob((blob) => {
           if (blob) resolve(blob);
           else reject(new Error('Canvas PNG export failed'));
         }, 'image/png');
       });
     },
 
-    // Replaces the pixels with an already-decoded image (ImageBitmap,
-    // or anything drawImage accepts), or clears to blank for null.
-    // Synchronous on purpose: main.js decodes the saved PNG *before*
-    // the canvas is on screen, so there's no window where a stroke
-    // could land and then be wiped by a late-arriving load. Doesn't
-    // fire onChange — loading isn't an edit.
-    setImage(image) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (image) ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      dirty = null;
-      syncCommitted({ x: 0, y: 0, w: width, h: height });
+    // Shows a frame: `layers` is the project's layer list (bottom
+    // first; only id/visible/opacity are read), `images` a Map of
+    // layer id -> already-decoded image (ImageBitmap, or anything
+    // drawImage accepts; missing = blank). Layer canvases whose id is
+    // still in the list are reused, so moving between frames doesn't
+    // reallocate ~8 MB per layer; the rest are released.
+    //
+    // Synchronous on purpose: main.js decodes the saved PNGs *before*
+    // calling this, so there's no window where a stroke could land and
+    // then be wiped by a late-arriving load. Doesn't fire onChange —
+    // loading isn't an edit.
+    loadFrame({ layers, activeLayerId: nextActive, images = new Map() }) {
+      const keep = new Set(layers.map((l) => l.id));
+      for (const [id, surface] of surfaces) {
+        if (keep.has(id)) continue;
+        surface.canvas.remove();
+        // Free the backing store now, not at GC (iPad canvas memory).
+        surface.canvas.width = 0;
+        surface.canvas.height = 0;
+        surfaces.delete(id);
+      }
+      if (canvas && !surfaces.has(activeLayerId)) {
+        canvas = null;
+        ctx = null;
+        activeLayerId = null;
+      }
+
+      order = layers.map((l) => l.id);
+      for (const layer of layers) {
+        let surface = surfaces.get(layer.id);
+        if (!surface) {
+          surface = createSurface(layer.id);
+          surfaces.set(layer.id, surface);
+        }
+        surface.visible = layer.visible !== false;
+        surface.opacity = typeof layer.opacity === 'number' ? layer.opacity : 1;
+        applySurfaceStyle(surface);
+        surface.ctx.clearRect(0, 0, width, height);
+        const image = images.get(layer.id);
+        if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+        // append() moves an existing child, so this also re-orders.
+        stack.appendChild(surface.canvas);
+      }
+
+      const fallback = order[order.length - 1] ?? null;
+      if (fallback === null) {
+        canvas = null;
+        ctx = null;
+        activeLayerId = null;
+        dirty = null;
+        return;
+      }
+      activate(surfaces.has(nextActive) ? nextActive : fallback);
+    },
+
+    // Switches which layer the tools paint on. Refused (returns false)
+    // mid-stroke or mid-gesture, or for an unknown layer.
+    setActiveLayer(id) {
+      if (isBusy()) return false;
+      return activate(id);
+    },
+
+    getActiveLayerId() {
+      return activeLayerId;
+    },
+
+    // Updates how a layer is shown: { visible?, opacity? } (0-1).
+    setLayerProps(id, props) {
+      const surface = surfaces.get(id);
+      if (!surface) return;
+      if (typeof props.visible === 'boolean') surface.visible = props.visible;
+      if (typeof props.opacity === 'number') {
+        surface.opacity = Math.min(1, Math.max(0, props.opacity));
+      }
+      applySurfaceStyle(surface);
     },
   };
 }

@@ -94,27 +94,27 @@ icon, manifest `name`/`short_name`, and repo copy.
   swipe, two-finger double-tap reset), with iPadOS's own undo kept out
   of the way; Clear and fill undoable; fill is a gesture candidate;
   zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
-- **Next: 2c** — layers panel (add/delete/reorder/visibility/opacity/
-  lock, per-frame cap) **plus the bare-bones frame strip** (add frame,
-  tap to switch), so multi-frame saving and cross-frame undo get tested
-  there. Then 2d project gallery (list/create/open/delete, custom
-  confirm).
-- **2c scoping — settle before building:**
-  - Layer cap number, and where the layers panel and frame strip sit
-    (wireframe: strip below the canvas, under the transport).
-  - **Coupled standard features to flag:** duplicate layer, merge
-    down, rename, layer thumbnails — standard in Sketchbook/Procreate,
-    not in the v1 list. Decide in or deferred, deliberately.
-  - **Remembered across launches:** active layer per frame
-    (`activeLayerId` already in the schema) and which frame was open.
-  - **Wiring already prepared:** history entries carry `frameId` /
-    `layerId` and a `type` (add layer-structure types next to
-    `'pixels'`); `main.js` `swapEntry` must switch to the entry's frame
-    first and write to the entry's layer, which may not be active; the
-    committed copy resyncs on any layer or frame switch.
-  - **Memory:** each layer is its own ~8 MB surface; the cap protects
-    the iPad. Consider whether non-current frames keep surfaces or
-    reload from storage.
+- **Now: 2c** — layers panel plus a bare-bones frame strip, built in
+  three passes, **each pushed and checked on the iPad on its own** so a
+  break points at one pass. **Pass 1 done** (not yet on the iPad): layers shared
+  across frames (schema v2 + migration), one canvas per layer, fill
+  reads all visible layers. Looks identical to 2b — still one layer.
+  - **Pass 2:** layers panel — right side, opened from a top-bar
+    button; add, delete, reorder, visibility, opacity, lock, rename,
+    thumbnails (in memory, updated on commit). Cap **8**
+    (`MAX_LAYERS`, one constant). Layer undo types next to `'pixels'`.
+    Dev tool: fill all 8 layers to stress-test memory on the iPad.
+  - **Pass 3:** frame strip below the canvas (room left for the
+    transport) — add a blank frame *after* the current one, tap to
+    switch, numbers only (thumbnails are step 4). Add frame is
+    undoable (stands in for delete until step 4). Undo jumps to the
+    entry's frame, loading it from storage — undo/redo go async and
+    ignore input meanwhile.
+  - **Remembered across launches:** open frame (`project.currentFrameId`,
+    pass 3), active layer (`project.activeLayerId`), whether the layers
+    panel was open (`meta`, pass 2).
+  - Then **2d** project gallery (list/create/open/delete, custom
+    confirm).
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -122,6 +122,12 @@ icon, manifest `name`/`short_name`, and repo copy.
   links, Krita reference import).
 
 **Open items**
+- **Duplicate layer, merge down** — deferred from 2c on purpose
+  (duplicate copies a bitmap on every frame; merge needs opacity-aware
+  compositing and a two-layer undo entry). Revisit after step 4.
+- **Fill sample toggle** (current layer vs all visible, as Sketchbook
+  offers) — fill always samples all visible layers; add the toggle if
+  she asks.
 - **Smudge feel** is off; deferred until more brushes exist (she ties
   it to brushes that soften their own edges). Don't retune it alone.
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
@@ -161,11 +167,21 @@ Short rules; reasoning in the linked sections.
 - **Storage:** IndexedDB, fully client-side. Layer bitmaps as PNG.
   Autosave after a stroke ends, never mid-stroke. Requests
   `navigator.storage.persist()`. ([why](docs/DESIGN_NOTES.md#storage))
-- **Layers** ([why](docs/DESIGN_NOTES.md#layers-and-undo)): multiple
-  per frame. v1 = add/delete, reorder, visibility, opacity, lock; no
-  blend modes/groups/masks. New frames copy the previous frame's layer
-  structure with blank bitmaps. The reference image is separate from
-  layers. Per-frame layer cap (number TBD in 2c).
+- **Layers** ([why](docs/DESIGN_NOTES.md#layers-and-undo)):
+  - **Shared across the whole animation, Flipaclip-style:** the
+    project owns the layer list and properties (name, order, visible,
+    opacity, locked); each frame holds only its own pixels per layer.
+    Hide/rename/add applies to every frame.
+  - v1 = add/delete, reorder, visibility, opacity, lock, rename,
+    thumbnails; no blend modes/groups/masks. Cap **8 per project**.
+    The reference image is separate from layers.
+  - **Rendering:** one `<canvas>` per layer stacked in a wrapper
+    (`.pp-canvas`) that carries the view transform and takes all input;
+    visibility/opacity are CSS. Only the open frame's layers are in
+    memory; changing frames reuses the same layer canvases.
+  - **Fill reads every visible layer** (composited at opacity) and
+    writes only the active one, so color fills up to line art on
+    another layer. **Smudge reads and writes the active layer only.**
 - **Undo/redo** ([why](docs/DESIGN_NOTES.md#layers-and-undo)):
   - Raster snapshots, not replayable commands.
   - One project-wide history (entries tagged with `frameId`; undo jumps
@@ -178,8 +194,10 @@ Short rules; reasoning in the linked sections.
   - Capture uses **one committed copy of the active layer only** (never
     one per layer); it follows the active layer — a layer switch
     resyncs it. The same copy reverts a touch that became a gesture.
-  - Layer structure changes are undoable on the same stack (2c: new
-    entry `type` alongside `'pixels'`).
+  - Layer structure changes are undoable on the same stack (new entry
+    `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
+    frame. **Visibility and lock are not undoable** (view state, as in
+    Photoshop). An entry for another frame loads that frame first.
   - `history.js` is pure; `canvas.js` exposes `onChange({rect,
     before})`, `swapRegion`, `isBusy`, `onGesture`; `main.js` glues.
 - **Gestures — match Sketchbook defaults**
@@ -208,8 +226,13 @@ Short rules; reasoning in the linked sections.
 Each is here because breaking it caused (or would cause) a real bug.
 
 **Canvas** ([why](docs/DESIGN_NOTES.md#gestures))
-- Canvas `transform-origin` is `0 0`, set in JS where the canvas is
-  created — the gesture math depends on it.
+- The wrapper's (`.pp-canvas`) `transform-origin` is `0 0`, set in JS
+  where it's created — the gesture math depends on it. The transform
+  goes on the wrapper, never on a layer canvas.
+- Layer canvases are `pointer-events: none`; input and pointer capture
+  belong to the wrapper.
+- Fill's region comes from the visible-layer composite, its pixels go
+  to the active layer only — never write the composite back.
 - `toCanvasPoint` is computed analytically from viewport state, never
   from `getBoundingClientRect()` (wrong once rotated). Every tool
   routes through it.
@@ -265,10 +288,12 @@ Each is here because breaking it caused (or would cause) a real bug.
       updater.js          SW registration, update checks/apply, version,
                           fresh reload — no UI
       canvas/
-        canvas.js         input dispatch, tools, viewport, committed copy;
-                          API seams: onChange / exportPNG / setImage
-                          (persistence), getSettings / applySettings,
-                          swapRegion / isBusy / onGesture (undo)
+        canvas.js         input dispatch, tools, viewport, layer surfaces,
+                          committed copy; API seams: loadFrame /
+                          setActiveLayer / setLayerProps (layers),
+                          onChange / exportPNG(layerId) (persistence),
+                          getSettings / applySettings, swapRegion(…,
+                          layerId) / isBusy / onGesture (undo)
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
         region.js         pure dirty-rect helpers
@@ -298,31 +323,39 @@ Developer section (Fresh reload, Clear drawing).
 
 ## Schema
 
-Built in 2a: `project`, `frame`, layer records. Planned fields are
-marked. Extend additively.
+Version 2 (2c): layers live on the project, frames map layer id →
+bitmap. Planned fields are marked. Extend additively.
 
     project = {
       id, name, createdAt, updatedAt,
       canvas: { width: 1920, height: 1080 },
       fps: 12,
+      layers: [                               // index 0 = bottom; shared by all frames
+        { id, name, visible: true, opacity: 1, locked: false },
+      ],
+      activeLayerId,
       frames: [frameId, ...],                 // timeline order
+      currentFrameId,                         // planned (2c pass 3)
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
 
     frame = {
       id, projectId,
-      layers: [                               // index 0 = bottom
-        { id, name, bitmapRef, visible: true, opacity: 1, locked: false },
-      ],
-      activeLayerId,
+      bitmapRefs: { [layerId]: bitmapRef },   // one per project layer
       image: { blobRef, x, y, scale, rotation, opacity } | null   // planned (step 3)
     }
 
-**IndexedDB stores** (`parapara`, version 1): `projects`, `frames`
+**IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
 type, buffer }`), `meta` (`lastProjectId`, `toolSettings`).
-`bitmapRef` is assigned at layer creation and never changes; no blob
-under it means blank. Undo is never stored.
+`bitmapRef` is assigned when a frame or layer is created and never
+changes; no blob under it means blank. Adding a layer adds a ref to
+every frame record. Undo is never stored.
+
+**Version 2 migration** (`migrateToSharedLayers`, pure and
+unit-tested): the first frame's layers become the project's, ids and
+bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
+`frame.activeLayerId`.
 
 ## Testing
 

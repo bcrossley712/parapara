@@ -5,17 +5,18 @@
 // storage-used estimation for the quota warning.
 //
 // Undo/redo is NOT here and is never persisted — it's one project-wide
-// in-memory history (see PROJECT_NOTES.md "Architecture"). It
-// will live in its own file in this folder when step 2b builds it.
+// in-memory history (see PROJECT_NOTES.md "Architecture"), in
+// history.js.
 //
 // Extend the schema additively (new optional fields) rather than
 // restructuring, per the working agreement. A change to the stores or
-// indexes themselves needs a DB_VERSION bump plus a new upgrade branch
-// in openDatabase() — never edit the version-1 branch in place, or
+// indexes themselves — or a one-off data migration, like version 2's
+// move to shared layers — needs a DB_VERSION bump plus a new upgrade
+// branch in openDatabase(). Never edit an existing branch in place, or
 // existing installs will skip it.
 
 const DB_NAME = 'parapara';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORE_PROJECTS = 'projects';
 const STORE_FRAMES = 'frames';
@@ -43,54 +44,56 @@ export function newId() {
 
 // --- schema factories (pure — nothing here touches the database) ---
 
+// Layers are shared across the whole animation, Flipaclip-style (see
+// PROJECT_NOTES.md "Schema"): the project holds the layer list and its
+// properties; each frame only maps layer id -> bitmapRef for its own
+// pixels on that layer.
 export function createLayer(name = DEFAULT_LAYER_NAME) {
   return {
     id: newId(),
     name,
-    // Assigned up front and never changed. No blob stored under it
-    // yet simply means "blank layer" — so saving a stroke only ever
-    // writes the blob store, never the frame record.
-    bitmapRef: newId(),
     visible: true,
     opacity: 1,
     locked: false,
   };
 }
 
-// New frames copy the previous frame's layer structure (names, order,
-// visibility, opacity, lock) with fresh ids and blank bitmaps — see
-// PROJECT_NOTES.md "Architecture". With no previous frame, one blank
-// default layer.
-export function createFrame(projectId, previousFrame = null) {
-  const layers = previousFrame
-    ? previousFrame.layers.map((layer) => ({
-        ...layer,
-        id: newId(),
-        bitmapRef: newId(),
-      }))
-    : [createLayer()];
-
-  // Keep the same layer active as on the previous frame (by position),
-  // so she keeps drawing on e.g. "line" when she adds a frame.
-  let activeIndex = 0;
-  if (previousFrame) {
-    const prevIndex = previousFrame.layers.findIndex(
-      (l) => l.id === previousFrame.activeLayerId
-    );
-    if (prevIndex >= 0) activeIndex = prevIndex;
-  }
-
+// A new frame gets a fresh, blank bitmap slot for every project layer.
+// A bitmapRef is assigned up front and never changed; no blob stored
+// under it simply means "blank" — so saving a stroke only ever writes
+// the blob store, never the frame record.
+export function createFrame(projectId, layers = []) {
+  const bitmapRefs = {};
+  for (const layer of layers) bitmapRefs[layer.id] = newId();
   return {
     id: newId(),
     projectId,
-    layers,
-    activeLayerId: layers[activeIndex].id,
+    bitmapRefs,
     image: null,
   };
 }
 
+// Gives `frame` a bitmapRef for any layer it's missing one for (a frame
+// should always have one per layer; this keeps a gap from becoming a
+// crash). Returns true if the frame changed and needs saving.
+export function ensureBitmapRefs(frame, layers) {
+  let changed = false;
+  if (!frame.bitmapRefs) {
+    frame.bitmapRefs = {};
+    changed = true;
+  }
+  for (const layer of layers) {
+    if (!frame.bitmapRefs[layer.id]) {
+      frame.bitmapRefs[layer.id] = newId();
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
   const now = Date.now();
+  const layer = createLayer();
   return {
     id: newId(),
     name,
@@ -98,8 +101,94 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     updatedAt: now,
     canvas: { ...DEFAULT_CANVAS },
     fps: DEFAULT_FPS,
+    layers: [layer],               // index 0 = bottom
+    activeLayerId: layer.id,
     frames: [],
     audioClips: [],
+  };
+}
+
+// --- migrations (pure — the upgrade branch feeds records through) ---
+
+// Version 1 kept a separate layer list on every frame
+// (frame.layers[] with a bitmapRef each, plus frame.activeLayerId).
+// Version 2 shares one layer list across the project. Layer ids,
+// properties and bitmapRefs are all kept, so no pixels move: the first
+// frame's layers become the project's, and every frame's bitmaps are
+// matched to them by position. A frame with more layers than that adds
+// the extras to the end rather than dropping them; a frame with fewer
+// gets blank slots. Already-migrated projects come back unchanged.
+export function migrateToSharedLayers(project, frames) {
+  if (Array.isArray(project.layers)) return { project, frames };
+
+  const shared = [];
+  for (const frame of frames) {
+    (frame.layers ?? []).forEach((layer, i) => {
+      if (i >= shared.length) {
+        const { id, name, visible, opacity, locked } = layer;
+        shared.push({
+          id,
+          name: name ?? DEFAULT_LAYER_NAME,
+          visible: visible ?? true,
+          opacity: opacity ?? 1,
+          locked: locked ?? false,
+        });
+      }
+    });
+  }
+  if (shared.length === 0) shared.push(createLayer());
+
+  const first = frames[0];
+  const firstActiveIndex = first?.layers?.findIndex((l) => l.id === first.activeLayerId) ?? -1;
+  const activeLayerId = shared[firstActiveIndex >= 0 ? firstActiveIndex : 0].id;
+
+  const migratedFrames = frames.map((frame) => {
+    const { layers = [], activeLayerId: _unused, ...rest } = frame;
+    const bitmapRefs = {};
+    shared.forEach((layer, i) => {
+      bitmapRefs[layer.id] = layers[i]?.bitmapRef ?? newId();
+    });
+    return { ...rest, bitmapRefs };
+  });
+
+  return {
+    project: { ...project, layers: shared, activeLayerId },
+    frames: migratedFrames,
+  };
+}
+
+// Runs migrateToSharedLayers over every project inside the upgrade
+// transaction. Request callbacks only (no awaits), per the
+// withTransaction rule. Any error aborts the upgrade, so the database
+// stays at version 1 untouched and saving stays off.
+function upgradeToSharedLayers(tx) {
+  const projectStore = tx.objectStore(STORE_PROJECTS);
+  const frameStore = tx.objectStore(STORE_FRAMES);
+  const projectsReq = projectStore.getAll();
+  projectsReq.onsuccess = () => {
+    const framesReq = frameStore.getAll();
+    framesReq.onsuccess = () => {
+      try {
+        const byProject = new Map();
+        for (const frame of framesReq.result) {
+          if (!byProject.has(frame.projectId)) byProject.set(frame.projectId, []);
+          byProject.get(frame.projectId).push(frame);
+        }
+        for (const project of projectsReq.result) {
+          // Timeline order first (the first frame's layers become the
+          // shared list), then any frames not in the timeline.
+          const all = byProject.get(project.id) ?? [];
+          const order = new Map(project.frames.map((id, i) => [id, i]));
+          all.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+          const out = migrateToSharedLayers(project, all);
+          projectStore.put(out.project);
+          for (const frame of out.frames) frameStore.put(frame);
+        }
+      } catch (err) {
+        console.error('Parapara! layer migration failed:', err);
+        tx.abort();
+      }
+    };
   };
 }
 
@@ -138,7 +227,13 @@ function openDatabase() {
 
         db.createObjectStore(STORE_META, { keyPath: 'key' });
       }
-      // Future versions: add `if (event.oldVersion < 2) { ... }` here.
+      if (event.oldVersion < 2) {
+        // No store or index changes — a data migration to layers shared
+        // across frames (see migrateToSharedLayers). A brand-new
+        // database has nothing to migrate.
+        if (event.oldVersion >= 1) upgradeToSharedLayers(request.transaction);
+      }
+      // Future versions: add `if (event.oldVersion < 3) { ... }` here.
     };
 
     request.onsuccess = () => {
@@ -211,11 +306,11 @@ export async function initStorage() {
   }
 }
 
-// Creates and saves a new project with one frame (one blank layer),
+// Creates and saves a new project with one blank layer and one frame,
 // and marks it as the last-opened project.
 export async function createProject(name) {
   const project = createProjectRecord(name);
-  const frame = createFrame(project.id);
+  const frame = createFrame(project.id, project.layers);
   project.frames.push(frame.id);
 
   await withTransaction(

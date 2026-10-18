@@ -15,6 +15,9 @@ import {
   saveLayerBitmap,
   loadToolSettings,
   saveToolSettings,
+  saveFrame,
+  createLayer,
+  ensureBitmapRefs,
 } from './storage/storage.js';
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
@@ -33,20 +36,23 @@ const updater = initUpdater({
 startEditor();
 
 async function startEditor() {
-  // Load everything — including decoding the saved image — *before*
-  // the canvas exists, so there's no moment where she could draw and
-  // then have a late-arriving load wipe the stroke.
-  let session = null;      // { project, frame, layer } once loaded
-  let savedImage = null;
+  // Load everything — including decoding every layer's saved image —
+  // *before* the canvas exists, so there's no moment where she could
+  // draw and then have a late-arriving load wipe the stroke.
+  let session = null;      // { project, frame } once loaded
+  let savedImages = new Map(); // layer id -> ImageBitmap
   let savedSettings = null;
   try {
     await initStorage();
     const { project, frames } = await openLastProject();
+    // Which frame was open is remembered from pass 3 on; until then
+    // there's only ever one.
     const frame = frames[0];
-    const layer = frame.layers.find((l) => l.id === frame.activeLayerId) ?? frame.layers[0];
-    const blob = await loadLayerBitmap(layer.bitmapRef);
-    if (blob) savedImage = await createImageBitmap(blob);
-    session = { project, frame, layer };
+    // A frame should have a bitmap slot for every layer; fill any gap
+    // (and save it) rather than failing to load.
+    if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
+    savedImages = await decodeFrameImages(project.layers, frame);
+    session = { project, frame };
 
     // Tool settings are a nicety, not her work: if they fail to load,
     // start with defaults rather than turning saving off.
@@ -83,24 +89,45 @@ async function startEditor() {
   });
   const canvasApi = ui.canvas;
 
-  if (savedImage) {
-    canvasApi.setImage(savedImage);
-    savedImage.close?.();
+  if (session) {
+    canvasApi.loadFrame({
+      layers: session.project.layers,
+      activeLayerId: session.project.activeLayerId,
+      images: savedImages,
+    });
+  } else {
+    // Saving is off, but she can still draw on one temporary layer.
+    const layer = createLayer();
+    canvasApi.loadFrame({ layers: [layer], activeLayerId: layer.id });
   }
+  for (const image of savedImages.values()) image.close?.();
+  savedImages.clear();
 
   // --- undo/redo (step 2b) ---
   //
   // One project-wide history, never saved. Entries are tagged with the
-  // frame and layer they changed. Only one frame and one layer exist
-  // until 2c; when they do, swapEntry must first switch to
-  // entry.frameId (undo jumps to that frame) and write to
-  // entry.layerId's surface — which may not be the active layer.
+  // frame and layer they changed, and swapEntry writes to entry.layerId
+  // — which may not be the active layer. Pass 3 (frame strip) adds the
+  // jump: switch to entry.frameId first, loading it if needed.
   const history = createHistory({
     onChange: () => ui.setHistoryState(history.canUndo, history.canRedo),
   });
 
+  // Layers with edits not yet saved. Autosave writes only these, so a
+  // stroke on one layer doesn't re-encode all of them.
+  const unsavedLayers = new Set();
+
+  function markUnsaved(layerId) {
+    unsavedLayers.add(layerId);
+    autosaver?.schedule();
+  }
+
   function swapEntry(entry) {
-    const patch = canvasApi.swapRegion(entry.rect, entry.patch);
+    const patch = canvasApi.swapRegion(entry.rect, entry.patch, entry.layerId);
+    // Can't happen until layers can be deleted (pass 2 makes deletes
+    // undoable, so their entries always have a layer to land on).
+    if (!patch) throw new Error(`Undo entry for missing layer ${entry.layerId}`);
+    unsavedLayers.add(entry.layerId);
     return { ...entry, patch, bytes: patch.data.byteLength };
   }
 
@@ -115,16 +142,16 @@ async function startEditor() {
     if (history.redo(swapEntry)) autosaver?.schedule();
   }
 
-  canvasApi.onChange(({ rect, before }) => {
+  canvasApi.onChange(({ rect, before, layerId }) => {
     history.push({
       type: 'pixels',
       frameId: session?.frame.id ?? null,
-      layerId: session?.layer.id ?? null,
+      layerId,
       rect,
       patch: before,
       bytes: before.data.byteLength,
     });
-    autosaver?.schedule();
+    markUnsaved(layerId);
   });
 
   canvasApi.onGesture((name) => (name === 'undo' ? undo() : redo()));
@@ -136,8 +163,18 @@ async function startEditor() {
 
   autosaver = createAutosaver({
     save: async () => {
-      const blob = await canvasApi.exportPNG();
-      await saveLayerBitmap(session.project.id, session.layer.bitmapRef, blob);
+      const layerIds = [...unsavedLayers];
+      unsavedLayers.clear();
+      try {
+        for (const layerId of layerIds) {
+          const blob = await canvasApi.exportPNG(layerId);
+          await saveLayerBitmap(session.project.id, session.frame.bitmapRefs[layerId], blob);
+        }
+      } catch (err) {
+        // Re-saving one that did land is harmless; losing one isn't.
+        for (const layerId of layerIds) unsavedLayers.add(layerId);
+        throw err;
+      }
     },
     onError: (err) => {
       console.error('Parapara! autosave failed:', err);
@@ -170,4 +207,16 @@ async function startEditor() {
   });
 
   flushBeforeReload.push(() => autosaver.flush(), () => settingsSaver.flush());
+}
+
+// Decodes a frame's saved layer bitmaps: a Map of layer id ->
+// ImageBitmap, with blank layers left out. A bitmap that won't decode
+// throws — the caller treats that like any failed load (saving off).
+async function decodeFrameImages(layers, frame) {
+  const images = new Map();
+  for (const layer of layers) {
+    const blob = await loadLayerBitmap(frame.bitmapRefs[layer.id]);
+    if (blob) images.set(layer.id, await createImageBitmap(blob));
+  }
+  return images;
 }

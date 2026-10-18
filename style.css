@@ -178,19 +178,30 @@ html, body {
   overflow: hidden;
 }
 
+/* The wrapper that holds one <canvas> per layer. canvas.js sizes it
+   (fitStack) to fit the canvas area at the project's aspect ratio, and
+   applies the pan/zoom/rotate transform to it. */
 .pp-canvas {
+  position: relative;
+  flex: none;
   background: #ffffff;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  aspect-ratio: 16 / 9;
   touch-action: none;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   /* Hints the browser to optimize for the pan/zoom transform updates
      in canvas.js — scoped to just this, unlike the earlier
      willReadFrequently mistake which affected the whole canvas. */
   will-change: transform;
+}
+
+/* One per layer, stacked in DOM order (bottom layer first). Input goes
+   to the wrapper, never to a layer canvas. */
+.pp-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }
 
 /* Color swatch + picker (js/ui/ui.js, js/ui/color-picker.js) */

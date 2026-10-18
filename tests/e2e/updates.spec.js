@@ -45,7 +45,7 @@ async function drawStroke(page) {
 
 async function paintedPixels(page) {
   return page.evaluate(() => {
-    const c = document.querySelector('.pp-canvas');
+    const c = document.querySelector('.pp-layer--active');
     const d = c.getContext('2d').getImageData(700, 440, 520, 200).data;
     let n = 0;
     for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;

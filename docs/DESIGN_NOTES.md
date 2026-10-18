@@ -151,9 +151,30 @@ Sections: [Process lessons](#process-lessons) ·
 - **Layers reversed an earlier single-bitmap decision**, because she's
   used to Sketchbook-style layers. Caught before storage/undo existed,
   so nothing was thrown away.
-- **New frames copy the previous frame's layer structure** (blank
-  bitmaps) so a "sketch / line / color" stack persists without
-  rebuilding it per frame.
+- **Layers are shared across the animation (2c), not per frame.** The
+  first plan had each frame copy the previous frame's layer list. That
+  departs from Flipaclip and Rough Animator, where the layer stack
+  belongs to the whole animation: hiding the sketch layer to check
+  line art is one tap, not one per frame. Switching cost a one-time
+  schema v2 migration while only one frame existed in saved data —
+  the one deliberate restructure. Frames keep a `bitmapRefs` map
+  rather than deriving blob ids, so existing refs (and the "assigned
+  once, never changes" rule) carried over without moving any pixels.
+- **One `<canvas>` per layer, stacked, rather than compositing into a
+  single visible canvas.** The browser composites on the GPU,
+  visibility/opacity are free CSS, and a stroke only touches its own
+  layer. She sees no difference from a native app's layers. The view
+  transform moved from the canvas to the wrapper.
+- **Only the open frame's layers live in memory.** A frame switch
+  saves, then loads the next frame's PNGs into the same layer canvases
+  (shared layer ids make reuse natural). Memory stays at cap × ~8 MB
+  however long the animation gets; the cost is a short decode pause
+  per switch, unmeasured on the iPad. Playback/onion skin (step 4)
+  will want a separate flattened-frame cache, not all layers loaded.
+- **Fill samples all visible layers** (Sketchbook's sample-all,
+  Clip Studio's refer-to-other-layers). Without it, filling a color
+  layer under line art floods the whole canvas. Smudge stays on the
+  active layer. Hidden layers don't count toward the fill.
 - **The reference image stays separate from layers** — it has its own
   transform model (position/scale/rotation) that doesn't map onto a
   stroke layer.
@@ -194,8 +215,13 @@ Sections: [Process lessons](#process-lessons) ·
   new edit, which clears redo first.
 - **Clear on a blank layer adds nothing**, so undo never does a step
   with no visible effect.
-- **Layer cap per frame** for the same memory reason — Procreate caps
-  layers by canvas size and device memory too.
+- **Layer cap (8, per project now that layers are shared)** for the
+  same memory reason — Procreate caps layers by canvas size and device
+  memory too. 8 × ~8 MB ≈ 64 MB of layers; iPad Safari's real canvas
+  ceiling is device-dependent and only testable on the iPad (hence the
+  fill-all-layers dev tool).
+- **Visibility and lock aren't undoable** — view state, as in
+  Photoshop; eye-icon taps filling the 30-step stack would be worse.
 
 ## Storage
 

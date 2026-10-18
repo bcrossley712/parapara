@@ -87,7 +87,7 @@ test('the remembered color is what actually gets drawn', async ({ page }) => {
   await page.mouse.up();
 
   const pixel = await page.evaluate(() => {
-    const c = document.querySelector('.pp-canvas');
+    const c = document.querySelector('.pp-layer--active');
     return Array.from(c.getContext('2d').getImageData(960, 540, 1, 1).data);
   });
   expect(pixel).toEqual([0, 170, 85, 255]);

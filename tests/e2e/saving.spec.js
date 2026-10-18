@@ -16,7 +16,7 @@ import { openApp, reloadApp, setVisibility, savedDrawingBytes, waitForDrawingSav
 // drawn (the white comes from CSS), so alpha > 0 means "painted."
 async function paintedPixels(page) {
   return page.evaluate(() => {
-    const c = document.querySelector('.pp-canvas');
+    const c = document.querySelector('.pp-layer--active');
     const d = c.getContext('2d').getImageData(500, 400, 900, 300).data;
     let n = 0;
     for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;

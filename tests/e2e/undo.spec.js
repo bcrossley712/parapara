@@ -15,7 +15,7 @@ const redoBtn = (page) => page.getByRole('button', { name: 'Redo' });
 // Painted (alpha > 0) pixels across the whole canvas.
 function paintedPixels(page) {
   return page.evaluate(() => {
-    const c = document.querySelector('.pp-canvas');
+    const c = document.querySelector('.pp-layer--active');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
     let n = 0;
     for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
