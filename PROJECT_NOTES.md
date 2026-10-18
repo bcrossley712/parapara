@@ -170,6 +170,14 @@ recipients) — not a public product, low-stakes threat model.
 - **IndexedDB for all project data, fully client-side.** Drawings,
   imported images, and audio blobs all live in IndexedDB. No backend
   is required for the core app to function.
+  - **Layer bitmaps are saved as PNG blobs** (`canvas.toBlob`), not
+    raw pixel data — roughly 10–50× smaller for line art.
+  - **Autosave runs shortly after a stroke ends**, never mid-stroke,
+    so encoding a PNG can't cause drawing lag.
+  - **The app requests persistent storage**
+    (`navigator.storage.persist()`) so iOS is less likely to evict her
+    work under storage pressure. Not guaranteed to be granted; the
+    storage warning (below) is still needed.
 - **Imported images sit as an adjustable layer, not a baked-in
   background.** Each frame is a small stack: an imported-image layer
   (position, scale, rotation, opacity) plus the drawn strokes on top,
@@ -210,10 +218,10 @@ recipients) — not a public product, low-stakes threat model.
     documented below — not folded into the new layer list. It already
     has its own transform model (position/scale/rotation) that
     doesn't map cleanly onto a stroke layer.
-  - **Undo/redo:** whole-stack raster snapshot (all layers in the
-    frame, before/after an edit), not per-layer. Keeps one undo model
-    instead of two, matching why raster snapshots were chosen over
-    vector replay in the first place. **Confirmed:** layer structure
+  - **Undo/redo:** one raster-snapshot undo model for everything
+    (originally "whole-stack snapshot per edit"; narrowed to
+    "only what changed" for memory — see the undo/redo decision
+    below). **Confirmed:** layer structure
     changes (add/delete/reorder/visibility/opacity/lock) are undoable
     too, on the same stack as drawing operations — matching how
     Procreate/Photoshop/Krita behave (an accidental layer delete is
@@ -239,6 +247,52 @@ recipients) — not a public product, low-stakes threat model.
       "the bitmap" — now the whole layer stack per frame, not a single
       stroke layer. The reasoning for snapshot-over-replay still
       holds; only the unit being snapshotted changed.
+  - **Revised before building (step 2 planning), for memory and
+    convention:**
+    - **One project-wide history, not one stack per frame.** Undo
+      reverses the most recent action wherever it happened and jumps
+      to that frame — how animation apps generally behave. Per-frame
+      stacks would make undo on frame 5 skip what she just did on
+      frame 6. Entries are tagged with their `frameId`.
+    - **In memory only, never saved.** Almost no drawing app keeps
+      undo across a relaunch, and persisting snapshots would eat
+      storage. History is lost when the app closes or the project
+      changes — expected behavior.
+    - **Entries store only what changed:** usually one layer, cropped
+      to the stroke's bounding box. Only structural ops (add/delete/
+      reorder layers) capture more. Each 1920×1080 layer is ~8 MB
+      raw, and iPad Safari caps canvas/tab memory hard, so whole-stack
+      before/after snapshots would crash the 9th-gen iPad long before
+      30 steps.
+    - **Only the "before" patch is stored.** On undo, the current
+      pixels in that region are captured as the redo patch, then the
+      before patch is restored. Halves memory versus storing both.
+    - **Caps: 30 steps *and* a ~150 MB memory budget**, oldest dropped
+      first when either is exceeded. The budget is what actually
+      protects the iPad — a typical stroke entry is ~0.5–1 MB, but a
+      full-canvas fill or Clear is ~8 MB. 30 is conservative next to
+      Procreate's default; raise it if she runs out.
+    - **Layer count is capped per frame** (exact number TBD in 2c) for
+      the same memory reason. Procreate also caps layers by canvas
+      size and device memory, so a cap isn't a convention deviation.
+- **Touch gestures match Sketchbook defaults**, the app she's using
+  most right now (per [Sketchbook's gesture guide](https://help.sketchbook.com/docs/gestures)).
+  Sketchbook differs from Procreate, which uses two-finger tap = undo
+  and three-finger tap = redo:
+  - Three-finger tap = undo.
+  - Three-finger swipe left / right = undo / redo.
+  - Two-finger double-tap = reset/fit view. **Replaces today's
+    two-finger single tap** (change lands with undo in step 2b).
+  - Two-finger single tap does nothing, so Procreate habits don't
+    misfire.
+  - Two-finger drag/pinch/twist = pan/zoom/rotate (already built).
+  - Visible undo/redo buttons as well.
+  - Later, once a brush library exists: three-finger swipe up =
+    color editor, down = brush library.
+  - **To check with her:** Sketchbook lets users remap these, so
+    confirm what *she* actually does. **To check on device:** iPadOS
+    has a system three-finger-swipe undo for text editing; it
+    shouldn't fire on the canvas, but that's unverified.
 - **Default fps: 12, "on twos."** Standard beginner-friendly rate for
   hand-drawn/flipbook animation, matches Flipaclip/Rough Animator
   defaults. Stored per-project, adjustable, not hardcoded.
@@ -297,13 +351,32 @@ installed PWA). `canvas/` and `ui/` have real logic (draw/erase/fill/
 smudge, color picker, two-finger pan/zoom/rotate, update prompt);
 `timeline/`, `storage/`, `export/`, and `audio/` are still placeholder
 entry points. Deploy pipeline and app icon set are done. The schema
-(below) is drafted and locked in but not yet built — that's step 2.
+(below) is drafted but not yet built — that's step 2, now planned in
+detail (see "Next" below).
 Details of everything built are under "Built so far."
 
 **iPad test results so far:** fill speed and palm rejection both work
-fine in real use. Pan/zoom/rotate and tap-to-reset work. Smudge feel
-is still off (see below). The viewport fix (third attempt) is
-unconfirmed (see below).
+fine in real use. Pan/zoom/rotate and tap-to-reset work. The viewport
+fix is confirmed on the device. Smudge feel is still off (see below).
+
+**Next: step 2, split into four pieces**, each tested on the iPad
+before the next starts:
+
+- **2a. Saving.** Schema + IndexedDB wrapper; one project, one frame,
+  autosaves and survives relaunch. The canvas paints the active
+  layer's bitmap from storage instead of owning its own.
+- **2b. Undo/redo** per the revised design (see architectural
+  decisions), plus the Sketchbook gesture mapping and buttons. Clear
+  becomes undoable here.
+- **2c. Layers panel** — add/delete/reorder/visibility/opacity/lock,
+  with a per-frame layer cap.
+- **2d. Project gallery** — list, create, open, delete (custom
+  confirm dialog).
+- **Pulled forward from step 4: a bare-bones frame strip** (add frame,
+  tap to switch) lands during step 2, so multi-frame saving, the
+  "new frames copy the layer structure" rule, and cross-frame undo can
+  be tested now instead of two steps later. Playback and onion skin
+  stay in step 4.
 
 **Known open items:**
 - **Smudge feel** — works, but not what she expects. She showed that
@@ -312,16 +385,6 @@ unconfirmed (see below).
   broader brush set. Deliberately deferred until more brushes and
   erasers exist (the `brush.js` tip seam is there for it) — don't
   retune smudge in isolation before then.
-- **Viewport / status bar** — symptom on the iPad: the app was pushed
-  off the bottom by about the status-bar height (Clear button half
-  off-screen). Third fix shipped, **awaiting device confirmation**:
-  the shell is now `position: fixed; inset: 0` instead of `100vh`
-  (see "Layout and PWA"), and the service worker now pre-caches with
-  `cache: 'reload'`. The second change matters for judging the
-  earlier fixes: before it, a new SW version could be filled with the
-  previous deploy's CSS from the HTTP cache, so those fixes may never
-  have actually reached the device. If it's still off, get a
-  screenshot before guessing further.
 - **Brush variety** — she noticed the range of brush sizes, tips
   (e.g. chisel), and edge-blending styles in other apps. Not
   scheduled yet; revisit after step 2 so it doesn't pull focus from
@@ -431,8 +494,10 @@ each piece got here lives in git.
   flood-filled region isn't a cheap patch to restore.
 - Lifting either finger ends the gesture; drawing doesn't resume with
   the other finger. Zoom is clamped 1×–8×. A quick two-finger tap
-  (≤300 ms, ≤12 px movement) resets pan, zoom, and rotation. A window
-  resize also resets the viewport.
+  (≤300 ms, ≤12 px movement) resets pan, zoom, and rotation —
+  **changing to a two-finger double-tap in 2b** to match Sketchbook
+  (see the gestures decision). A canvas-area size change also resets
+  the viewport.
 
 ### Layout and PWA
 
@@ -447,9 +512,11 @@ each piece got here lives in git.
 - **App shell sizing.** `.pp-app-shell` is `position: fixed;
   inset: 0`, not `100vh`/`100vw`. In an installed iPad PWA with
   `black-translucent`, `100vh` doesn't match the visible area, which
-  pushed the bottom of the rail off-screen. Don't reintroduce `vh`
-  (or `dvh`) units for full-screen layout without testing on the
-  device. **Still unconfirmed on the iPad** — see Current state.
+  pushed the bottom of the rail off-screen (two earlier fixes seemed
+  not to work, likely because the old SW pre-cache could serve the
+  previous deploy's CSS — see "Service worker pre-cache" below).
+  Confirmed working on the iPad. Don't reintroduce `vh` (or `dvh`)
+  units for full-screen layout without testing on the device.
 - **Safe area.** iOS extends a standalone PWA under the status bar.
   The shell pads with `env(safe-area-inset-*)` on all four sides,
   which only works because of two other settings: global
@@ -482,13 +549,12 @@ most optional piece):
    Pencil-specific logic yet) — get input feel right before anything
    else, since a bad drawing feel undermines everything built on top
    of it.
-2. Frame/project data model + IndexedDB storage layer, including the
-   layers UI (add/delete/reorder/visibility/opacity/lock) — schema is
-   locked in (see architectural decisions + draft schema above), but
-   the UI itself is intentionally deferred to this step rather than
-   built into the current draw/erase-only prototype.
+2. Frame/project data model + IndexedDB storage, undo/redo, layers
+   UI, project gallery, and a bare-bones frame strip — split into
+   2a–2d (see "Next" under Current state).
 3. Image import + adjustable image-layer transform per frame.
-4. Playback loop + onion skinning.
+4. Playback loop + onion skinning (plus fleshing out the frame strip
+   started in step 2: reorder, delete, thumbnails).
 5. Audio import/record + single-clip trim.
 6. Export (ffmpeg.wasm) + native share sheet.
 7. Cloudflare Worker + R2 backend (Krita reference import, shareable
@@ -508,13 +574,13 @@ Decided since wireframing:
 Still open:
 - Default export format specifics (container/codec) — not needed
   until step 6.
-- Whether to run step 2 (storage/schema/undo/layers — dense,
-  interdependent state where a subtle bug is expensive to find late)
-  on a higher-capability model than the one used for steps 1's UI and
-  gesture work. Anthropic's own guidance is to start with the most
-  capable generally available model and tune effort, and it names
-  Opus-class for complex agentic coding. Proposed as an experiment:
-  compare the bug-report rate on step 2 against step 1's. Not decided.
+
+Decided during step 2 planning:
+- **Step 2 runs on a higher-capability (Opus-class) model.** Dense,
+  interdependent state where a subtle bug is expensive to find late.
+  The switch already paid off once: it found the stale SW pre-cache
+  bug behind the viewport issue. Still worth comparing the bug-report
+  rate on step 2 against step 1's.
 
 ## File layout (confirmed)
 
@@ -565,11 +631,18 @@ you want ffmpeg.wasm reinstated specifically.
         ...   // array order = stacking order, index 0 = bottom
       ],
       activeLayerId,   // which layer new strokes paint onto
-      undoStack: [ snapshotRef, ... ],  // whole layer-stack snapshot, capped depth, per-frame
       image: {
         blobRef, x, y, scale, rotation, opacity
       } | null   // reference image — separate from layers, see architectural decisions
     }
+
+    // bitmapRef / blobRef point at entries in a separate blob store
+    // (layer bitmaps as PNG blobs), so project/frame records stay
+    // small and cheap to read and write.
+
+**Removed in step 2 planning: `frame.undoStack`.** Undo is now one
+project-wide history held in memory only, never saved (see the
+undo/redo decision). Nothing had been built on the field yet.
 
 Nothing here has been built or tested yet — this file will be updated
 as decisions get made and code starts shipping.
