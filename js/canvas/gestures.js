@@ -9,9 +9,11 @@
 // Kept separate so the transform math, which is the fiddly part, can
 // be reasoned about and retuned on its own.
 
-// Can't zoom out past the natural fit-to-screen size, capped at 8x
-// for detail work.
-export const MIN_SCALE = 1;
+// Zoom range relative to the natural fit-to-screen size (1). Zooming
+// out below fit matches Sketchbook/Procreate, and is needed to see the
+// whole canvas once it's rotated (at 90° it needs ~0.56x to fit).
+// Capped at 8x for detail work.
+export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 8;
 
 // How long a touch can sit alone before it's committed to being a

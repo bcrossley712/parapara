@@ -276,7 +276,7 @@ Each is here because breaking it caused (or would cause) a real bug.
 **Notable constants:** `MAX_BRUSH_SIZE` (60) and `DEFAULT_COLOR` are
 exported from `canvas.js` as the single source of truth. Autosave
 debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
-`gestures.js`: 150 ms / 8 px window; zoom 1–8×; double-tap gap
+`gestures.js`: 150 ms / 8 px window; zoom 0.25–8× (fit = 1×); double-tap gap
 350 ms; third finger joins within 200 ms; three-finger tap ≤ 350 ms /
 20 px; swipe ≥ 60 px, mostly horizontal. Undo caps in `history.js`.
 

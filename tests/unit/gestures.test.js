@@ -12,6 +12,7 @@ import {
   classifyThreeFinger,
   isDoubleTap,
   centroid,
+  clampScale,
   DOUBLE_TAP_MAX_GAP_MS,
 } from '../../js/canvas/gestures.js';
 import { rectAroundPoint, unionRect, clampRect } from '../../js/canvas/region.js';
@@ -62,4 +63,10 @@ test('clampRect trims to the canvas and returns null when outside', () => {
   assert.deepEqual(clampRect({ x: 95, y: 90, w: 10, h: 20 }, 100, 100), { x: 95, y: 90, w: 5, h: 10 });
   assert.equal(clampRect({ x: 120, y: 0, w: 10, h: 10 }, 100, 100), null);
   assert.equal(clampRect(null, 100, 100), null);
+});
+
+test('zoom can go below fit-to-screen (down to 0.25x) and up to 8x', () => {
+  assert.equal(clampScale(0.5), 0.5);
+  assert.equal(clampScale(0.1), 0.25);
+  assert.equal(clampScale(20), 8);
 });
