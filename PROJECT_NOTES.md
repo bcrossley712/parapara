@@ -89,16 +89,32 @@ icon, manifest `name`/`short_name`, and repo copy.
   one frame, one layer; autosaves and survives relaunch. Also
   remembered tool settings, and the gear menu (version, Check for
   updates, dev tools).
-- **Step 2b (undo/redo): built, awaiting iPad check.** Undo/redo
-  buttons in a new dark top bar; Sketchbook gestures (three-finger tap
-  / swipe, two-finger double-tap reset); Clear and fill are undoable;
-  fill is now a gesture candidate. She mostly uses the buttons, not
-  gestures.
+- **Step 2b (undo/redo): done and confirmed on the iPad.** Undo/redo
+  buttons in a dark top bar; Sketchbook gestures (three-finger tap /
+  swipe, two-finger double-tap reset), with iPadOS's own undo kept out
+  of the way; Clear and fill undoable; fill is a gesture candidate;
+  zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
 - **Next: 2c** — layers panel (add/delete/reorder/visibility/opacity/
   lock, per-frame cap) **plus the bare-bones frame strip** (add frame,
-  tap to switch), so multi-frame saving and cross-frame undo (undo
-  jumps to the entry's frame) get tested there. Then 2d project gallery
-  (list/create/open/delete, custom confirm).
+  tap to switch), so multi-frame saving and cross-frame undo get tested
+  there. Then 2d project gallery (list/create/open/delete, custom
+  confirm).
+- **2c scoping — settle before building:**
+  - Layer cap number, and where the layers panel and frame strip sit
+    (wireframe: strip below the canvas, under the transport).
+  - **Coupled standard features to flag:** duplicate layer, merge
+    down, rename, layer thumbnails — standard in Sketchbook/Procreate,
+    not in the v1 list. Decide in or deferred, deliberately.
+  - **Remembered across launches:** active layer per frame
+    (`activeLayerId` already in the schema) and which frame was open.
+  - **Wiring already prepared:** history entries carry `frameId` /
+    `layerId` and a `type` (add layer-structure types next to
+    `'pixels'`); `main.js` `swapEntry` must switch to the entry's frame
+    first and write to the entry's layer, which may not be active; the
+    committed copy resyncs on any layer or frame switch.
+  - **Memory:** each layer is its own ~8 MB surface; the cap protects
+    the iPad. Consider whether non-current frames keep surfaces or
+    reload from storage.
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -112,9 +128,6 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Brush variety** (sizes, chisel tips, edge blending) — after step 2.
 - **Color picker has no presets/recents, eyedropper or opacity** — on
   purpose; revisit if she asks.
-- **Gestures to check:** what *she* uses to undo (Sketchbook allows
-  remapping), and that iPadOS's own three-finger undo doesn't fire on
-  the canvas.
 - **Export format** (container/codec) — decide at step 6.
 - **How-to / tutorials** reachable from the settings (gear) menu —
   later, once there's enough to explain (gestures, layers, frames).

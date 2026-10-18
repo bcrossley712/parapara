@@ -29,6 +29,12 @@ Sections: [Process lessons](#process-lessons) ·
   the drawing but not tool, color or sizes; she'd have re-picked her
   color every launch. Sketchbook and Procreate both remember these. It
   was caught on the device, not at scoping.
+- **Defaults are conventions too.** Step 1 capped zoom-out at
+  fit-to-screen (`MIN_SCALE = 1`) without flagging it; her apps zoom
+  out further, and once rotation existed a rotated canvas couldn't be
+  seen whole. Found on the device in 2b. Limits and thresholds picked
+  as "reasonable defaults" need the same check against her apps as
+  features do.
 - **Convention catches that worked:** per-tool brush size memory (vs.
   one shared size) and undoable layer operations were both caught by
   checking against her apps before building.
