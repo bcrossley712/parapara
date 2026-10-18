@@ -9,6 +9,7 @@
 // home-screen apps around an update.
 
 import { test, expect } from '@playwright/test';
+import { setVisibility } from './helpers.js';
 
 const INITIAL_VERSION = '0123456789abcdef0123456789abcdef01234567-20261018131500';
 const NEW_VERSION = 'fedcba9876543210fedcba9876543210fedcba98-20261019090000';
@@ -124,10 +125,7 @@ test('returning to the foreground checks for updates and shows the toast', async
   await setServerState(page, { version: NEW_VERSION });
 
   // Simulate leaving and coming back to the app.
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
+  await setVisibility(page, 'visible');
 
   await expect(page.locator('#pp-update-toast')).toBeVisible({ timeout: 10000 });
 });
@@ -161,10 +159,7 @@ test('an update that is mid-download when the app opens still shows the toast', 
 test('the toast Refresh button applies the update', async ({ page }) => {
   await openInstalledApp(page);
   await setServerState(page, { version: NEW_VERSION });
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
+  await setVisibility(page, 'visible');
   const refresh = page.locator('#pp-update-toast').getByRole('button', { name: 'Refresh' });
   await refresh.waitFor({ timeout: 10000 });
 
@@ -188,9 +183,8 @@ test('a stroke made just before an update is not lost', async ({ page }) => {
     page.getByRole('button', { name: 'Check for updates' }).click(),
   ]);
   await page.locator('.pp-canvas').waitFor();
-  await page.waitForTimeout(300);
 
-  expect(await paintedPixels(page)).toBe(painted);
+  await expect.poll(() => paintedPixels(page)).toBe(painted);
 });
 
 test('Fresh reload re-downloads the app but keeps the drawing and other apps\' caches', async ({ page }) => {
@@ -208,9 +202,9 @@ test('Fresh reload re-downloads the app but keeps the drawing and other apps\' c
     page.getByRole('button', { name: 'Fresh reload' }).click(),
   ]);
   await page.locator('.pp-canvas').waitFor();
-  await page.waitForTimeout(300);
 
-  expect(await paintedPixels(page)).toBe(painted); // drawing kept (and the stroke was flushed first)
+  // Drawing kept (and the stroke was flushed first).
+  await expect.poll(() => paintedPixels(page)).toBe(painted);
 
   const keys = await page.evaluate(() => caches.keys());
   expect(keys).toContain('some-other-app');

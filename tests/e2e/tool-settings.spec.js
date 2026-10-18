@@ -4,19 +4,7 @@
 // Run: npm run test:e2e
 
 import { test, expect } from '@playwright/test';
-
-async function openApp(page) {
-  await page.goto('/index.html');
-  await page.locator('.pp-canvas').waitFor();
-}
-
-async function reloadApp(page) {
-  await page.reload();
-  await page.locator('.pp-canvas').waitFor();
-}
-
-// Waits out the settings save debounce (300 ms) plus the write.
-const SETTINGS_SETTLE_MS = 700;
+import { openApp, reloadApp, setVisibility, waitForToolSettings } from './helpers.js';
 
 const toolButton = (page, name) => page.getByRole('button', { name, exact: true });
 const sizeSlider = (page) => page.locator('.pp-brush-size input[type="range"]');
@@ -56,7 +44,11 @@ test('tool, color and per-tool sizes survive a reload', async ({ page }) => {
   await toolButton(page, 'Smudge').click(); // last tool picked
   await setSize(page, 9);                  // smudge size
 
-  await page.waitForTimeout(SETTINGS_SETTLE_MS);
+  await waitForToolSettings(page, {
+    tool: 'smudge',
+    color: '#ff8800',
+    brushSizes: { draw: 20, erase: 45, smudge: 9 },
+  });
   await reloadApp(page);
 
   await expect(toolButton(page, 'Smudge')).toHaveClass(/is-active/);
@@ -73,7 +65,7 @@ test('tool, color and per-tool sizes survive a reload', async ({ page }) => {
 test('Fill as the last tool reopens with the size slider disabled', async ({ page }) => {
   await openApp(page);
   await toolButton(page, 'Fill').click();
-  await page.waitForTimeout(SETTINGS_SETTLE_MS);
+  await waitForToolSettings(page, { tool: 'fill' });
   await reloadApp(page);
 
   await expect(toolButton(page, 'Fill')).toHaveClass(/is-active/);
@@ -83,7 +75,7 @@ test('Fill as the last tool reopens with the size slider disabled', async ({ pag
 test('the remembered color is what actually gets drawn', async ({ page }) => {
   await openApp(page);
   await setColorViaHex(page, '00aa55');
-  await page.waitForTimeout(SETTINGS_SETTLE_MS);
+  await waitForToolSettings(page, { color: '#00aa55' });
   await reloadApp(page);
 
   const box = await page.locator('.pp-canvas').boundingBox();
@@ -104,11 +96,10 @@ test('the remembered color is what actually gets drawn', async ({ page }) => {
 test('hiding the app saves settings immediately', async ({ page }) => {
   await openApp(page);
   await toolButton(page, 'Erase').click();
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  await page.waitForTimeout(150); // under the 300 ms debounce
+  await setVisibility(page, 'hidden');
+  // Must land well inside the 300 ms debounce, or it was the debounce
+  // that saved it, not the hide.
+  await waitForToolSettings(page, { tool: 'erase' }, { timeout: 200 });
   await reloadApp(page);
   await expect(toolButton(page, 'Erase')).toHaveClass(/is-active/);
 });

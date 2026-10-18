@@ -42,9 +42,8 @@ icons/                  app icon set (manifest + apple-touch-icon)
 
 ## Status
 
-Early scaffolding — placeholder files only, no drawing engine yet.
-See PROJECT_NOTES.md "Current state" and "What's realistically next"
-for the up-to-date build order.
+In active development. See PROJECT_NOTES.md "Current state" for
+what's built and what's next.
 
 ## Local development
 

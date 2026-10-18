@@ -21,24 +21,23 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Playwright's official image: Node, headless Chromium and its system
+    # libraries come preinstalled, instead of downloading and apt-
+    # installing them on every push (most of the fixed setup time).
+    # The tag MUST match the exact @playwright/test version pinned in
+    # package.json — bump both together. A mismatch fails the e2e step
+    # with "Executable doesn't exist".
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.0-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
 
       - name: Install test tools
         run: npm ci
 
       - name: Unit tests
         run: npm run test:unit
-
-      - name: Install headless Chromium
-        run: npx playwright install --with-deps chromium
 
       - name: End-to-end tests
         run: npm run test:e2e
@@ -82,6 +81,7 @@ jobs:
             --exclude='./package-lock.json' \
             --exclude='./playwright.config.js' \
             --exclude='./PROJECT_NOTES.md' \
+            --exclude='./docs' \
             --exclude='./README.md' \
             . | tar -xf - -C _site
           echo "Published files:"

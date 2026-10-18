@@ -1,11 +1,11 @@
 // js/storage/storage.js
 //
 // Owns: the IndexedDB wrapper and the project/frame schema (source of
-// truth — see PROJECT_NOTES.md "Draft frame/project schema"). Later:
+// truth — see PROJECT_NOTES.md "Schema"). Later:
 // storage-used estimation for the quota warning.
 //
 // Undo/redo is NOT here and is never persisted — it's one project-wide
-// in-memory history (see PROJECT_NOTES.md, undo/redo decision). It
+// in-memory history (see PROJECT_NOTES.md "Architecture"). It
 // will live in its own file in this folder when step 2b builds it.
 //
 // Extend the schema additively (new optional fields) rather than
@@ -59,7 +59,7 @@ export function createLayer(name = DEFAULT_LAYER_NAME) {
 
 // New frames copy the previous frame's layer structure (names, order,
 // visibility, opacity, lock) with fresh ids and blank bitmaps — see
-// PROJECT_NOTES.md, layers decision. With no previous frame, one blank
+// PROJECT_NOTES.md "Architecture". With no previous frame, one blank
 // default layer.
 export function createFrame(projectId, previousFrame = null) {
   const layers = previousFrame

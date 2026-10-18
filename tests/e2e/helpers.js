@@ -1,0 +1,77 @@
+// Shared helpers for the e2e specs.
+//
+// Rule (see PROJECT_NOTES.md "Testing"): don't sleep a fixed time
+// waiting for something to happen — wait for the thing itself, with
+// expect.poll / waitFor. Fixed sleeps pad every run and compound as
+// tests are added. The only acceptable fixed wait is proving something
+// *doesn't* happen (there's nothing to poll for).
+
+import { expect } from '@playwright/test';
+
+export async function openApp(page) {
+  await page.goto('/index.html');
+  await page.locator('.pp-canvas').waitFor();
+}
+
+export async function reloadApp(page) {
+  await page.reload();
+  await page.locator('.pp-canvas').waitFor();
+}
+
+// Simulates the app going to the background / coming back.
+export async function setVisibility(page, state) {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+// Reads one record from the app's IndexedDB, straight from the page.
+function readDb(page, storeName, key) {
+  return page.evaluate(([store, k]) => new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(store)) { db.close(); resolve(null); return; }
+      const tx = db.transaction(store);
+      const r = k === undefined ? tx.objectStore(store).getAll() : tx.objectStore(store).get(k);
+      r.onsuccess = () => { db.close(); resolve(r.result ?? null); };
+      r.onerror = () => { db.close(); reject(r.error); };
+    };
+  }), [storeName, key]);
+}
+
+// A fingerprint of the saved drawing (total PNG bytes across saved
+// layer bitmaps), or null if nothing is saved yet. Changes whenever a
+// new save lands.
+export async function savedDrawingBytes(page) {
+  const records = await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('blobs')) { db.close(); resolve([]); return; }
+      const r = db.transaction('blobs').objectStore('blobs').getAll();
+      r.onsuccess = () => { db.close(); resolve(r.result.map((rec) => rec.buffer.byteLength)); };
+      r.onerror = () => { db.close(); reject(r.error); };
+    };
+  }));
+  return records.length ? records.reduce((a, b) => a + b, 0) : null;
+}
+
+// Waits until the saved drawing differs from `before` (a previous
+// savedDrawingBytes value) — i.e. a new autosave has landed.
+export async function waitForDrawingSave(page, before, options = {}) {
+  await expect.poll(() => savedDrawingBytes(page), options).not.toBe(before);
+}
+
+export function savedToolSettings(page) {
+  return readDb(page, 'meta', 'toolSettings').then((r) => r?.value ?? null);
+}
+
+// Waits until the saved tool settings include `expected` (a partial
+// object, e.g. { tool: 'smudge' }).
+export async function waitForToolSettings(page, expected, options = {}) {
+  await expect.poll(() => savedToolSettings(page), options).toMatchObject(expected);
+}

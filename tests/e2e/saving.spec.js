@@ -9,6 +9,7 @@
 // the background save finishes before iPadOS suspends the app.
 
 import { test, expect } from '@playwright/test';
+import { openApp, reloadApp, setVisibility, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
 
 // Counts painted (non-transparent) canvas pixels in a box around where
 // drawStroke() draws. The canvas is transparent where nothing is
@@ -39,20 +40,6 @@ async function drawStroke(page) {
   await page.mouse.up();
 }
 
-async function openApp(page) {
-  await page.goto('/index.html');
-  await page.locator('.pp-canvas').waitFor();
-}
-
-async function reloadApp(page) {
-  await page.reload();
-  await page.locator('.pp-canvas').waitFor();
-  await page.waitForTimeout(300); // let the saved image paint
-}
-
-// Waits out the autosave debounce (500 ms) plus PNG encode and write.
-const AUTOSAVE_SETTLE_MS = 1200;
-
 test('a drawing survives a reload', async ({ page }) => {
   await openApp(page);
   expect(await paintedPixels(page)).toBe(0);
@@ -61,12 +48,12 @@ test('a drawing survives a reload', async ({ page }) => {
   const painted = await paintedPixels(page);
   expect(painted).toBeGreaterThan(500);
 
-  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await waitForDrawingSave(page, null);
   await reloadApp(page);
 
   // PNG round-trip is lossless; allow a sliver for edge resampling.
-  const after = await paintedPixels(page);
-  expect(Math.abs(after - painted)).toBeLessThan(painted * 0.02);
+  await expect.poll(async () => Math.abs((await paintedPixels(page)) - painted))
+    .toBeLessThan(painted * 0.02);
 });
 
 test('hiding the app saves immediately, without waiting for the debounce', async ({ page }) => {
@@ -74,28 +61,28 @@ test('hiding the app saves immediately, without waiting for the debounce', async
   await drawStroke(page);
   const painted = await paintedPixels(page);
 
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  await page.waitForTimeout(400); // under the 500 ms debounce
+  await setVisibility(page, 'hidden');
+  // Must land well inside the 500 ms debounce, or it was the debounce
+  // that saved it, not the hide.
+  await waitForDrawingSave(page, null, { timeout: 300 });
   await reloadApp(page);
 
-  expect(await paintedPixels(page)).toBe(painted);
+  await expect.poll(() => paintedPixels(page)).toBe(painted);
 });
 
 test('Clear is saved like any other edit', async ({ page }) => {
   await openApp(page);
   await drawStroke(page);
-  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await waitForDrawingSave(page, null);
+  const withStroke = await savedDrawingBytes(page);
 
   // Clear lives in the gear menu (moved off the rail — no undo yet).
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('button', { name: 'Clear drawing' }).click();
-  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await waitForDrawingSave(page, withStroke);
   await reloadApp(page);
 
-  expect(await paintedPixels(page)).toBe(0);
+  await expect.poll(() => paintedPixels(page)).toBe(0);
 });
 
 test('reloading reuses one project instead of creating new ones', async ({ page }) => {
@@ -131,6 +118,8 @@ test('first launch does not reload the page when the service worker takes contro
   await openApp(page);
   // Give the service worker time to install, activate and claim.
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 5000 });
+  // The one acceptable fixed wait: proving a reload *doesn't* happen
+  // (there's nothing to poll for).
   await page.waitForTimeout(500);
   expect(loads).toBe(1);
 });
@@ -142,7 +131,7 @@ test('no errors in the console during normal use', async ({ page }) => {
 
   await openApp(page);
   await drawStroke(page);
-  await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
+  await waitForDrawingSave(page, null);
   await reloadApp(page);
 
   expect(errors).toEqual([]);
