@@ -17,6 +17,7 @@ import {
   saveToolSettings,
 } from './storage/storage.js';
 import { createAutosaver } from './storage/autosave.js';
+import { createHistory } from './storage/history.js';
 import { initUpdater, formatVersion } from './updater.js';
 
 // Save functions to run before any reload the app causes itself
@@ -63,10 +64,12 @@ async function startEditor() {
   }
 
   // Created below once we know storage works; until then (and if it
-  // doesn't), setting changes simply aren't saved.
+  // doesn't), changes simply aren't saved. Undo works either way — it's
+  // in memory only.
   let settingsSaver = null;
+  let autosaver = null;
 
-  const canvasApi = initUI(document.getElementById('app'), {
+  const ui = initUI(document.getElementById('app'), {
     settings: savedSettings,
     onSettingsChange: () => settingsSaver?.schedule(),
     appActions: {
@@ -75,19 +78,63 @@ async function startEditor() {
       applyUpdate: () => updater.applyUpdate(),
       freshReload: () => updater.freshReload(),
     },
+    onUndo: () => undo(),
+    onRedo: () => redo(),
   });
+  const canvasApi = ui.canvas;
 
   if (savedImage) {
     canvasApi.setImage(savedImage);
     savedImage.close?.();
   }
 
+  // --- undo/redo (step 2b) ---
+  //
+  // One project-wide history, never saved. Entries are tagged with the
+  // frame and layer they changed. Only one frame and one layer exist
+  // until 2c; when they do, swapEntry must first switch to
+  // entry.frameId (undo jumps to that frame) and write to
+  // entry.layerId's surface — which may not be the active layer.
+  const history = createHistory({
+    onChange: () => ui.setHistoryState(history.canUndo, history.canRedo),
+  });
+
+  function swapEntry(entry) {
+    const patch = canvasApi.swapRegion(entry.rect, entry.patch);
+    return { ...entry, patch, bytes: patch.data.byteLength };
+  }
+
+  // An undo/redo changes the saved drawing like any edit.
+  function undo() {
+    if (canvasApi.isBusy()) return;
+    if (history.undo(swapEntry)) autosaver?.schedule();
+  }
+
+  function redo() {
+    if (canvasApi.isBusy()) return;
+    if (history.redo(swapEntry)) autosaver?.schedule();
+  }
+
+  canvasApi.onChange(({ rect, before }) => {
+    history.push({
+      type: 'pixels',
+      frameId: session?.frame.id ?? null,
+      layerId: session?.layer.id ?? null,
+      rect,
+      patch: before,
+      bytes: before.data.byteLength,
+    });
+    autosaver?.schedule();
+  });
+
+  canvasApi.onGesture((name) => (name === 'undo' ? undo() : redo()));
+
   if (!session) {
     showNotice("Saving isn't working right now, so drawings won't be kept.");
     return;
   }
 
-  const autosaver = createAutosaver({
+  autosaver = createAutosaver({
     save: async () => {
       const blob = await canvasApi.exportPNG();
       await saveLayerBitmap(session.project.id, session.layer.bitmapRef, blob);
@@ -97,8 +144,6 @@ async function startEditor() {
       showNotice("Your drawing couldn't be saved. The iPad may be out of space.");
     },
   });
-
-  canvasApi.onChange(() => autosaver.schedule());
 
   // Tool, color and brush sizes — app-wide, remembered across launches
   // (see storage.js). Same save-timing rules as the drawing. A failure

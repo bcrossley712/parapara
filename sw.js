@@ -27,8 +27,10 @@ const APP_SHELL = [
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
   './js/canvas/gestures.js',
+  './js/canvas/region.js',
   './js/storage/storage.js',
   './js/storage/autosave.js',
+  './js/storage/history.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

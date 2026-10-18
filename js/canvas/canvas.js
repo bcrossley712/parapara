@@ -13,6 +13,15 @@
 // (see the API at the bottom). Real per-layer surfaces arrive with the
 // layers panel (step 2c).
 //
+// Undo capture (step 2b): an offscreen "committed copy" holds the
+// active layer as of the last committed edit. While a stroke paints,
+// a dirty rect grows around every stamp; when it commits, the "before"
+// pixels for just that rect are read from the copy and handed to
+// onChange listeners, then the copy is synced for that rect. One copy
+// only — it follows the active layer, never one per layer. The same
+// copy is what reverts an uncommitted mark when a touch turns out to
+// be a gesture (draw, erase and fill alike).
+//
 // Talks to other modules only through the shared frame/project data
 // shapes (see PROJECT_NOTES.md schema) once those exist — no reaching
 // into timeline/storage internals directly.
@@ -25,10 +34,16 @@ import {
   shortestAngleDelta,
   screenToNaturalPoint,
   isQuickTap,
+  isDoubleTap,
+  classifyThreeFinger,
+  centroid,
   computeGestureTransform,
   GESTURE_WINDOW_MS,
   GESTURE_MOVEMENT_THRESHOLD_PX,
+  THREE_FINGER_JOIN_MS,
+  THREE_FINGER_JOIN_MAX_MOVEMENT_PX,
 } from './gestures.js';
+import { rectAroundPoint, unionRect, clampRect } from './region.js';
 
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
@@ -145,6 +160,55 @@ export function initCanvas(container, options = {}) {
   scratchCanvas.height = MAX_BRUSH_SIZE;
   const scratchCtx = scratchCanvas.getContext('2d');
 
+  // The committed copy (see top of file). Read with getImageData only
+  // when a stroke commits, so — like the main canvas — no
+  // willReadFrequently hint.
+  const committedCanvas = document.createElement('canvas');
+  committedCanvas.width = width;
+  committedCanvas.height = height;
+  const committedCtx = committedCanvas.getContext('2d');
+
+  // Canvas-pixel box around everything painted since the last commit
+  // (unclamped; clamped at commit). null = nothing uncommitted.
+  let dirty = null;
+
+  function markDirty(rect) {
+    dirty = unionRect(dirty, rect);
+  }
+
+  // Copies `rect` of the main canvas into the committed copy.
+  function syncCommitted(rect) {
+    committedCtx.clearRect(rect.x, rect.y, rect.w, rect.h);
+    committedCtx.drawImage(canvas, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+  }
+
+  // Puts the committed pixels back over everything uncommitted — how a
+  // touch that became a gesture loses its first mark (or fill).
+  function revertUncommitted() {
+    const rect = clampRect(dirty, width, height);
+    dirty = null;
+    if (!rect) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.clearRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.drawImage(committedCanvas, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
+  }
+
+  // Commits whatever is dirty: reads the "before" patch from the copy,
+  // syncs the copy, and tells listeners. Nothing dirty (a smudge tap
+  // with no drag, a fill on an already-filled area) = no change at all,
+  // so no undo step and no save.
+  function commit() {
+    const rect = clampRect(dirty, width, height);
+    dirty = null;
+    if (!rect) return;
+    const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+    syncCommitted(rect);
+    notifyChange({ rect, before });
+  }
+
   let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
   let brush = roundBrush; // only tip today — see brush.js for the seam
   let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
@@ -254,21 +318,48 @@ export function initCanvas(container, options = {}) {
   // stays a "pending" gesture candidate for a short window. If a
   // second touch joins within that window while the first has barely
   // moved, both become a two-finger pan/zoom gesture instead — the
-  // first pointer's just-drawn mark is reverted from a saved pixel
-  // patch. If the window expires (or the first pointer moves too far)
-  // without a second touch, it was just a normal solo stroke and
-  // nothing further happens — the draw was never delayed waiting to
-  // find out.
+  // first pointer's just-drawn mark (or fill) is reverted from the
+  // committed copy. If the window expires (or the first pointer moves
+  // too far) without a second touch, it was just a normal solo stroke
+  // and nothing further happens — the draw was never delayed waiting
+  // to find out.
   //
   // pointerType 'pen' (and mouse, for desktop testing) bypasses all
   // of this and goes straight to drawing — real styli, and hopefully
   // eventually a real Apple Pencil, report reliably enough that no
-  // gesture candidacy is needed. Fill is also exempt: it commits its
-  // result immediately regardless of pointerType, since reverting an
-  // arbitrary flood-filled region isn't a cheap "restore a small
-  // patch" operation the way draw/erase's single dot is.
-  let pendingTouch = null; // { pointerId, startTime, startLocal, lastLocal, revertPatch }
-  let gesture = null;      // { pointerIds, points, startTime, startScale, startX, startY, startMidpoint, startDistance, totalMovement }
+  // gesture candidacy is needed.
+  let pendingTouch = null; // { pointerId, startTime, startLocal, lastLocal }
+  // Two-finger pan/zoom/rotate, or — once a third finger joins —
+  // a three-finger undo/redo gesture (gesture.threeFinger set).
+  let gesture = null;      // { pointerIds, points, startPoints, startTime, startScale, startX, startY, startMidpoint, startDistance, totalMovement, threeFinger }
+  let lastTwoFingerTapTime = null; // for the two-finger double-tap
+
+  // Undo/redo gesture listeners: called with 'undo' or 'redo'.
+  const gestureListeners = new Set();
+  function emitGesture(name) {
+    for (const listener of gestureListeners) listener(name);
+  }
+
+  function restoreGestureStartViewport(g) {
+    viewportScale = g.startScale;
+    viewportRotation = g.startRotation;
+    viewportX = g.startX;
+    viewportY = g.startY;
+    applyViewport();
+  }
+
+  // iPadOS has its own three-finger undo/redo (and its HUD). Pointer
+  // Events can't cancel a system gesture, so this is the one deliberate
+  // exception to "Pointer Events only": a non-passive touch listener
+  // that only calls preventDefault() while 3+ touches are down. All
+  // gesture *recognition* stays in the pointer handlers. Whether this
+  // actually blocks the system gesture is device-only; if three-finger
+  // tap/swipe stops registering on the iPad, suspect this listener first.
+  const blockSystemThreeFinger = (event) => {
+    if (event.touches.length >= 3) event.preventDefault();
+  };
+  container.addEventListener('touchstart', blockSystemThreeFinger, { passive: false });
+  container.addEventListener('touchmove', blockSystemThreeFinger, { passive: false });
 
   function toCanvasPoint(event) {
     const local = toLocalPoint(event);
@@ -300,6 +391,13 @@ export function initCanvas(container, options = {}) {
 
   // --- draw/erase: stamp the active brush along the smoothed path ---
 
+  // Every draw/erase stamp goes through here so the dirty rect can't
+  // miss one.
+  function stamp(point, size) {
+    brush.stamp(ctx, point, size);
+    markDirty(rectAroundPoint(point, size));
+  }
+
   function stampAlongLine(a, b) {
     const size = brushSizes[tool];
     const spacing = Math.max(1, size * brush.spacingRatio);
@@ -307,7 +405,7 @@ export function initCanvas(container, options = {}) {
     const steps = Math.max(1, Math.ceil(dist / spacing));
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      brush.stamp(ctx, { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, size);
+      stamp({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, size);
     }
   }
 
@@ -325,7 +423,7 @@ export function initCanvas(container, options = {}) {
       const oneMinusT = 1 - t;
       const x = oneMinusT * oneMinusT * start.x + 2 * oneMinusT * t * control.x + t * t * end.x;
       const y = oneMinusT * oneMinusT * start.y + 2 * oneMinusT * t * control.y + t * t * end.y;
-      brush.stamp(ctx, { x, y }, size);
+      stamp({ x, y }, size);
     }
   }
 
@@ -355,6 +453,7 @@ export function initCanvas(container, options = {}) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(scratchCanvas, 0, 0, size, size, to.x - half, to.y - half, size, size);
     ctx.restore();
+    markDirty(rectAroundPoint(to, size));
   }
 
   // Bug fix: smudge originally called smudgeStep once per pointer
@@ -424,8 +523,13 @@ export function initCanvas(container, options = {}) {
     const visited = new Uint8Array(width * height);
     visited[startY * width + startX] = 1;
 
+    // Bounds of the filled pixels — the undo patch only covers these.
+    let minX = startX, maxX = startX, minY = startY, maxY = startY;
+
     while (stack.length) {
       const [x, y] = stack.pop();
+      if (x < minX) minX = x; else if (x > maxX) maxX = x;
+      if (y < minY) minY = y; else if (y > maxY) maxY = y;
       const idx = (y * width + x) * 4;
       data[idx] = fillColor.r;
       data[idx + 1] = fillColor.g;
@@ -446,7 +550,11 @@ export function initCanvas(container, options = {}) {
       }
     }
 
-    ctx.putImageData(imageData, 0, 0);
+    // Write back only the filled box: same pixels, less to upload.
+    const w = maxX - minX + 1;
+    const h = maxY - minY + 1;
+    ctx.putImageData(imageData, 0, 0, minX, minY, w, h);
+    markDirty({ x: minX, y: minY, w, h });
   }
 
   // --- stroke lifecycle, shared by draw/erase/smudge ---
@@ -469,7 +577,7 @@ export function initCanvas(container, options = {}) {
 
     // Stamp once immediately so a tap with no movement still leaves a
     // mark instead of rendering nothing.
-    brush.stamp(ctx, point, brushSizes[tool]);
+    stamp(point, brushSizes[tool]);
   }
 
   function extendStroke(point) {
@@ -506,38 +614,54 @@ export function initCanvas(container, options = {}) {
     p1 = null;
     // Every committed edit ends here — draw/erase/smudge strokes, and
     // fills too (a fill's pointerup also routes through endStroke). A
-    // touch that turned into a two-finger gesture never reaches this,
-    // so a reverted dot doesn't count as a change.
-    notifyChange();
+    // touch that turned into a gesture never reaches this: its mark
+    // was already reverted, so it doesn't count as a change.
+    commit();
   }
 
-  // --- change notification (used by main.js to schedule autosave) ---
+  // --- change notification (main.js: undo history + autosave) ---
 
   const changeListeners = new Set();
 
-  function notifyChange() {
-    for (const listener of changeListeners) listener();
+  // change = { rect, before }: the committed rect and its pixels
+  // before the edit (ImageData).
+  function notifyChange(change) {
+    for (const listener of changeListeners) listener(change);
   }
 
-  // --- revert-patch helpers, used only for the touch/gesture disambiguation below ---
-
-  function capturePatchAt(point, size) {
-    const half = size / 2;
-    const x = Math.round(point.x - half);
-    const y = Math.round(point.y - half);
-    return { x, y, data: ctx.getImageData(x, y, size, size) };
+  function isBusy() {
+    return activePointerId !== null || pendingTouch !== null || gesture !== null;
   }
 
-  function restorePatch(patch) {
-    ctx.putImageData(patch.data, patch.x, patch.y);
+  function hasPaint(data) {
+    for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return true;
+    return false;
   }
 
   function onPointerDown(event) {
     if (event.pointerType === 'touch') {
-      // A third finger, or a second finger arriving after the window
-      // has already closed, is treated the same as the palm-rejection
-      // heuristic always has: ignored.
-      if (gesture) return;
+      if (gesture) {
+        // A third finger landing right after a two-finger gesture
+        // started turns it into a three-finger undo/redo gesture.
+        // Anything else extra (a fourth finger, a late third) is
+        // ignored, as the palm-rejection heuristic always has been.
+        const elapsed = event.timeStamp - gesture.startTime;
+        if (
+          !gesture.threeFinger
+          && elapsed <= THREE_FINGER_JOIN_MS
+          && gesture.totalMovement <= THREE_FINGER_JOIN_MAX_MOVEMENT_PX
+        ) {
+          const local = toLocalPoint(event);
+          canvas.setPointerCapture(event.pointerId);
+          gesture.pointerIds.push(event.pointerId);
+          gesture.points.set(event.pointerId, local);
+          gesture.startPoints.set(event.pointerId, local);
+          gesture.threeFinger = true;
+          // Whatever tiny pan/zoom the first two fingers caused is undone.
+          restoreGestureStartViewport(gesture);
+        }
+        return;
+      }
 
       if (pendingTouch && event.pointerId !== pendingTouch.pointerId) {
         const elapsed = event.timeStamp - pendingTouch.startTime;
@@ -545,8 +669,9 @@ export function initCanvas(container, options = {}) {
 
         if (elapsed <= GESTURE_WINDOW_MS && moved <= GESTURE_MOVEMENT_THRESHOLD_PX) {
           // Confirmed: this is a two-finger gesture, not a palm.
-          // Revert whatever the first finger had started drawing.
-          if (pendingTouch.revertPatch) restorePatch(pendingTouch.revertPatch);
+          // Revert whatever the first finger had started drawing (or
+          // filling) from the committed copy.
+          revertUncommitted();
           if (canvas.hasPointerCapture?.(pendingTouch.pointerId)) {
             canvas.releasePointerCapture(pendingTouch.pointerId);
           }
@@ -561,7 +686,13 @@ export function initCanvas(container, options = {}) {
               [pendingTouch.pointerId, firstLocal],
               [event.pointerId, secondLocal],
             ]),
+            startPoints: new Map([
+              [pendingTouch.pointerId, pendingTouch.startLocal],
+              [event.pointerId, secondLocal],
+            ]),
             startTime: event.timeStamp,
+            // The very first touch, for three-finger tap duration.
+            firstTouchTime: pendingTouch.startTime,
             startScale: viewportScale,
             startRotation: viewportRotation,
             startX: viewportX,
@@ -576,6 +707,7 @@ export function initCanvas(container, options = {}) {
             lastAngle: angleBetween(firstLocal, secondLocal),
             accumulatedRotation: 0,
             totalMovement: 0,
+            threeFinger: false,
           };
 
           pendingTouch = null;
@@ -602,22 +734,15 @@ export function initCanvas(container, options = {}) {
         startTime: event.timeStamp,
         startLocal: local,
         lastLocal: local,
-        revertPatch: null,
       };
 
       if (tool === 'fill') {
-        // Fill commits immediately regardless of pointerType — not a
-        // gesture candidate (see the comment above pendingTouch).
+        // Fills right away (no latency), but stays a gesture candidate
+        // like a stroke: a second finger in the window reverts it from
+        // the committed copy. It commits on pointerup.
         floodFill(point);
-        pendingTouch = null;
         return;
       }
-
-      if (tool === 'draw' || tool === 'erase') {
-        pendingTouch.revertPatch = capturePatchAt(point, brushSizes[tool]);
-      }
-      // Smudge draws nothing on pointerdown (see beginStroke) — there
-      // is nothing yet to revert, so no patch needed.
 
       beginStroke(point);
       return;
@@ -644,6 +769,10 @@ export function initCanvas(container, options = {}) {
       const prev = gesture.points.get(event.pointerId);
       gesture.totalMovement += distance(local, prev);
       gesture.points.set(event.pointerId, local);
+
+      // Three fingers: just track the points; it's classified on lift
+      // and never moves the view.
+      if (gesture.threeFinger) return;
 
       const [idA, idB] = gesture.pointerIds;
       const pA = gesture.points.get(idA);
@@ -718,15 +847,38 @@ export function initCanvas(container, options = {}) {
       // future move/up events fall through every branch below as a
       // no-op once gesture is cleared, since it was never tracked as
       // pendingTouch or activePointerId.
-      const gestureDuration = event.timeStamp - gesture.startTime;
-      const wasTap = isQuickTap(gestureDuration, gesture.totalMovement);
+      // The lifted finger's final position counts too.
+      if (event.type !== 'pointercancel') {
+        gesture.points.set(event.pointerId, toLocalPoint(event));
+      }
 
       for (const id of gesture.pointerIds) {
         if (canvas.hasPointerCapture?.(id)) canvas.releasePointerCapture(id);
       }
+      const ended = gesture;
       gesture = null;
 
-      if (wasTap) resetViewport();
+      // A cancelled gesture (system took over) does nothing.
+      if (event.type === 'pointercancel') return;
+
+      if (ended.threeFinger) {
+        handleThreeFingerEnd(ended, event.timeStamp);
+        return;
+      }
+
+      const wasTap = isQuickTap(event.timeStamp - ended.startTime, ended.totalMovement);
+      if (!wasTap) {
+        lastTwoFingerTapTime = null;
+        return;
+      }
+      // A tap shouldn't leave the view nudged by finger jitter.
+      restoreGestureStartViewport(ended);
+      if (isDoubleTap(lastTwoFingerTapTime, event.timeStamp)) {
+        lastTwoFingerTapTime = null;
+        resetViewport();
+      } else {
+        lastTwoFingerTapTime = event.timeStamp;
+      }
       return;
     }
 
@@ -741,6 +893,26 @@ export function initCanvas(container, options = {}) {
       canvas.releasePointerCapture(event.pointerId);
     }
     endStroke();
+  }
+
+  function handleThreeFingerEnd(ended, now) {
+    const starts = ended.pointerIds.map((id) => ended.startPoints.get(id));
+    const currents = ended.pointerIds.map((id) => ended.points.get(id));
+    const startC = centroid(starts);
+    const endC = centroid(currents);
+    let maxTravel = 0;
+    for (let i = 0; i < starts.length; i++) {
+      maxTravel = Math.max(maxTravel, distance(starts[i], currents[i]));
+    }
+    const kind = classifyThreeFinger({
+      durationMs: now - ended.firstTouchTime,
+      dx: endC.x - startC.x,
+      dy: endC.y - startC.y,
+      maxTravel,
+    });
+    lastTwoFingerTapTime = null;
+    if (kind === 'tap' || kind === 'swipe-left') emitGesture('undo');
+    else if (kind === 'swipe-right') emitGesture('redo');
   }
 
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -804,9 +976,40 @@ export function initCanvas(container, options = {}) {
       Object.assign(brushSizes, clean.brushSizes);
     },
 
+    // Undoable like any edit. Clearing an already-blank layer is a
+    // no-op, so it doesn't add an undo step that does nothing.
     clear() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      notifyChange();
+      if (isBusy()) return;
+      const before = committedCtx.getImageData(0, 0, width, height);
+      if (!hasPaint(before.data)) return;
+      ctx.clearRect(0, 0, width, height);
+      committedCtx.clearRect(0, 0, width, height);
+      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before });
+    },
+
+    // --- undo/redo seam (step 2b) ---
+
+    // True while a stroke, pending touch or gesture is in progress —
+    // main.js skips undo/redo then, so a button tapped with another
+    // finger can't swap pixels out from under a live stroke.
+    isBusy,
+
+    // Writes `patch` (ImageData) at rect and returns the pixels it
+    // replaced, keeping the committed copy in sync. Undo and redo are
+    // both this one call. Doesn't fire onChange — main.js schedules
+    // the save itself.
+    swapRegion(rect, patch) {
+      const replaced = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+      ctx.putImageData(patch, rect.x, rect.y);
+      committedCtx.putImageData(patch, rect.x, rect.y);
+      return replaced;
+    },
+
+    // Calls listener('undo' | 'redo') for the three-finger gestures.
+    // Returns an unsubscribe function.
+    onGesture(listener) {
+      gestureListeners.add(listener);
+      return () => gestureListeners.delete(listener);
     },
 
     // --- persistence seam (step 2a) ---
@@ -816,8 +1019,9 @@ export function initCanvas(container, options = {}) {
     // active layer ("Layer 1"); 2c replaces that with real per-layer
     // surfaces behind the same idea.
 
-    // Calls `listener()` after every committed edit (stroke end, fill,
-    // clear). Returns an unsubscribe function.
+    // Calls `listener({ rect, before })` after every committed edit
+    // (stroke end, fill, clear) — before is the rect's ImageData from
+    // before the edit. Returns an unsubscribe function.
     onChange(listener) {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
@@ -843,6 +1047,8 @@ export function initCanvas(container, options = {}) {
     setImage(image) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (image) ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      dirty = null;
+      syncCommitted({ x: 0, y: 0, w: width, h: height });
     },
   };
 }

@@ -1,6 +1,8 @@
 // js/canvas/gestures.js
 //
-// Pure math for the two-finger pan/zoom/rotate gesture. Deliberately
+// Pure math for the two-finger pan/zoom/rotate gesture, plus the
+// tap/swipe classifiers for the undo/redo and reset-view gestures.
+// Deliberately
 // no DOM or pointer event handling here — that dispatch logic
 // (deciding whether a touch is a stroke or a gesture candidate, and
 // the incremental rotation tracking below needs) lives in canvas.js.
@@ -19,10 +21,25 @@ export const GESTURE_WINDOW_MS = 150;
 export const GESTURE_MOVEMENT_THRESHOLD_PX = 8;
 
 // A confirmed two-finger gesture that was short and barely moved
-// counts as a "tap" — used to reset pan/zoom/rotation to fit, the
-// common two-finger-tap-to-reset convention.
+// counts as a "tap". Two of those close together (a two-finger
+// double-tap) reset pan/zoom/rotation — Sketchbook's mapping. A
+// single two-finger tap does nothing, so Procreate's two-finger-tap
+// undo habit can't misfire.
 const TAP_MAX_DURATION_MS = 300;
 const TAP_MAX_MOVEMENT_PX = 12;
+export const DOUBLE_TAP_MAX_GAP_MS = 350;
+
+// Three-finger gestures (Sketchbook: tap = undo, swipe left/right =
+// undo/redo). The third finger must join within THREE_FINGER_JOIN_MS
+// of the two-finger gesture starting. All thresholds are reasoned
+// defaults, not measured against Sketchbook or tuned on her stylus.
+export const THREE_FINGER_JOIN_MS = 200;
+// ...and the two-finger part may have moved (summed across both
+// fingers) at most this much by then.
+export const THREE_FINGER_JOIN_MAX_MOVEMENT_PX = 30;
+const THREE_TAP_MAX_DURATION_MS = 350;
+const THREE_TAP_MAX_TRAVEL_PX = 20;
+const SWIPE_MIN_DISTANCE_PX = 60;
 
 export function distance(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y);
@@ -58,6 +75,38 @@ export function clampScale(scale) {
 
 export function isQuickTap(durationMs, totalMovementPx) {
   return durationMs <= TAP_MAX_DURATION_MS && totalMovementPx <= TAP_MAX_MOVEMENT_PX;
+}
+
+// True if a two-finger tap at `nowMs` completes a double-tap, given
+// when the previous two-finger tap ended (null if none).
+export function isDoubleTap(previousTapMs, nowMs) {
+  return previousTapMs !== null && nowMs - previousTapMs <= DOUBLE_TAP_MAX_GAP_MS;
+}
+
+// Classifies a finished three-finger gesture.
+//   durationMs: first touch down → first finger up
+//   dx, dy:     how far the fingers' centroid moved (CSS px)
+//   maxTravel:  the farthest any single finger moved from its start
+// Returns 'tap' | 'swipe-left' | 'swipe-right' | null (ignored).
+// Swipes must be mostly horizontal (|dx| ≥ 2|dy|).
+export function classifyThreeFinger({ durationMs, dx, dy, maxTravel }) {
+  if (durationMs <= THREE_TAP_MAX_DURATION_MS && maxTravel <= THREE_TAP_MAX_TRAVEL_PX) {
+    return 'tap';
+  }
+  if (Math.abs(dx) >= SWIPE_MIN_DISTANCE_PX && Math.abs(dx) >= 2 * Math.abs(dy)) {
+    return dx < 0 ? 'swipe-left' : 'swipe-right';
+  }
+  return null;
+}
+
+export function centroid(points) {
+  let x = 0;
+  let y = 0;
+  for (const p of points) {
+    x += p.x;
+    y += p.y;
+  }
+  return { x: x / points.length, y: y / points.length };
 }
 
 function rotateVector(x, y, radians) {

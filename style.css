@@ -48,16 +48,63 @@ html, body {
      to vh units here without re-testing on the device. */
   position: fixed;
   inset: 0;
+  flex-direction: column;
+  /* Dark, so any inset area (and the status bar) has a dark backdrop. */
+  background: var(--pp-ink);
   /* iOS standalone PWAs paint under the status bar (index.html has
      viewport-fit=cover, which is what makes these env() vars resolve
      to nonzero values) — the padding keeps content out from under it.
      Bottom/left/right insets are for devices with a home-indicator
      bar or notch rather than the 9th-gen iPad's home button; they
      resolve to 0 there and are harmless. */
-  padding-top: env(safe-area-inset-top, 0px);
+  /* Top inset lives on .pp-top-bar, which paints under the status bar. */
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Top bar (js/ui/ui.js). Must stay dark: it sits under the iPad
+   status bar, whose text is white (black-translucent). */
+.pp-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: env(safe-area-inset-top, 0px) 12px 0 12px;
+  min-height: calc(52px + env(safe-area-inset-top, 0px));
+  background: var(--pp-ink);
+  border-bottom: 1px solid var(--pp-ink-light);
+}
+
+.pp-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  cursor: pointer;
+}
+
+.pp-icon-btn:active:not(:disabled) {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+.pp-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Rail + canvas area, below the top bar. min-height: 0 lets the
+   canvas area shrink instead of overflowing the shell. */
+.pp-app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .pp-tool-rail {

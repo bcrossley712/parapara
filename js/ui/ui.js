@@ -24,12 +24,34 @@ import { createSettingsPanel } from './settings-panel.js';
 // options.appActions: for the gear menu — { getVersionLabel,
 //   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
 //   Omitted actions report "unavailable" rather than breaking the UI.
+// options.onUndo / options.onRedo: the top-bar buttons.
+//
+// Returns { canvas, setHistoryState(canUndo, canRedo) }.
 export function initUI(container, options = {}) {
-  const { settings = null, onSettingsChange = () => {}, appActions = {} } = options;
+  const {
+    settings = null,
+    onSettingsChange = () => {},
+    appActions = {},
+    onUndo = () => {},
+    onRedo = () => {},
+  } = options;
   container.innerHTML = '';
 
   const shell = document.createElement('div');
   shell.className = 'pp-app-shell';
+
+  // Top bar: full width, and it extends up under the iPad status bar.
+  // Keep it dark — the status bar's text is white (black-translucent).
+  // Undo/redo for now; Share and the rest of the planned top bar land
+  // with their steps.
+  const topBar = document.createElement('div');
+  topBar.className = 'pp-top-bar';
+  const undoBtn = createIconButton('Undo', UNDO_ICON, onUndo);
+  const redoBtn = createIconButton('Redo', REDO_ICON, onRedo);
+  topBar.append(undoBtn, redoBtn);
+
+  const body = document.createElement('div');
+  body.className = 'pp-app-body';
 
   const rail = document.createElement('div');
   rail.className = 'pp-tool-rail';
@@ -37,9 +59,15 @@ export function initUI(container, options = {}) {
   const canvasArea = document.createElement('div');
   canvasArea.className = 'pp-canvas-area';
 
-  shell.appendChild(rail);
-  shell.appendChild(canvasArea);
+  body.append(rail, canvasArea);
+  shell.append(topBar, body);
   container.appendChild(shell);
+
+  function setHistoryState(canUndo, canRedo) {
+    undoBtn.disabled = !canUndo;
+    redoBtn.disabled = !canRedo;
+  }
+  setHistoryState(false, false);
 
   const canvasApi = initCanvas(canvasArea);
   canvasApi.applySettings(settings);
@@ -121,11 +149,8 @@ export function initUI(container, options = {}) {
   rail.appendChild(sizeControl);
 
   // Gear menu (settings-panel.js) at the bottom of the rail: version,
-  // check for updates, and dev tools. Clear lives in there now, not on
-  // the rail — it's saved like any edit and there's no undo until 2b,
-  // so one stray tap shouldn't be able to wipe her drawing. (No confirm
-  // dialog once undo exists either; undo is the safety net, as in
-  // other drawing apps.)
+  // check for updates, and dev tools (including Clear, which is
+  // undoable — undo is the safety net, no confirm dialog).
   const gearBtn = document.createElement('button');
   gearBtn.type = 'button';
   gearBtn.className = 'pp-tool-btn pp-tool-btn--secondary pp-gear-btn';
@@ -185,9 +210,19 @@ export function initUI(container, options = {}) {
     return btn;
   }
 
+  function createIconButton(label, icon, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pp-icon-btn';
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = icon;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
   setActiveTool(startSettings.tool);
 
-  return canvasApi;
+  return { canvas: canvasApi, setHistoryState };
 }
 
 // PWA update prompt — shown when a new service worker has installed
@@ -237,6 +272,18 @@ function createToast(id, message, buttonLabel) {
   toast.append(text, btn);
   return toast;
 }
+
+// Undo/redo arrows: a curved shaft and a head, mirrored for redo.
+const UNDO_ICON = `
+<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
+  <path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M10 2.5 4.5 7 10 11.5Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>`;
+const REDO_ICON = `
+<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false" style="transform: scaleX(-1)">
+  <path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M10 2.5 4.5 7 10 11.5Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>`;
 
 // Gear icon, drawn here rather than pulled from an icon set: four bars
 // crossed at 45° make the eight teeth, a disc makes the body, and the

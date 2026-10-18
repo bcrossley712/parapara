@@ -109,13 +109,15 @@ Sections: [Process lessons](#process-lessons) ·
   `pointerType: 'touch'` like a finger. A touch draws immediately (no
   latency) but stays a gesture candidate for `GESTURE_WINDOW_MS`
   (150 ms) while it moves under `GESTURE_MOVEMENT_THRESHOLD_PX` (8 px).
-  A second touch in that window reverts the first dot from a saved
-  pixel patch and both become a gesture. `pen`/mouse skip this, which
+  A second touch in that window reverts the first mark from the
+  committed copy (see Layers and undo) and both become a gesture. `pen`/mouse skip this, which
   is also why a real Pencil will slot in cleanly. Thresholds are
   reasoned defaults, not tuned on her stylus — retune there first if it
-  misfires. Fill is exempt from the revert (a flood fill isn't a cheap
-  patch to restore). Lifting either finger ends the gesture, and
-  drawing doesn't resume with the other finger — avoids a stray mark
+  misfires. Fill used to be exempt from the revert (a flood fill wasn't
+  a cheap patch to restore), which meant a pinch with Fill active
+  filled and never zoomed; since 2b the committed copy makes reverting
+  any uncommitted area cheap, so fill is a candidate too. Lifting
+  either finger ends the gesture, and drawing doesn't resume with the other finger — avoids a stray mark
   as a pinch ends.
 - **Sketchbook vs. Procreate mapping.** She uses Sketchbook most, and
   its defaults differ: Sketchbook three-finger tap = undo, three-finger
@@ -123,7 +125,20 @@ Sections: [Process lessons](#process-lessons) ·
   Procreate two-finger tap = undo, three-finger tap = redo. Two-finger
   single tap does nothing, so Procreate habits don't misfire. Source:
   [Sketchbook gesture guide](https://help.sketchbook.com/docs/gestures).
-  Sketchbook lets users remap, so confirm what *she* does.
+  Sketchbook lets users remap, so confirm what *she* does. (She mostly
+  uses the undo buttons, so the gestures are a nicety.)
+- **Three-finger recognition rides on the two-finger gesture:** the
+  third finger must join within 200 ms with little movement, which
+  undoes any tiny pan/zoom the first two caused. It's classified once,
+  on the first finger's lift — tap, or a mostly-horizontal swipe — and
+  never moves the view. Firing on lift (not mid-swipe) keeps one swipe
+  = one step.
+- **The touch-listener exception.** iPadOS has a system three-finger
+  undo/redo with its own HUD. Pointer Events can't cancel a system
+  gesture, so a non-passive touch listener calls `preventDefault()`
+  with 3+ touches down. Cancelling `touchstart` shouldn't suppress
+  pointer events in WebKit, but that's unverified on the device — if
+  three-finger gestures stop registering, remove this listener first.
 
 ## Layers and undo
 
@@ -155,6 +170,24 @@ Sections: [Process lessons](#process-lessons) ·
   drawing app keeps undo across a relaunch, and persisting snapshots
   would eat storage. (`frame.undoStack` was removed from the draft
   schema for this.)
+- **How a stroke's "before" patch is captured: a committed copy.**
+  Bounds aren't known until a stroke ends, and a full `getImageData`
+  at pointerdown would add latency right where drawing starts. Instead
+  an offscreen copy holds the layer as of the last commit; a dirty rect
+  grows around each stamp; at commit, the before patch is read from the
+  copy for just that rect, and only that rect is re-synced. Cost: one
+  layer of memory (~8 MB) and a small blit per stroke.
+- **One copy, of the active layer only.** A copy per layer would add
+  ~8 MB per layer for nothing — only the active layer is drawn on. In
+  2c a layer switch resyncs the copy; undoing an edit on another layer
+  writes to that layer directly and leaves the copy alone.
+- **One patch per entry, budget counts both stacks.** Undo swaps the
+  before patch in and keeps the after; redo reverses it. Same rect,
+  same bytes, so moving an entry between stacks never changes the
+  total, and redo memory is never "free". Trimming only happens on a
+  new edit, which clears redo first.
+- **Clear on a blank layer adds nothing**, so undo never does a step
+  with no visible effect.
 - **Layer cap per frame** for the same memory reason — Procreate caps
   layers by canvas size and device memory too.
 

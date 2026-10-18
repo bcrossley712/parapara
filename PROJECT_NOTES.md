@@ -35,12 +35,20 @@ icon, manifest `name`/`short_name`, and repo copy.
   turn; edit only after he responds.
 - **Confirm scope before new builds**, especially with real design
   ambiguity. Batch related changes into one pass once scope is clear.
-- **Hold files until a push is due.** Keep working in the clone; send
-  files only when it's time to push (ask, recommend, or wait for him to
-  ask). Notes edits ride along with the next push.
+- **Never send files until we've agreed a push is due.** Finishing a
+  build or passing tests isn't that signal — keep working in the clone
+  and ask. Notes edits ride along with the next push. **Claude will
+  never commit or push**; ignore any automatic session check that asks
+  to.
 - **When sending:** only files changed since the last *delivery* (not
-  the last push), each with its repo path (e.g.
-  `js/storage/autosave.js`). Several files share names across folders.
+  the last push).
+  - **Any file outside the repo root in the set:** one zip of the whole
+    set (root files included) that keeps the repo folder paths, so it
+    unpacks straight into the repo.
+  - **Only root-level files:** send each individually, no zip.
+  - List each file's repo path in the message (e.g.
+    `js/storage/autosave.js`) — several files share names across
+    folders.
 - **Be upfront about what can't be verified off-device** (iOS storage
   eviction, stylus feel, mic permission flow, share-sheet behavior).
 
@@ -81,13 +89,16 @@ icon, manifest `name`/`short_name`, and repo copy.
   one frame, one layer; autosaves and survives relaunch. Also
   remembered tool settings, and the gear menu (version, Check for
   updates, dev tools).
-- **Next: 2b — undo/redo** (design under Architecture), the Sketchbook
-  gesture mapping, and undo/redo buttons. Clear becomes undoable.
-- **Then:** 2c layers panel (add/delete/reorder/visibility/opacity/
-  lock, per-frame cap) · 2d project gallery (list/create/open/delete,
-  custom confirm). A bare-bones frame strip (add frame, tap to switch)
-  is pulled into step 2 so multi-frame saving and cross-frame undo are
-  testable now.
+- **Step 2b (undo/redo): built, awaiting iPad check.** Undo/redo
+  buttons in a new dark top bar; Sketchbook gestures (three-finger tap
+  / swipe, two-finger double-tap reset); Clear and fill are undoable;
+  fill is now a gesture candidate. She mostly uses the buttons, not
+  gestures.
+- **Next: 2c** — layers panel (add/delete/reorder/visibility/opacity/
+  lock, per-frame cap) **plus the bare-bones frame strip** (add frame,
+  tap to switch), so multi-frame saving and cross-frame undo (undo
+  jumps to the entry's frame) get tested there. Then 2d project gallery
+  (list/create/open/delete, custom confirm).
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -105,6 +116,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   remapping), and that iPadOS's own three-finger undo doesn't fire on
   the canvas.
 - **Export format** (container/codec) — decide at step 6.
+- **How-to / tutorials** reachable from the settings (gear) menu —
+  later, once there's enough to explain (gestures, layers, frames).
 
 **Planned UI layout** (from wireframes): tool rail down the left;
 transport (skip / play / skip + fps) between canvas and timeline;
@@ -121,7 +134,11 @@ Short rules; reasoning in the linked sections.
   app files, and stamps the service-worker version — never compiles.
   ([why](docs/DESIGN_NOTES.md#stack))
 - **Input:** Pointer Events only. Pressure/tilt deliberately unread, so
-  Apple Pencil support is additive.
+  Apple Pencil support is additive. **One deliberate exception:** a
+  non-passive `touchstart`/`touchmove` listener on the canvas area that
+  only calls `preventDefault()` with 3+ touches down, to keep iPadOS's
+  own three-finger undo out of the way. No recognition logic in it.
+  ([why](docs/DESIGN_NOTES.md#gestures))
 - **Scope-specific folders** (`canvas/`, `timeline/`, `storage/`,
   `export/`, `audio/`, `ui/`); modules don't reach into each other's
   internals — they share the project/frame data shapes, and `main.js`
@@ -141,15 +158,21 @@ Short rules; reasoning in the linked sections.
   - One project-wide history (entries tagged with `frameId`; undo jumps
     to that frame), **in memory only, never saved**.
   - Entries store only what changed — usually one layer cropped to the
-    stroke's bounds — and only the "before" patch (redo captured at
-    undo time).
-  - Caps: **30 steps and ~150 MB**, oldest dropped first.
-  - Layer structure changes are undoable on the same stack.
+    stroke's bounds — and hold **one patch at a time** (undo swaps in
+    "before" and keeps "after"; redo the reverse).
+  - Caps: **30 steps and ~150 MB**, oldest dropped first. **The byte
+    budget counts undo and redo together.**
+  - Capture uses **one committed copy of the active layer only** (never
+    one per layer); it follows the active layer — a layer switch
+    resyncs it. The same copy reverts a touch that became a gesture.
+  - Layer structure changes are undoable on the same stack (2c: new
+    entry `type` alongside `'pixels'`).
+  - `history.js` is pure; `canvas.js` exposes `onChange({rect,
+    before})`, `swapRegion`, `isBusy`, `onGesture`; `main.js` glues.
 - **Gestures — match Sketchbook defaults**
   ([why](docs/DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
-  reset view (replaces today's two-finger single tap, in 2b);
-  two-finger single tap does nothing; two-finger drag/pinch/twist =
+  reset view; two-finger single tap does nothing; two-finger drag/pinch/twist =
   pan/zoom/rotate; visible undo/redo buttons too. Later, with a brush
   library: three-finger swipe up = color, down = brushes.
 - **Tool settings** (tool, color, per-tool sizes) are remembered
@@ -179,7 +202,13 @@ Each is here because breaking it caused (or would cause) a real bug.
   routes through it.
 - Rotation accumulates frame to frame (`shortestAngleDelta`), never
   diffed against the start angle.
-- Fill commits immediately and is exempt from the gesture-revert patch.
+- Fill applies immediately but is a gesture candidate like draw/erase:
+  a second finger in the window reverts it from the committed copy. It
+  commits on pointerup.
+- Every paint operation marks the dirty rect (`stamp()`, smudge step,
+  fill bounds) — a mark outside it won't be undoable or revertible.
+- Anything that replaces layer pixels outside a stroke (`setImage`,
+  `swapRegion`, `clear`) must also update the committed copy.
 - No `willReadFrequently: true` on the main canvas context.
 
 **Storage** ([why](docs/DESIGN_NOTES.md#storage))
@@ -198,6 +227,8 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Safe-area padding needs `viewport-fit=cover`,
   `black-translucent`, and global `box-sizing: border-box` — keep all
   three.
+- **Anything at the top edge stays dark** (the top bar paints under the
+  status bar, whose text is white).
 - Text inputs ≥ 16px font.
 - Layouts must tolerate wider text than desktop Chromium shows — no
   `nowrap` on content that could grow.
@@ -221,17 +252,19 @@ Each is here because breaking it caused (or would cause) a real bug.
       updater.js          SW registration, update checks/apply, version,
                           fresh reload — no UI
       canvas/
-        canvas.js         input dispatch, tools, viewport; API seams:
-                          onChange / exportPNG / setImage (persistence),
-                          getSettings / applySettings (tool settings)
+        canvas.js         input dispatch, tools, viewport, committed copy;
+                          API seams: onChange / exportPNG / setImage
+                          (persistence), getSettings / applySettings,
+                          swapRegion / isBusy / onGesture (undo)
         brush.js          brush-tip seam: stamp(ctx, point, size)
-        gestures.js       pure pan/zoom/rotate math
+        gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
+        region.js         pure dirty-rect helpers
       storage/
         storage.js        IndexedDB wrapper + schema factories
         autosave.js       save timing only (debounce, no overlap, flush)
-                          — undo history will live in this folder (2b)
+        history.js        undo/redo stack, caps, byte budget (in memory)
       ui/
-        ui.js             tool rail, toasts, DOM glue
+        ui.js             top bar (undo/redo), tool rail, toasts, DOM glue
         color-picker.js   custom HSV picker
         settings-panel.js gear menu (dev section is temporary)
       timeline/ export/ audio/   placeholders for later steps
@@ -243,7 +276,9 @@ Each is here because breaking it caused (or would cause) a real bug.
 **Notable constants:** `MAX_BRUSH_SIZE` (60) and `DEFAULT_COLOR` are
 exported from `canvas.js` as the single source of truth. Autosave
 debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
-`gestures.js`: 150 ms / 8 px window; zoom 1–8×.
+`gestures.js`: 150 ms / 8 px window; zoom 1–8×; double-tap gap
+350 ms; third finger joins within 200 ms; three-finger tap ≤ 350 ms /
+20 px; swipe ≥ 60 px, mostly horizontal. Undo caps in `history.js`.
 
 **Dev-only, remove before calling the app done:** the gear menu's
 Developer section (Fresh reload, Clear drawing).
@@ -295,7 +330,9 @@ under it means blank. Undo is never stored.
   `serve.js` serves the repo and simulates deploys
   (`/__test__/state?version=…&slowInstallMs=…`); because of that
   shared state, `workers: 1`. Mouse input for strokes; touch gestures
-  aren't covered yet.
+  go through CDP `Input.dispatchTouchEvent` (`undo.spec.js`) — pass
+  explicit `timestamp`s when the page may be busy (e.g. mid-fill), or
+  the gesture window expires before the second touch is sent.
 - **Rules:**
   - **No fixed sleeps** — wait for the event (`helpers.js`:
     `waitForDrawingSave`, `waitForToolSettings`, `expect.poll`). Only
