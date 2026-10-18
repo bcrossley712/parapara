@@ -25,6 +25,7 @@ const STORE_META = 'meta';     // small app-level records, e.g. last project
 
 const META_LAST_PROJECT = 'lastProjectId';
 const META_TOOL_SETTINGS = 'toolSettings';
+const META_UI_STATE = 'uiState';
 
 const DEFAULT_CANVAS = { width: 1920, height: 1080 };
 const DEFAULT_FPS = 12;
@@ -386,6 +387,60 @@ export async function saveToolSettings(settings) {
   await withTransaction([STORE_META], 'readwrite', (s) => {
     s[STORE_META].put({ key: META_TOOL_SETTINGS, value: settings });
   });
+}
+
+// --- UI state (app-wide, remembered across launches) ---
+//
+// Small view preferences that aren't tool settings — today whether the
+// layers panel was open. Stored as-is; ui.js reads only the fields it
+// knows and treats anything else as missing.
+
+export async function loadUiState() {
+  const record = await withTransaction([STORE_META], 'readonly', (s) =>
+    promisifyRequest(s[STORE_META].get(META_UI_STATE))
+  );
+  return record?.value ?? null;
+}
+
+export async function saveUiState(state) {
+  await withTransaction([STORE_META], 'readwrite', (s) => {
+    s[STORE_META].put({ key: META_UI_STATE, value: state });
+  });
+}
+
+// Saves the project and the given frames in one transaction, so a
+// layer added or removed can never be saved on the project without its
+// frames' bitmap slots (or the reverse).
+export async function saveProjectAndFrames(project, frames) {
+  const record = { ...project, updatedAt: Date.now() };
+  await withTransaction([STORE_PROJECTS, STORE_FRAMES], 'readwrite', (s) => {
+    s[STORE_PROJECTS].put(record);
+    for (const frame of frames) s[STORE_FRAMES].put(frame);
+  });
+  return record;
+}
+
+// Deletes this project's blobs that nothing references any more
+// (`referenced` is a Set of ids — see layers.js referencedBlobIds).
+// Removing a layer keeps its pixels in storage so undo can bring it
+// back; undo history isn't saved, so at the next launch those are
+// garbage. Returns how many were deleted.
+export async function deleteUnreferencedBlobs(projectId, referenced) {
+  let deleted = 0;
+  await withTransaction([STORE_BLOBS], 'readwrite', (s) => {
+    const index = s[STORE_BLOBS].index('projectId');
+    const req = index.openKeyCursor(IDBKeyRange.only(projectId));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return;
+      if (!referenced.has(cursor.primaryKey)) {
+        s[STORE_BLOBS].delete(cursor.primaryKey);
+        deleted++;
+      }
+      cursor.continue();
+    };
+  });
+  return deleted;
 }
 
 export async function saveFrame(frame) {

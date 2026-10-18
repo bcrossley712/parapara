@@ -94,27 +94,10 @@ icon, manifest `name`/`short_name`, and repo copy.
   swipe, two-finger double-tap reset), with iPadOS's own undo kept out
   of the way; Clear and fill undoable; fill is a gesture candidate;
   zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
-- **Now: 2c** — layers panel plus a bare-bones frame strip, built in
-  three passes, **each pushed and checked on the iPad on its own** so a
-  break points at one pass. **Pass 1 done** (not yet on the iPad): layers shared
-  across frames (schema v2 + migration), one canvas per layer, fill
-  reads all visible layers. Looks identical to 2b — still one layer.
-  - **Pass 2:** layers panel — right side, opened from a top-bar
-    button; add, delete, reorder, visibility, opacity, lock, rename,
-    thumbnails (in memory, updated on commit). Cap **8**
-    (`MAX_LAYERS`, one constant). Layer undo types next to `'pixels'`.
-    Dev tool: fill all 8 layers to stress-test memory on the iPad.
-  - **Pass 3:** frame strip below the canvas (room left for the
-    transport) — add a blank frame *after* the current one, tap to
-    switch, numbers only (thumbnails are step 4). Add frame is
-    undoable (stands in for delete until step 4). Undo jumps to the
-    entry's frame, loading it from storage — undo/redo go async and
-    ignore input meanwhile.
-  - **Remembered across launches:** open frame (`project.currentFrameId`,
-    pass 3), active layer (`project.activeLayerId`), whether the layers
-    panel was open (`meta`, pass 2).
-  - Then **2d** project gallery (list/create/open/delete, custom
-    confirm).
+- **Now: 2c** — passes 1–2 of 3 done: shared layers and one canvas per
+  layer (confirmed on the iPad), then the layers panel (not yet on the
+  iPad). Next: frame strip. Then **2d** project gallery
+  (list/create/open/delete, custom confirm).
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -142,7 +125,10 @@ icon, manifest `name`/`short_name`, and repo copy.
 transport (skip / play / skip + fps) between canvas and timeline;
 horizontally scrolling frame strip with a dashed "add frame" tile and
 a marker on frames with an imported image; onion-skin toggle as a
-badge on the canvas; Share as a first-class top-bar icon.
+badge on the canvas; Share as a first-class top-bar icon. Layers panel
+on the right, over the canvas (doesn't shrink it), opened from a
+top-bar button. Until step 4 the frame strip shows numbered tiles only,
+with room left above it for the transport.
 
 ## Architecture
 
@@ -173,8 +159,16 @@ Short rules; reasoning in the linked sections.
     opacity, locked); each frame holds only its own pixels per layer.
     Hide/rename/add applies to every frame.
   - v1 = add/delete, reorder, visibility, opacity, lock, rename,
-    thumbnails; no blend modes/groups/masks. Cap **8 per project**.
-    The reference image is separate from layers.
+    thumbnails (in memory, refreshed when an edit commits); no blend
+    modes/groups/masks. Cap **8 per project** (`MAX_LAYERS` in
+    `layers.js`). The reference image is separate from layers.
+  - A new layer goes directly above the active one, becomes active,
+    and is named "Layer N". The last layer can't be deleted; after a
+    delete the layer below becomes active. No delete confirm (undoable).
+  - **Locked or hidden active layer:** strokes, fill and Clear are
+    refused with a notice; a touch on it can still become a gesture.
+  - **Frames:** add frame inserts a blank frame *after* the current
+    one, with a slot for every layer.
   - **Rendering:** one `<canvas>` per layer stacked in a wrapper
     (`.pp-canvas`) that carries the view transform and takes all input;
     visibility/opacity are CSS. Only the open frame's layers are in
@@ -197,9 +191,16 @@ Short rules; reasoning in the linked sections.
   - Layer structure changes are undoable on the same stack (new entry
     `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
     frame. **Visibility and lock are not undoable** (view state, as in
-    Photoshop). An entry for another frame loads that frame first.
-  - `history.js` is pure; `canvas.js` exposes `onChange({rect,
-    before})`, `swapRegion`, `isBusy`, `onGesture`; `main.js` glues.
+    Photoshop). Rename isn't either. An entry for another frame loads
+    that frame first.
+  - **Removing a layer** (delete, or undoing an add) saves its pixels
+    first and leaves them in storage under the frames' old refs, which
+    the entry keeps; bringing it back reloads them. Undo never holds a
+    removed layer's pixels in memory (unless they couldn't be saved).
+  - Anything async (layer add/remove, frame loads) runs one at a time;
+    meanwhile undo/redo, panel actions and new touches are ignored.
+  - `history.js` and `layers.js` are pure; `canvas.js` exposes the
+    seams; `main.js` glues.
 - **Gestures — match Sketchbook defaults**
   ([why](docs/DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -207,8 +208,9 @@ Short rules; reasoning in the linked sections.
   pan/zoom/rotate; visible undo/redo buttons too. Later, with a brush
   library: three-finger swipe up = color, down = brushes.
 - **Tool settings** (tool, color, per-tool sizes) are remembered
-  app-wide, not per project. The view (pan/zoom/rotation) resets on
-  launch.
+  app-wide, not per project. Per project: the open frame and active
+  layer. App-wide: whether the layers panel was open. The view
+  (pan/zoom/rotation) resets on launch.
 - **Projects:** a gallery, one project open at a time.
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
@@ -254,6 +256,10 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Don't await non-IndexedDB work inside `withTransaction` (it
   auto-commits early).
 - If loading saved work fails, saving stays off.
+- **The launch sweep deletes every blob of the project not listed by
+  `referencedBlobIds` (`layers.js`).** Any new kind of blob reference
+  (step 3 images, step 5 audio) must be added there, or it's deleted
+  on the next launch.
 - Tool-settings validation lives in `canvas.js`
   (`sanitizeToolSettings`); bad fields fall back individually.
 
@@ -290,10 +296,12 @@ Each is here because breaking it caused (or would cause) a real bug.
       canvas/
         canvas.js         input dispatch, tools, viewport, layer surfaces,
                           committed copy; API seams: loadFrame /
-                          setActiveLayer / setLayerProps (layers),
+                          syncLayers / setLayerImage / setActiveLayer /
+                          setLayerProps / drawThumbnail (layers),
                           onChange / exportPNG(layerId) (persistence),
                           getSettings / applySettings, swapRegion(…,
-                          layerId) / isBusy / onGesture (undo)
+                          layerId) / isBusy / onGesture / onBlocked /
+                          setInputBlocked (undo, lock)
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
         region.js         pure dirty-rect helpers
@@ -301,8 +309,12 @@ Each is here because breaking it caused (or would cause) a real bug.
         storage.js        IndexedDB wrapper + schema factories
         autosave.js       save timing only (debounce, no overlap, flush)
         history.js        undo/redo stack, caps, byte budget (in memory)
+        layers.js         pure layer-list + bitmap-slot ops, MAX_LAYERS,
+                          referencedBlobIds (launch sweep)
       ui/
-        ui.js             top bar (undo/redo), tool rail, toasts, DOM glue
+        ui.js             top bar (undo/redo, Layers), tool rail, toasts,
+                          DOM glue
+        layers-panel.js   layers panel (UI only; intents via callbacks)
         color-picker.js   custom HSV picker
         settings-panel.js gear menu (dev section is temporary)
       timeline/ export/ audio/   placeholders for later steps
@@ -319,7 +331,8 @@ debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
 20 px; swipe ≥ 60 px, mostly horizontal. Undo caps in `history.js`.
 
 **Dev-only, remove before calling the app done:** the gear menu's
-Developer section (Fresh reload, Clear drawing).
+Developer section (Fresh reload, Clear drawing, and from 2c a
+fill-all-layers memory stress test).
 
 ## Schema
 
@@ -335,7 +348,7 @@ bitmap. Planned fields are marked. Extend additively.
       ],
       activeLayerId,
       frames: [frameId, ...],                 // timeline order
-      currentFrameId,                         // planned (2c pass 3)
+      currentFrameId,                         // planned (2c frame strip)
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
 
@@ -347,7 +360,8 @@ bitmap. Planned fields are marked. Extend additively.
 
 **IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
-type, buffer }`), `meta` (`lastProjectId`, `toolSettings`).
+type, buffer }`), `meta` (`lastProjectId`, `toolSettings`, `uiState`
+= `{ layersPanelOpen }`).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
 every frame record. Undo is never stored.

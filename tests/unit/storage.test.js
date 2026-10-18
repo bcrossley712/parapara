@@ -232,3 +232,39 @@ test('saveFrame and saveProject persist structural changes', async () => {
   const loaded = await storage.openLastProject();
   assert.deepEqual(loaded.frames.map((f) => f.id), [frames[0].id, frame2.id]);
 });
+
+test('saveProjectAndFrames writes the project and frames together', async () => {
+  const { project, frames } = await storage.openLastProject();
+  const extra = storage.createLayer('Layer 2');
+  const updatedProject = { ...project, layers: [...project.layers, extra] };
+  const updatedFrame = { ...frames[0], bitmapRefs: { ...frames[0].bitmapRefs, [extra.id]: 'new-ref' } };
+
+  await storage.saveProjectAndFrames(updatedProject, [updatedFrame]);
+  relaunch();
+  const loaded = await storage.openLastProject();
+  assert.deepEqual(loaded.project.layers.map((l) => l.name), ['Layer 1', 'Layer 2']);
+  assert.equal(loaded.frames[0].bitmapRefs[extra.id], 'new-ref');
+});
+
+test('deleteUnreferencedBlobs removes only this project\'s unreferenced blobs', async () => {
+  const { project, frames } = await storage.openLastProject();
+  const keep = frames[0].bitmapRefs[project.activeLayerId];
+  const png = () => new Blob([new Uint8Array([1])], { type: 'image/png' });
+  await storage.saveLayerBitmap(project.id, keep, png());
+  await storage.saveLayerBitmap(project.id, 'orphan', png());
+  await storage.saveLayerBitmap('other-project', 'not-mine', png());
+
+  const deleted = await storage.deleteUnreferencedBlobs(project.id, new Set([keep]));
+  assert.equal(deleted, 1);
+  assert.ok(await storage.loadLayerBitmap(keep));
+  assert.equal(await storage.loadLayerBitmap('orphan'), null);
+  assert.ok(await storage.loadLayerBitmap('not-mine'), 'other projects untouched');
+});
+
+test('UI state round-trips, and is null before anything is saved', async () => {
+  await storage.initStorage();
+  assert.equal(await storage.loadUiState(), null);
+  await storage.saveUiState({ layersPanelOpen: true });
+  relaunch();
+  assert.deepEqual(await storage.loadUiState(), { layersPanelOpen: true });
+});

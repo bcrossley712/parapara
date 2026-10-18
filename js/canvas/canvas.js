@@ -177,13 +177,84 @@ export function initCanvas(container, options = {}) {
     el.height = height;
     el.className = 'pp-layer';
     el.dataset.layerId = id;
-    return { canvas: el, ctx: el.getContext('2d'), visible: true, opacity: 1 };
+    return { canvas: el, ctx: el.getContext('2d'), visible: true, opacity: 1, locked: false };
   }
 
   function applySurfaceStyle(surface) {
     surface.canvas.style.visibility = surface.visible ? '' : 'hidden';
     surface.canvas.style.opacity = String(surface.opacity);
   }
+
+  function readLayerProps(surface, layer) {
+    surface.visible = layer.visible !== false;
+    surface.opacity = typeof layer.opacity === 'number'
+      ? Math.min(1, Math.max(0, layer.opacity))
+      : 1;
+    surface.locked = layer.locked === true;
+    applySurfaceStyle(surface);
+  }
+
+  // Makes the surfaces match `layers` (bottom first): creates canvases
+  // for new ids (blank), releases ones no longer listed, re-orders the
+  // DOM, and applies visible/opacity/locked. Existing pixels are left
+  // alone. If the active layer went away, the top layer becomes active.
+  function applyLayers(layers) {
+    const keep = new Set(layers.map((l) => l.id));
+    for (const [id, surface] of surfaces) {
+      if (keep.has(id)) continue;
+      surface.canvas.remove();
+      // Free the backing store now, not at GC (iPad canvas memory).
+      surface.canvas.width = 0;
+      surface.canvas.height = 0;
+      surfaces.delete(id);
+    }
+    if (activeLayerId !== null && !surfaces.has(activeLayerId)) {
+      canvas = null;
+      ctx = null;
+      activeLayerId = null;
+    }
+
+    order = layers.map((l) => l.id);
+    for (const layer of layers) {
+      let surface = surfaces.get(layer.id);
+      if (!surface) {
+        surface = createSurface(layer.id);
+        surfaces.set(layer.id, surface);
+      }
+      readLayerProps(surface, layer);
+      // append() moves an existing child, so this also re-orders.
+      stack.appendChild(surface.canvas);
+    }
+
+    if (activeLayerId === null) {
+      const top = order[order.length - 1];
+      if (top !== undefined) activate(top);
+      else dirty = null;
+    }
+  }
+
+  // Why the active layer can't be painted on right now, or null.
+  // Locked: the standard lock. Hidden: painting where you can't see
+  // the result would be a surprise, so it's refused too.
+  function paintBlockReason() {
+    const surface = surfaces.get(activeLayerId);
+    if (!surface) return null;
+    if (surface.locked) return 'locked';
+    if (!surface.visible) return 'hidden';
+    return null;
+  }
+
+  // While true (main.js sets it during async layer/frame work), new
+  // touches are ignored entirely.
+  let inputBlocked = false;
+
+  // Set at the start of a stroke on a layer that can't be painted: the
+  // stroke still runs (so a second finger can still turn it into a
+  // gesture) but paints nothing, and on lift reports why instead of
+  // committing.
+  let strokeBlocked = null;
+
+  const blockedListeners = new Set();
 
   // Smudge's scratch buffer: sized once to the largest brush size
   // rather than reallocated per stroke.
@@ -563,6 +634,7 @@ export function initCanvas(container, options = {}) {
   }
 
   function floodFill(point) {
+    if (strokeBlocked) return;
     const startX = Math.round(point.x);
     const startY = Math.round(point.y);
     if (startX < 0 || startY < 0 || startX >= width || startY >= height) return;
@@ -636,6 +708,7 @@ export function initCanvas(container, options = {}) {
   function beginStroke(point) {
     p0 = null;
     p1 = point;
+    if (strokeBlocked) return;
 
     if (tool === 'smudge') {
       // Smudge has no "begin" mark — it only does something once it
@@ -656,6 +729,10 @@ export function initCanvas(container, options = {}) {
 
   function extendStroke(point) {
     const p2 = point;
+    if (strokeBlocked) {
+      p1 = p2;
+      return;
+    }
 
     if (tool === 'smudge') {
       smudgeAlongLine(p1, p2);
@@ -686,6 +763,13 @@ export function initCanvas(container, options = {}) {
     activePointerId = null;
     p0 = null;
     p1 = null;
+    if (strokeBlocked) {
+      const reason = strokeBlocked;
+      strokeBlocked = null;
+      dirty = null;
+      for (const listener of blockedListeners) listener(reason);
+      return;
+    }
     // Every committed edit ends here — draw/erase/smudge strokes, and
     // fills too (a fill's pointerup also routes through endStroke). A
     // touch that turned into a gesture never reaches this: its mark
@@ -713,7 +797,7 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerDown(event) {
-    if (!ctx) return; // no frame loaded yet
+    if (!ctx || inputBlocked) return; // no frame loaded yet, or busy
     if (event.pointerType === 'touch') {
       if (gesture) {
         // A third finger landing right after a two-finger gesture
@@ -787,6 +871,7 @@ export function initCanvas(container, options = {}) {
 
           pendingTouch = null;
           activePointerId = null;
+          strokeBlocked = null; // a gesture, not a refused stroke
           p0 = null;
           p1 = null;
           return;
@@ -801,6 +886,7 @@ export function initCanvas(container, options = {}) {
 
       const point = toCanvasPoint(event);
       activePointerId = event.pointerId;
+      strokeBlocked = paintBlockReason();
       stack.setPointerCapture(event.pointerId);
 
       const local = toLocalPoint(event);
@@ -828,6 +914,7 @@ export function initCanvas(container, options = {}) {
     if (activePointerId !== null || gesture || pendingTouch) return;
 
     activePointerId = event.pointerId;
+    strokeBlocked = paintBlockReason();
     stack.setPointerCapture(event.pointerId);
 
     if (tool === 'fill') {
@@ -1071,6 +1158,11 @@ export function initCanvas(container, options = {}) {
     // no-op, so it doesn't add an undo step that does nothing.
     clear() {
       if (isBusy() || !ctx) return;
+      const reason = paintBlockReason();
+      if (reason) {
+        for (const listener of blockedListeners) listener(reason);
+        return;
+      }
       const before = committedCtx.getImageData(0, 0, width, height);
       if (!hasPaint(before.data)) return;
       ctx.clearRect(0, 0, width, height);
@@ -1149,47 +1241,37 @@ export function initCanvas(container, options = {}) {
     // then be wiped by a late-arriving load. Doesn't fire onChange —
     // loading isn't an edit.
     loadFrame({ layers, activeLayerId: nextActive, images = new Map() }) {
-      const keep = new Set(layers.map((l) => l.id));
-      for (const [id, surface] of surfaces) {
-        if (keep.has(id)) continue;
-        surface.canvas.remove();
-        // Free the backing store now, not at GC (iPad canvas memory).
-        surface.canvas.width = 0;
-        surface.canvas.height = 0;
-        surfaces.delete(id);
-      }
-      if (canvas && !surfaces.has(activeLayerId)) {
-        canvas = null;
-        ctx = null;
-        activeLayerId = null;
-      }
-
-      order = layers.map((l) => l.id);
-      for (const layer of layers) {
-        let surface = surfaces.get(layer.id);
-        if (!surface) {
-          surface = createSurface(layer.id);
-          surfaces.set(layer.id, surface);
-        }
-        surface.visible = layer.visible !== false;
-        surface.opacity = typeof layer.opacity === 'number' ? layer.opacity : 1;
-        applySurfaceStyle(surface);
+      applyLayers(layers);
+      for (const id of order) {
+        const surface = surfaces.get(id);
         surface.ctx.clearRect(0, 0, width, height);
-        const image = images.get(layer.id);
+        const image = images.get(id);
         if (image) surface.ctx.drawImage(image, 0, 0, width, height);
-        // append() moves an existing child, so this also re-orders.
-        stack.appendChild(surface.canvas);
       }
+      if (surfaces.has(nextActive)) activate(nextActive);
+      else if (activeLayerId !== null) activate(activeLayerId); // resync the copy
+    },
 
-      const fallback = order[order.length - 1] ?? null;
-      if (fallback === null) {
-        canvas = null;
-        ctx = null;
-        activeLayerId = null;
+    // Makes the layer stack match `layers` (same shape as loadFrame)
+    // without touching any existing layer's pixels: new ids get blank
+    // canvases, missing ids are released, order and visible/opacity/
+    // locked are applied. For add/delete/reorder/property changes.
+    syncLayers(layers) {
+      applyLayers(layers);
+    },
+
+    // Replaces one layer's pixels with an already-decoded image (or
+    // blank for null) — how a layer brought back by undo gets its saved
+    // pixels. Doesn't fire onChange.
+    setLayerImage(id, image) {
+      const surface = surfaces.get(id);
+      if (!surface) return;
+      surface.ctx.clearRect(0, 0, width, height);
+      if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+      if (id === activeLayerId) {
         dirty = null;
-        return;
+        syncCommitted({ x: 0, y: 0, w: width, h: height });
       }
-      activate(surfaces.has(nextActive) ? nextActive : fallback);
     },
 
     // Switches which layer the tools paint on. Refused (returns false)
@@ -1203,7 +1285,8 @@ export function initCanvas(container, options = {}) {
       return activeLayerId;
     },
 
-    // Updates how a layer is shown: { visible?, opacity? } (0-1).
+    // Updates one layer's display/lock: { visible?, opacity? (0-1),
+    // locked? }.
     setLayerProps(id, props) {
       const surface = surfaces.get(id);
       if (!surface) return;
@@ -1211,7 +1294,51 @@ export function initCanvas(container, options = {}) {
       if (typeof props.opacity === 'number') {
         surface.opacity = Math.min(1, Math.max(0, props.opacity));
       }
+      if (typeof props.locked === 'boolean') surface.locked = props.locked;
       applySurfaceStyle(surface);
+    },
+
+    // Draws a scaled-down copy of a layer into `target` (a small
+    // <canvas>), over a cleared background — the layers panel's
+    // thumbnails. Cheap enough to call after each committed edit.
+    drawThumbnail(id, target) {
+      const surface = surfaces.get(id);
+      const tctx = target.getContext('2d');
+      tctx.clearRect(0, 0, target.width, target.height);
+      if (surface) tctx.drawImage(surface.canvas, 0, 0, target.width, target.height);
+    },
+
+    // Ignores new touches while true — main.js sets it around async
+    // work (bringing a layer back from storage) so a stroke can't land
+    // on pixels that are about to be replaced.
+    setInputBlocked(next) {
+      inputBlocked = next === true;
+    },
+
+    // Calls listener('locked' | 'hidden') when a stroke, fill or Clear
+    // was refused because of the active layer. Returns an unsubscribe
+    // function.
+    onBlocked(listener) {
+      blockedListeners.add(listener);
+      return () => blockedListeners.delete(listener);
+    },
+
+    // Developer tool (memory stress test): fills a whole layer with
+    // `color` as one undoable edit, through the same onChange path as
+    // a stroke. Ignores lock/visibility on purpose.
+    devFillLayer(id, color) {
+      const surface = surfaces.get(id);
+      if (!surface || isBusy()) return;
+      const isActive = id === activeLayerId;
+      const before = (isActive ? committedCtx : surface.ctx).getImageData(0, 0, width, height);
+      surface.ctx.save();
+      surface.ctx.globalCompositeOperation = 'source-over';
+      surface.ctx.globalAlpha = 1;
+      surface.ctx.fillStyle = color;
+      surface.ctx.fillRect(0, 0, width, height);
+      surface.ctx.restore();
+      if (isActive) syncCommitted({ x: 0, y: 0, w: width, h: height });
+      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: id });
     },
   };
 }

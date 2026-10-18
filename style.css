@@ -99,9 +99,20 @@ html, body {
   cursor: default;
 }
 
+.pp-icon-btn.is-active {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+/* Pushes the buttons after it to the right end of the top bar. */
+.pp-top-bar__spacer {
+  flex: 1;
+}
+
 /* Rail + canvas area, below the top bar. min-height: 0 lets the
    canvas area shrink instead of overflowing the shell. */
 .pp-app-body {
+  position: relative; /* anchors the layers panel */
   display: flex;
   flex: 1;
   min-height: 0;
@@ -446,4 +457,197 @@ html, body {
 
 .pp-toast__btn:active {
   background: var(--pp-accent-active);
+}
+
+/* Layers panel (js/ui/layers-panel.js): floats over the right side of
+   the canvas area without resizing it. Same look as the settings panel. */
+.pp-layers {
+  position: absolute;
+  z-index: 10;
+  top: 8px;
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 288px;
+  max-height: calc(100% - 16px);
+  padding: 10px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 14px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.pp-layers--hidden {
+  display: none;
+}
+
+.pp-layers__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pp-layers__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pp-layers__add,
+.pp-layers__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  cursor: pointer;
+}
+
+.pp-layers__add:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pp-layers__toggle {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+}
+
+.pp-layers__toggle.is-on {
+  color: var(--pp-accent);
+}
+
+/* Scrolls if the rows outgrow the panel (8 rows fit on the iPad). */
+.pp-layers__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+
+.pp-layers__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 4px 4px 4px 0;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  cursor: pointer;
+}
+
+.pp-layers__row.is-active {
+  box-shadow: inset 0 0 0 2px var(--pp-accent);
+}
+
+.pp-layers__row.is-hidden .pp-layers__thumb-wrap,
+.pp-layers__row.is-hidden .pp-layers__name {
+  opacity: 0.45;
+}
+
+.pp-layers__row.is-dragging {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 0 0 2px var(--pp-accent);
+}
+
+.pp-layers__handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 32px;
+  opacity: 0.7;
+  touch-action: none;
+  cursor: grab;
+}
+
+.pp-layers__thumb-wrap {
+  flex-shrink: 0;
+  width: 64px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.pp-layers__thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Names may wrap (no nowrap: the iPad's font runs wider). */
+.pp-layers__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.pp-layers__name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--pp-accent);
+  border-radius: 6px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: inherit;
+  font-size: 16px; /* 16px+ so iPadOS doesn't zoom on focus */
+}
+
+.pp-layers__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pp-ink-light);
+}
+
+.pp-layers__opacity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.pp-layers__opacity input[type="range"] {
+  width: 100%;
+}
+
+.pp-layers__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pp-layers__btn {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pp-layers__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

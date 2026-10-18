@@ -24,6 +24,7 @@ const APP_SHELL = [
   './js/ui/ui.js',
   './js/ui/color-picker.js',
   './js/ui/settings-panel.js',
+  './js/ui/layers-panel.js',
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
   './js/canvas/gestures.js',
@@ -31,6 +32,7 @@ const APP_SHELL = [
   './js/storage/storage.js',
   './js/storage/autosave.js',
   './js/storage/history.js',
+  './js/storage/layers.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

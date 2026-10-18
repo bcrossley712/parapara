@@ -15,6 +15,7 @@
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { createColorPicker } from './color-picker.js';
 import { createSettingsPanel } from './settings-panel.js';
+import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -25,8 +26,12 @@ import { createSettingsPanel } from './settings-panel.js';
 //   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
 //   Omitted actions report "unavailable" rather than breaking the UI.
 // options.onUndo / options.onRedo: the top-bar buttons.
+// options.layers: callbacks for the layers panel (see layers-panel.js);
+//   onOpenChange also fires when the top-bar button toggles it.
+// options.layersPanelOpen: open the layers panel at startup.
 //
-// Returns { canvas, setHistoryState(canUndo, canRedo) }.
+// Returns { canvas, layers (the panel), setHistoryState(canUndo,
+// canRedo) }.
 export function initUI(container, options = {}) {
   const {
     settings = null,
@@ -34,6 +39,8 @@ export function initUI(container, options = {}) {
     appActions = {},
     onUndo = () => {},
     onRedo = () => {},
+    layers: layersCallbacks = {},
+    layersPanelOpen = false,
   } = options;
   container.innerHTML = '';
 
@@ -48,7 +55,12 @@ export function initUI(container, options = {}) {
   topBar.className = 'pp-top-bar';
   const undoBtn = createIconButton('Undo', UNDO_ICON, onUndo);
   const redoBtn = createIconButton('Redo', REDO_ICON, onRedo);
-  topBar.append(undoBtn, redoBtn);
+  const topBarSpacer = document.createElement('div');
+  topBarSpacer.className = 'pp-top-bar__spacer';
+  const layersBtn = createIconButton('Layers', LAYERS_ICON, () => {
+    layersPanel.setOpen(!layersPanel.isOpen);
+  });
+  topBar.append(undoBtn, redoBtn, topBarSpacer, layersBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';
@@ -59,7 +71,23 @@ export function initUI(container, options = {}) {
   const canvasArea = document.createElement('div');
   canvasArea.className = 'pp-canvas-area';
 
-  body.append(rail, canvasArea);
+  // The layers panel floats over the right of the canvas area (inside
+  // the body, so it sits below the top bar) without resizing it.
+  const layersPanel = createLayersPanel({
+    onSelect: () => {}, onAdd: () => {}, onDelete: () => {}, onRename: () => {},
+    onToggleVisible: () => {}, onToggleLock: () => {}, onMove: () => {},
+    onOpacityInput: () => {}, onOpacityCommit: () => {},
+    drawThumbnail: (id, target) => canvasApi.drawThumbnail(id, target),
+    ...layersCallbacks,
+    onOpenChange: (open) => {
+      layersBtn.classList.toggle('is-active', open);
+      layersBtn.setAttribute('aria-pressed', String(open));
+      layersCallbacks.onOpenChange?.(open);
+    },
+  });
+  layersBtn.setAttribute('aria-pressed', 'false');
+
+  body.append(rail, canvasArea, layersPanel.element);
   shell.append(topBar, body);
   container.appendChild(shell);
 
@@ -165,6 +193,7 @@ export function initUI(container, options = {}) {
     applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
     freshReload: appActions.freshReload ?? (async () => window.location.reload()),
     clearDrawing: () => canvasApi.clear(),
+    fillAllLayers: appActions.fillAllLayers ?? (() => {}),
   });
   shell.appendChild(settingsPanel.element);
 
@@ -222,7 +251,13 @@ export function initUI(container, options = {}) {
 
   setActiveTool(startSettings.tool);
 
-  return { canvas: canvasApi, setHistoryState };
+  if (layersPanelOpen) {
+    layersPanel.setOpen(true, { notify: false });
+    layersBtn.classList.add('is-active');
+    layersBtn.setAttribute('aria-pressed', 'true');
+  }
+
+  return { canvas: canvasApi, layers: layersPanel, setHistoryState };
 }
 
 // PWA update prompt — shown when a new service worker has installed

@@ -9,9 +9,11 @@
 // - Version: which build is running.
 // - Check for updates (permanent). If an update is found it's applied
 //   right away (with a reload).
-// - Developer section (temporary, remove before "done"): Fresh reload
-//   and Clear drawing. Clear moved here from the rail because there's
-//   no undo yet (2b), so a stray tap on the rail would wipe her work.
+// - Developer section (temporary, remove before "done"): Fresh reload,
+//   Clear drawing (moved here from the rail before undo existed, so a
+//   stray tap couldn't wipe her work), and Fill all layers — adds layers
+//   up to the cap and paints each one, to stress-test canvas memory on
+//   the iPad. Both edits are undoable.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -23,6 +25,7 @@ export function createSettingsPanel(actions) {
     applyUpdate,       // () => Promise<void>, reloads the page
     freshReload,       // () => Promise<void>, reloads the page
     clearDrawing,      // () => void
+    fillAllLayers,     // () => void
   } = actions;
 
   const panel = document.createElement('div');
@@ -59,7 +62,12 @@ export function createSettingsPanel(actions) {
 
   const clearBtn = makeButton('Clear drawing');
 
-  panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint, clearBtn);
+  const fillBtn = makeButton('Fill all layers');
+  const fillHint = document.createElement('div');
+  fillHint.className = 'pp-settings__hint';
+  fillHint.textContent = 'Memory test: adds layers up to the limit and paints each. Undoable.';
+
+  panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint, clearBtn, fillBtn, fillHint);
 
   let open = false;
   let busy = false;
@@ -110,6 +118,11 @@ export function createSettingsPanel(actions) {
 
   clearBtn.addEventListener('click', () => {
     clearDrawing();
+    setOpen(false);
+  });
+
+  fillBtn.addEventListener('click', () => {
+    fillAllLayers();
     setOpen(false);
   });
 

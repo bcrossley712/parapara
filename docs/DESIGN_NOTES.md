@@ -215,11 +215,27 @@ Sections: [Process lessons](#process-lessons) ·
   new edit, which clears redo first.
 - **Clear on a blank layer adds nothing**, so undo never does a step
   with no visible effect.
+- **2c was built in passes, internals first.** The schema change and
+  the move to one canvas per layer shipped with no visible change, so
+  a problem on the iPad could be traced to them before any panel or
+  frame UI sat on top.
 - **Layer cap (8, per project now that layers are shared)** for the
   same memory reason — Procreate caps layers by canvas size and device
   memory too. 8 × ~8 MB ≈ 64 MB of layers; iPad Safari's real canvas
   ceiling is device-dependent and only testable on the iPad (hence the
   fill-all-layers dev tool).
+- **A removed layer's pixels stay in storage, not in undo memory.**
+  Holding them in the entry would cost up to ~8 MB per delete (or a
+  PNG each, still real memory on the iPad). Instead removal saves the
+  layer first and keeps the frames' refs in the entry; storage still
+  has the pixels when undo brings it back. Add and delete are the same
+  two operations (detach/attach) run in opposite directions, so there's
+  one code path. The cost is garbage in storage until the next launch,
+  when no undo can need it — a sweep deletes blobs nothing references.
+  That's also why the sweep must know every kind of blob reference.
+- **Drawing on a hidden layer is refused**, like a locked one. Painting
+  where she can't see the result would be a surprise; a notice says
+  why. Revisit if she expects otherwise.
 - **Visibility and lock aren't undoable** — view state, as in
   Photoshop; eye-icon taps filling the 30-step stack would be worse.
 
