@@ -291,7 +291,21 @@ Sections: [Process lessons](#process-lessons) ·
   non-zero under `viewport-fit=cover` + `black-translucent` (under
   `default`, iOS reserves the bar). Padding only insets correctly with
   global `border-box`. `black-translucent` draws white status text
-  over the top edge — fine while the rail and stage are dark there.
+  over the top edge — fine only while everything iPadOS reads there is
+  dark (next bullet).
+- **The status bar follows the page's colors, not just
+  `black-translucent`.** After 2d, the status text turned black over a
+  light frosted band — first when the gallery appeared, then staying
+  that way in the editor. The cause was the cream `theme-color`
+  (`index.html`), the manifest's `theme_color`/`background_color`, and
+  the cream `html, body` background (never visible, but iPadOS reads
+  it). All are now the top bar's dark brown. That the gallery's light
+  scrolling area is what set it off is a guess — nothing scrolled
+  before 2d. Only the iPad can check this: desktop Chromium doesn't
+  draw the status bar. iOS may keep manifest colors from when the app
+  was added to the home screen, but re-adding it can delete her
+  drawings, so never suggest that before she's backed up (step 6
+  export).
 - **16px inputs:** iOS zooms the page when a smaller text field gets
   focus, and the zoom can stick.
 - **ResizeObserver** on the canvas area: iOS layout (safe area,

@@ -345,12 +345,10 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Safe-area padding needs `viewport-fit=cover`,
   `black-translucent`, and global `box-sizing: border-box` — keep all
   three.
-- **Anything at the top edge stays dark** (the top bar paints under the
-  status bar, whose text is white). That includes `theme-color`
-  (`index.html`), the manifest's `theme_color`/`background_color`, and
-  the `html, body` background: newer iPadOS restyles the status bar
-  from them, and a light one turned it black over a light band once
-  the gallery appeared.
+- **Anything at the top edge stays dark**, including `theme-color`,
+  the manifest's `theme_color`/`background_color`, and the `html, body`
+  background — iPadOS restyles the status bar from them.
+  ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
 - Text inputs ≥ 16px font.
 - Layouts must tolerate wider text than desktop Chromium shows — no
   `nowrap` on content that could grow.
