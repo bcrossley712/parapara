@@ -331,7 +331,7 @@ test('the layer cap disables Add at 8, and the panel stays open across a reload'
       const r = req.result.transaction('meta').objectStore('meta').get('uiState');
       r.onsuccess = () => { req.result.close(); resolve(r.result?.value ?? null); };
     };
-  }))).toEqual({ layersPanelOpen: false });
+  }))).toMatchObject({ layersPanelOpen: false });
   await reloadApp(page);
   await expect(page.locator('.pp-layers')).toBeHidden();
 });

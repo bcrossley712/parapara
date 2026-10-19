@@ -1,17 +1,32 @@
 // Parapara! — app entry point
 //
-// Glue between modules: loads the project from storage/, hands it to
-// the canvas, wires autosave, undo and the layers panel, and connects
-// the updater (updater.js) to the update toast and the gear menu.
-// Modules don't import each other's internals; this file moves data
-// between them (see PROJECT_NOTES.md, scope-specific file structure).
-// Screen routing (gallery <-> editor) lands here with step 2d; for now
-// it opens straight into the editor.
+// Glue between modules, and screen routing: the gallery (ui/gallery.js)
+// or one project open in the editor (ui/ui.js + canvas/), never both.
+// Loads projects from storage/, hands them to the canvas, wires
+// autosave, undo, the layers panel and frame strip, and connects the
+// updater (updater.js) to the update toast and the gear menu. Modules
+// don't import each other's internals; this file moves data between
+// them (see PROJECT_NOTES.md, scope-specific file structure).
+//
+// Launch reopens wherever she left off: the gallery, or the editor on
+// the last project (uiState.screen + lastProjectId), as Procreate and
+// Sketchbook do.
 
 import { initUI, showUpdatePrompt, showNotice, showBanner } from './ui/ui.js';
+import { createGallery } from './ui/gallery.js';
+import { showConfirm } from './ui/confirm-dialog.js';
 import {
   initStorage,
-  openLastProject,
+  loadLastProject,
+  loadProject,
+  saveLastProjectId,
+  createProject,
+  listProjects,
+  renameProject,
+  deleteProject,
+  nextProjectName,
+  saveThumbnail,
+  loadThumbnail,
   loadLayerBitmap,
   saveLayerBitmap,
   loadToolSettings,
@@ -48,103 +63,307 @@ import {
 } from './timeline/frames.js';
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
+import { renderThumbnail } from './canvas/thumbnail.js';
 import { initUpdater, formatVersion } from './updater.js';
-
-// Save functions to run before any reload the app causes itself
-// (applying an update, Fresh reload), so a stroke made seconds earlier
-// isn't lost. startEditor() adds to this once saving is set up.
-const flushBeforeReload = [];
-
-const updater = initUpdater({
-  onUpdateReady: () => showUpdatePrompt(() => updater.applyUpdate()),
-  beforeReload: () => Promise.all(flushBeforeReload.map((flush) => flush())),
-});
 
 // Colors for the developer "Fill all layers" memory test.
 const DEV_FILL_COLORS = ['#e05a47', '#f2a65a', '#e8d15a', '#7cc46b', '#4fb3c9', '#5a7be0', '#a065d6', '#d65aa8'];
 
-startEditor();
+const appRoot = document.getElementById('app');
 
-async function startEditor() {
-  // Load everything — including decoding every layer's saved image —
-  // *before* the canvas exists, so there's no moment where she could
-  // draw and then have a late-arriving load wipe the stroke.
-  //
-  // session: { project, frames (all, timeline order), frame (open) }.
-  // canSave is false if loading failed: she can still draw (on an
-  // in-memory project) but nothing is written, so a drawing that merely
-  // failed to load is never overwritten.
-  let session = null;
-  let canSave = false;
-  let savedImages = new Map(); // layer id -> ImageBitmap
-  let savedSettings = null;
-  let savedUiState = null;
+// --- app-wide state (survives switching screens) ---
+
+// Tool, color and brush sizes — app-wide, not per project, so they
+// follow her from one animation into the next (see storage.js).
+let toolSettings = null;
+// { layersPanelOpen, screen: 'gallery' | 'editor' } — remembered
+// across launches.
+let uiState = {};
+// False if the database can't be opened at all; then there's no
+// gallery, just an unsaved editor.
+let storageWorks = false;
+
+// The open editor's save-everything-now function, or null on the
+// gallery. Runs before any reload the app causes itself (applying an
+// update, Fresh reload) and when the app is hidden.
+let flushEditor = null;
+
+// Same save-timing rules as the drawing (autosave.js). Failures are
+// only logged: losing a color choice or a panel state isn't worth
+// interrupting her.
+const settingsSaver = createAutosaver({
+  save: () => saveToolSettings(toolSettings),
+  delayMs: 300,
+  onError: (err) => console.warn('Parapara! saving tool settings failed:', err),
+});
+const uiStateSaver = createAutosaver({
+  save: () => saveUiState({ ...uiState }),
+  delayMs: 300,
+  onError: (err) => console.warn('Parapara! saving UI state failed:', err),
+});
+
+// `now`: save right away instead of debouncing — for switching
+// screens, which is rare and should survive the app being closed
+// straight after.
+function setUiState(changes, { now = false } = {}) {
+  Object.assign(uiState, changes);
+  if (!storageWorks) return;
+  uiStateSaver.schedule();
+  if (now) uiStateSaver.flush();
+}
+
+function flushAll() {
+  const savers = storageWorks ? [settingsSaver.flush(), uiStateSaver.flush()] : [];
+  return Promise.all([flushEditor?.(), ...savers]);
+}
+
+const updater = initUpdater({
+  onUpdateReady: () => showUpdatePrompt(() => updater.applyUpdate()),
+  beforeReload: () => flushAll(),
+});
+
+// Gear-menu actions shared by both screens.
+const appActions = {
+  getVersionLabel: async () => formatVersion(await updater.getVersion()),
+  checkForUpdate: () => updater.checkForUpdate(),
+  applyUpdate: () => updater.applyUpdate(),
+  freshReload: () => updater.freshReload(),
+};
+
+// iPadOS can close a backgrounded web app without warning, so save
+// the moment it's hidden rather than waiting out the debounce.
+// visibilitychange is the reliable signal on iOS; pagehide is a
+// backup for an actual unload.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushAll();
+});
+window.addEventListener('pagehide', () => flushAll());
+
+launch();
+
+async function launch() {
   try {
     await initStorage();
-    const { project, frames } = await openLastProject();
-    // Reopen the frame she was on.
-    const frame = frames.find((f) => f.id === project.currentFrameId) ?? frames[0];
-    project.currentFrameId = frame.id;
-    // A frame should have a bitmap slot for every layer; fill any gap
-    // (and save it) rather than failing to load.
-    if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
-    savedImages = await decodeFrameImages(project.layers, frame, loadLayerBitmap);
-    session = { project, frames, frame };
-    canSave = true;
-
-    // Pixels of layers removed last session (kept so undo could bring
-    // them back) are garbage now — undo history isn't saved. Not
-    // awaited: nothing here waits on it, and it only touches blobs
-    // nothing references.
-    deleteUnreferencedBlobs(project.id, referencedBlobIds(project, frames))
-      .catch((err) => console.warn('Parapara! blob cleanup failed:', err));
+    storageWorks = true;
   } catch (err) {
-    console.error('Parapara! could not load saved work:', err);
+    // No database at all: she can still draw (on an in-memory project)
+    // but nothing is written.
+    console.error('Parapara! could not open storage:', err);
     const project = createProjectRecord();
     const frame = createFrame(project.id, project.layers);
     project.frames = [frame.id];
     project.currentFrameId = frame.id;
-    session = { project, frames: [frame], frame };
+    mountEditor({ project, frames: [frame], frame, images: new Map() }, { canSave: false });
+    return;
   }
 
-  // Tool settings and panel state are niceties, not her work: if they
-  // fail to load, start with defaults rather than turning saving off.
+  // Niceties, not her work: if they fail to load, use defaults.
+  try {
+    toolSettings = await loadToolSettings();
+  } catch (err) {
+    console.warn('Parapara! could not load tool settings:', err);
+  }
+  try {
+    const saved = await loadUiState();
+    uiState = {
+      layersPanelOpen: saved?.layersPanelOpen === true,
+      // Installs from before the gallery have no screen saved; they
+      // were always in the editor.
+      screen: saved?.screen === 'gallery' ? 'gallery' : 'editor',
+    };
+  } catch (err) {
+    console.warn('Parapara! could not load UI state:', err);
+    uiState = { layersPanelOpen: false, screen: 'editor' };
+  }
+
+  if (uiState.screen === 'editor') {
+    try {
+      const loaded = await loadLastProject();
+      if (loaded) {
+        mountEditor(await prepareSession(loaded), { canSave: true });
+        return;
+      }
+    } catch (err) {
+      console.error('Parapara! could not open the last project:', err);
+      showNotice("Your last animation couldn't be opened.");
+    }
+  }
+  showGallery();
+}
+
+// Everything the editor needs, loaded — including decoding every
+// layer's saved image of the open frame — *before* the canvas exists,
+// so there's no moment where she could draw and then have a
+// late-arriving load wipe the stroke. Throws if anything fails; the
+// caller stays where it was (saving a blank canvas over a drawing
+// that merely failed to load would destroy it).
+//
+// Returns { project, frames (all, timeline order), frame (open), images }.
+async function prepareSession({ project, frames }) {
+  if (frames.length === 0) throw new Error(`Project ${project.id} has no frames`);
+  // Reopen the frame she was on.
+  const frame = frames.find((f) => f.id === project.currentFrameId) ?? frames[0];
+  project.currentFrameId = frame.id;
+  // A frame should have a bitmap slot for every layer; fill any gap
+  // (and save it) rather than failing to load.
+  if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
+  const images = await decodeFrameImages(project.layers, frame, loadLayerBitmap);
+  return { project, frames, frame, images };
+}
+
+// --- gallery ---
+
+async function showGallery() {
+  setUiState({ screen: 'gallery' }, { now: true });
+
+  // Cards: project records plus their stored thumbnails.
+  let cards = [];
+  try {
+    const projects = await listProjects();
+    cards = await Promise.all(projects.map(async (p) => ({
+      id: p.id,
+      name: p.name,
+      frameCount: p.frames.length,
+      thumbnail: await loadThumbnail(p.id).catch(() => null),
+    })));
+  } catch (err) {
+    console.error('Parapara! could not list projects:', err);
+    showNotice("Your animations couldn't be loaded.");
+  }
+
+  let closed = false;
+
+  const gallery = createGallery(appRoot, {
+    appActions,
+    callbacks: {
+      onOpen: (id) => open(() => loadProject(id)),
+      onCreate: () => open(
+        () => createProject(nextProjectName(cards.map((c) => c.name))),
+        "Couldn't make a new animation. The iPad may be out of space."
+      ),
+      onRename: async (id, name) => {
+        try {
+          await renameProject(id, name);
+          cards = cards.map((c) => (c.id === id ? { ...c, name } : c));
+          gallery.render(cards);
+        } catch (err) {
+          console.error('Parapara! rename failed:', err);
+          showNotice("That animation couldn't be renamed.");
+        }
+      },
+      onDelete: async (id) => {
+        gallery.setBusy(true);
+        try {
+          await deleteProject(id);
+          cards = cards.filter((c) => c.id !== id);
+          gallery.render(cards);
+        } catch (err) {
+          console.error('Parapara! delete failed:', err);
+          showNotice("That animation couldn't be deleted.");
+        } finally {
+          gallery.setBusy(false);
+        }
+      },
+    },
+  });
+  gallery.render(cards);
+
+  // Loads (or creates) a project and opens it. The gallery stays up
+  // until the project has fully loaded, so a failure leaves her where
+  // she was.
+  async function open(load, failMessage = "That animation couldn't be opened.") {
+    gallery.setBusy(true);
+    let session;
+    try {
+      const loaded = await load();
+      if (!loaded) throw new Error('Project not found');
+      session = await prepareSession(loaded);
+    } catch (err) {
+      console.error('Parapara! could not open project:', err);
+      showNotice(failMessage);
+      gallery.setBusy(false);
+      return;
+    }
+    closed = true;
+    gallery.destroy();
+    mountEditor(session, { canSave: true });
+  }
+
+  // Projects without a thumbnail yet (older ones, or never drawn on
+  // since): draw them from frame 1's saved layers, one at a time, and
+  // keep them. Only logged on failure — a blank card is harmless.
+  for (const c of cards) {
+    if (c.thumbnail) continue;
+    try {
+      const loaded = await loadProject(c.id);
+      if (closed) return;
+      if (!loaded) continue;
+      const blob = await buildThumbnail(loaded.project, loaded.frames, loadLayerBitmap);
+      if (!blob) continue;
+      await saveThumbnail(c.id, blob);
+      if (closed) return;
+      c.thumbnail = blob;
+      gallery.setThumbnail(c.id, blob);
+    } catch (err) {
+      console.warn('Parapara! could not draw a thumbnail:', err);
+    }
+  }
+}
+
+// Frame 1 of the project as a gallery thumbnail, or null if it has no
+// frames. `read(bitmapRef)` supplies layer pixels.
+function buildThumbnail(project, frames, read) {
+  const first = frames.find((f) => f.id === project.frames[0]);
+  if (!first) return null;
+  return renderThumbnail({ layers: project.layers, frame: first, canvasSize: project.canvas, read });
+}
+
+// --- editor ---
+//
+// Mounts the editor on one project (a prepareSession() result). With
+// canSave false nothing is written and there's no way back to a
+// gallery. Leaving through the Gallery button saves everything, draws
+// the thumbnail, then tears the editor down — undo history goes with
+// it, as in Procreate and Flipaclip.
+function mountEditor(session, { canSave }) {
+  let savedImages = session.images;
+  delete session.images;
+
   if (canSave) {
-    try {
-      savedSettings = await loadToolSettings();
-    } catch (err) {
-      console.warn('Parapara! could not load tool settings:', err);
-    }
-    try {
-      savedUiState = await loadUiState();
-    } catch (err) {
-      console.warn('Parapara! could not load UI state:', err);
-    }
+    saveLastProjectId(session.project.id)
+      .catch((err) => console.warn('Parapara! could not remember the open project:', err));
+    setUiState({ screen: 'editor' }, { now: true });
+
+    // Pixels of layers removed last time (kept so undo could bring
+    // them back) are garbage now — undo history isn't saved. Not
+    // awaited: nothing here waits on it, and it only touches blobs
+    // nothing references.
+    deleteUnreferencedBlobs(session.project.id, referencedBlobIds(session.project, session.frames))
+      .catch((err) => console.warn('Parapara! blob cleanup failed:', err));
   }
 
   const project = session.project;
 
-  // Created below once we know storage works; until then (and if it
-  // doesn't), changes simply aren't saved. Undo works either way — it's
-  // in memory only.
-  let settingsSaver = null;
+  // Created below if saving works; otherwise changes simply aren't
+  // saved. Undo works either way — it's in memory only.
   let autosaver = null;
   let projectSaver = null;
-  let uiStateSaver = null;
 
-  const ui = initUI(document.getElementById('app'), {
-    settings: savedSettings,
-    onSettingsChange: () => settingsSaver?.schedule(),
-    appActions: {
-      getVersionLabel: async () => formatVersion(await updater.getVersion()),
-      checkForUpdate: () => updater.checkForUpdate(),
-      applyUpdate: () => updater.applyUpdate(),
-      freshReload: () => updater.freshReload(),
-      fillAllLayers: () => devFillAllLayers(),
+  // True when something that shows in frame 1's thumbnail changed
+  // since the thumbnail was last drawn.
+  let thumbnailStale = false;
+
+  const ui = initUI(appRoot, {
+    settings: toolSettings,
+    onSettingsChange: () => {
+      toolSettings = canvasApi.getSettings();
+      if (canSave) settingsSaver.schedule();
     },
+    appActions: { ...appActions, fillAllLayers: () => devFillAllLayers() },
+    onGallery: canSave ? () => close() : null,
     onUndo: () => undo(),
     onRedo: () => redo(),
-    layersPanelOpen: savedUiState?.layersPanelOpen === true,
+    layersPanelOpen: uiState.layersPanelOpen === true,
     layers: {
       onSelect: (id) => selectLayer(id),
       onAdd: () => addLayer(),
@@ -155,7 +374,7 @@ async function startEditor() {
       onMove: (id, toIndex) => moveLayerTo(id, toIndex),
       onOpacityInput: (id, opacity) => canvasApi.setLayerProps(id, { opacity }),
       onOpacityCommit: (id, before, after) => commitOpacity(id, before, after),
-      onOpenChange: () => uiStateSaver?.schedule(),
+      onOpenChange: (open) => setUiState({ layersPanelOpen: open }),
     },
     frames: {
       onSelect: (id) => selectFrame(id),
@@ -174,6 +393,8 @@ async function startEditor() {
   for (const image of savedImages.values()) image.close?.();
   savedImages.clear();
   project.activeLayerId = canvasApi.getActiveLayerId();
+  // Settings may have been cleaned up by the canvas (bad saved values).
+  toolSettings = canvasApi.getSettings();
 
   // --- async work guard ---
   //
@@ -224,12 +445,14 @@ async function startEditor() {
 
   function markUnsaved(layerId) {
     unsavedLayers.add(layerId);
+    if (session.frame.id === project.frames[0]) thumbnailStale = true;
     autosaver?.schedule();
   }
 
   // Layer or frame added or removed: the project and the frame records
   // change together, saved in one transaction.
   async function persistStructure(removedFrameIds = []) {
+    thumbnailStale = true;
     if (canSave) await saveProjectAndFrames(project, session.frames, removedFrameIds);
   }
 
@@ -404,6 +627,7 @@ async function startEditor() {
 
   function applyMove(layerId, toIndex) {
     project.layers = moveLayer(project.layers, layerId, toIndex);
+    thumbnailStale = true;
     canvasApi.syncLayers(project.layers);
     scheduleProjectSave();
     refreshPanel();
@@ -411,6 +635,7 @@ async function startEditor() {
 
   function applyLayerChanges(layerId, changes) {
     project.layers = updateLayer(project.layers, layerId, changes);
+    if ('visible' in changes || 'opacity' in changes) thumbnailStale = true;
     canvasApi.setLayerProps(layerId, changes);
     scheduleProjectSave();
     refreshPanel();
@@ -638,41 +863,69 @@ async function startEditor() {
     },
   });
 
-  // Tool, color and brush sizes — app-wide, remembered across launches
-  // (see storage.js). Same save-timing rules as the drawing. A failure
-  // is only logged: losing a color choice isn't worth interrupting her.
-  settingsSaver = createAutosaver({
-    save: () => saveToolSettings(canvasApi.getSettings()),
-    delayMs: 300,
-    onError: (err) => console.warn('Parapara! saving tool settings failed:', err),
-  });
+  // Saves everything now, then redraws the thumbnail if frame 1
+  // changed. Thumbnail failures are only logged.
+  async function flush() {
+    await Promise.all([autosaver.flush(), projectSaver.flush()]);
+    await updateThumbnail();
+  }
 
-  // Whether the layers panel is open — same idea as tool settings.
-  uiStateSaver = createAutosaver({
-    save: () => saveUiState({ layersPanelOpen: panel.isOpen }),
-    delayMs: 300,
-    onError: (err) => console.warn('Parapara! saving UI state failed:', err),
-  });
+  async function updateThumbnail() {
+    if (!thumbnailStale) return;
+    thumbnailStale = false;
+    try {
+      const blob = await buildThumbnail(project, session.frames, readBitmap);
+      if (blob) await saveThumbnail(project.id, blob);
+    } catch (err) {
+      thumbnailStale = true;
+      console.warn('Parapara! could not save the thumbnail:', err);
+    }
+  }
 
-  const flushAll = () => Promise.all(
-    [autosaver, projectSaver, settingsSaver, uiStateSaver].map((saver) => saver.flush())
-  );
+  flushEditor = flush;
 
-  // iPadOS can close a backgrounded web app without warning, so save
-  // the moment it's hidden rather than waiting out the debounce.
-  // visibilitychange is the reliable signal on iOS; pagehide is a
-  // backup for an actual unload.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushAll();
-  });
-  window.addEventListener('pagehide', () => flushAll());
-
-  flushBeforeReload.push(flushAll);
+  // The Gallery button. Waits out nothing: a tap while a layer or
+  // frame change or a stroke is in progress is ignored, like other
+  // buttons. If some of her drawing couldn't be saved, she's asked
+  // before it's dropped.
+  let closing = false;
+  async function close() {
+    if (closing || !canAct()) return;
+    closing = true;
+    busy = true;
+    canvasApi.setInputBlocked(true);
+    refreshPanel();
+    // Failures are reported by the savers' own onError (and left
+    // marked unsaved), so check what's left rather than catching.
+    await Promise.all([autosaver.flush(), projectSaver.flush()]);
+    if (unsavedLayers.size > 0 || heldBitmaps.size > 0 || projectSaver.hasPendingWork) {
+      const leave = await showConfirm({
+        title: "Some of your drawing isn't saved",
+        message: 'The iPad may be out of space. If you go to the gallery now, the unsaved part will be lost.',
+        confirmLabel: 'Leave anyway',
+        cancelLabel: 'Stay',
+        danger: true,
+      });
+      if (!leave) {
+        closing = false;
+        busy = false;
+        canvasApi.setInputBlocked(false);
+        refreshPanel();
+        if (autosaver.hasPendingWork) autosaver.schedule();
+        if (projectSaver.hasPendingWork) projectSaver.schedule();
+        return;
+      }
+    }
+    await updateThumbnail();
+    flushEditor = null;
+    ui.destroy();
+    showGallery();
+  }
 }
 
 // Decodes a frame's saved layer bitmaps: a Map of layer id ->
 // ImageBitmap, with blank layers left out. A bitmap that won't decode
-// throws — the caller treats that like any failed load (saving off).
+// throws — the caller treats that like any failed load.
 async function decodeFrameImages(layers, frame, read) {
   const images = new Map();
   for (const layer of layers) {

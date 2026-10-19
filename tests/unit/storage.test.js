@@ -23,9 +23,10 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
 });
 
-test('first launch creates a project with one frame and one blank layer', async () => {
+test('createProject makes a project with one frame and one blank layer', async () => {
   await storage.initStorage();
-  const { project, frames } = await storage.openLastProject();
+  assert.equal(await storage.loadLastProject(), null, 'first launch: no last project');
+  const { project, frames } = await storage.createProject();
 
   assert.equal(project.name, 'Untitled');
   assert.deepEqual(project.canvas, { width: 1920, height: 1080 });
@@ -52,10 +53,10 @@ test('first launch creates a project with one frame and one blank layer', async 
   assert.equal(await storage.loadLayerBitmap(ref), null, 'blank layer has no blob');
 });
 
-test('relaunch reopens the same project instead of creating a new one', async () => {
-  const first = await storage.openLastProject();
+test('relaunch reopens the last project', async () => {
+  const first = await storage.createProject();
   relaunch();
-  const second = await storage.openLastProject();
+  const second = await storage.loadLastProject();
 
   assert.equal(second.project.id, first.project.id);
   assert.equal(second.frames[0].id, first.frames[0].id);
@@ -64,7 +65,7 @@ test('relaunch reopens the same project instead of creating a new one', async ()
 });
 
 test('layer bitmap round-trips byte-for-byte and bumps updatedAt', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const ref = frames[0].bitmapRefs[project.activeLayerId];
   const bytes = new Uint8Array(5000).map((_, i) => (i * 37) % 256);
 
@@ -81,7 +82,7 @@ test('layer bitmap round-trips byte-for-byte and bumps updatedAt', async () => {
 });
 
 test('saving again overwrites the previous bitmap', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const ref = frames[0].bitmapRefs[project.activeLayerId];
 
   await storage.saveLayerBitmap(project.id, ref, new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
@@ -91,7 +92,7 @@ test('saving again overwrites the previous bitmap', async () => {
   assert.deepEqual(back, new Uint8Array([9, 9]));
 });
 
-test('a last-project pointer to a missing project falls back to creating a new one', async () => {
+test('a last-project pointer to a missing project loads nothing', async () => {
   // Create the database, then point "last project" at an id that
   // doesn't exist (e.g. a project deleted elsewhere).
   await storage.initStorage();
@@ -108,9 +109,7 @@ test('a last-project pointer to a missing project falls back to creating a new o
   });
   db.close();
 
-  const { project, frames } = await storage.openLastProject();
-  assert.notEqual(project.id, 'gone');
-  assert.equal(frames.length, 1);
+  assert.equal(await storage.loadLastProject(), null);
 });
 
 test('createFrame gives every project layer its own blank bitmap slot', () => {
@@ -212,7 +211,7 @@ test('opening a version-1 database migrates it and keeps the drawing', async () 
     req.onerror = () => reject(req.error);
   });
 
-  const loaded = await storage.openLastProject();
+  const loaded = await storage.loadLastProject();
   assert.equal(loaded.project.id, 'p1', 'same project, not a new one');
   assert.equal(loaded.project.layers[0].id, frame.layers[0].id);
   const ref = loaded.frames[0].bitmapRefs[loaded.project.activeLayerId];
@@ -222,32 +221,32 @@ test('opening a version-1 database migrates it and keeps the drawing', async () 
 });
 
 test('saveFrame and saveProject persist structural changes', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const frame2 = storage.createFrame(project.id, project.layers);
 
   await storage.saveFrame(frame2);
   await storage.saveProject({ ...project, frames: [...project.frames, frame2.id] });
 
   relaunch();
-  const loaded = await storage.openLastProject();
+  const loaded = await storage.loadLastProject();
   assert.deepEqual(loaded.frames.map((f) => f.id), [frames[0].id, frame2.id]);
 });
 
 test('saveProjectAndFrames writes the project and frames together', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const extra = storage.createLayer('Layer 2');
   const updatedProject = { ...project, layers: [...project.layers, extra] };
   const updatedFrame = { ...frames[0], bitmapRefs: { ...frames[0].bitmapRefs, [extra.id]: 'new-ref' } };
 
   await storage.saveProjectAndFrames(updatedProject, [updatedFrame]);
   relaunch();
-  const loaded = await storage.openLastProject();
+  const loaded = await storage.loadLastProject();
   assert.deepEqual(loaded.project.layers.map((l) => l.name), ['Layer 1', 'Layer 2']);
   assert.equal(loaded.frames[0].bitmapRefs[extra.id], 'new-ref');
 });
 
 test('deleteUnreferencedBlobs removes only this project\'s unreferenced blobs', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const keep = frames[0].bitmapRefs[project.activeLayerId];
   const png = () => new Blob([new Uint8Array([1])], { type: 'image/png' });
   await storage.saveLayerBitmap(project.id, keep, png());
@@ -270,7 +269,7 @@ test('UI state round-trips, and is null before anything is saved', async () => {
 });
 
 test('saveProjectAndFrames deletes removed frame records', async () => {
-  const { project, frames } = await storage.openLastProject();
+  const { project, frames } = await storage.createProject();
   const frame2 = storage.createFrame(project.id, project.layers);
   await storage.saveProjectAndFrames({ ...project, frames: [frames[0].id, frame2.id] }, [...frames, frame2]);
   await storage.saveProjectAndFrames({ ...project, frames: [frames[0].id] }, frames, [frame2.id]);
@@ -284,4 +283,111 @@ test('saveProjectAndFrames deletes removed frame records', async () => {
     };
   });
   assert.deepEqual(remaining, [frames[0].id]);
+});
+
+// --- gallery (2d) ---
+
+const png = (...bytes) => new Blob([new Uint8Array(bytes)], { type: 'image/png' });
+
+function allKeys(storeName) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onsuccess = () => {
+      const r = req.result.transaction(storeName).objectStore(storeName).getAllKeys();
+      r.onsuccess = () => { req.result.close(); resolve(r.result); };
+      r.onerror = () => reject(r.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+test('nextProjectName counts past the highest "Animation N", ignoring renamed ones', () => {
+  assert.equal(storage.nextProjectName([]), 'Animation 1');
+  assert.equal(storage.nextProjectName(['Untitled']), 'Animation 1');
+  assert.equal(storage.nextProjectName(['Animation 1', 'Animation 3', 'My cat']), 'Animation 4');
+  assert.equal(storage.nextProjectName(['Animation 2x', 'animation 5']), 'Animation 1');
+});
+
+test('listProjects returns every project, most recently changed first', async () => {
+  const a = await storage.createProject('A');
+  await sleep(5);
+  const b = await storage.createProject('B');
+  await sleep(5);
+  // Drawing on A makes it the most recent.
+  await storage.saveLayerBitmap(a.project.id, a.frames[0].bitmapRefs[a.project.activeLayerId], png(1));
+
+  const list = await storage.listProjects();
+  assert.deepEqual(list.map((p) => p.name), ['A', 'B']);
+  assert.ok(list.every((p) => Array.isArray(p.frames)));
+  assert.ok(b.project.id);
+});
+
+test('renameProject changes the name but not updatedAt', async () => {
+  const { project } = await storage.createProject('Old');
+  await sleep(5);
+  await storage.renameProject(project.id, 'New');
+  const { project: back } = await storage.loadProject(project.id);
+  assert.equal(back.name, 'New');
+  assert.equal(back.updatedAt, project.updatedAt);
+});
+
+test('deleteProject removes the project, its frames and blobs, and nothing else', async () => {
+  const keep = await storage.createProject('Keep');
+  const gone = await storage.createProject('Gone');
+  const goneFrame2 = storage.createFrame(gone.project.id, gone.project.layers);
+  await storage.saveProjectAndFrames(
+    { ...gone.project, frames: [...gone.project.frames, goneFrame2.id] },
+    [...gone.frames, goneFrame2]
+  );
+  const keepRef = keep.frames[0].bitmapRefs[keep.project.activeLayerId];
+  const goneRef = gone.frames[0].bitmapRefs[gone.project.activeLayerId];
+  await storage.saveLayerBitmap(keep.project.id, keepRef, png(1));
+  await storage.saveLayerBitmap(gone.project.id, goneRef, png(2));
+  await storage.saveThumbnail(keep.project.id, png(3));
+  await storage.saveThumbnail(gone.project.id, png(4));
+
+  // "Gone" was created last, so it's the last-opened project.
+  await storage.deleteProject(gone.project.id);
+
+  assert.equal(await storage.loadProject(gone.project.id), null);
+  assert.deepEqual(await allKeys('frames'), [keep.frames[0].id]);
+  assert.deepEqual(
+    (await allKeys('blobs')).sort(),
+    [keepRef, storage.thumbnailBlobId(keep.project.id)].sort()
+  );
+  assert.equal(await storage.loadLastProject(), null, 'pointer to the deleted project cleared');
+  assert.ok(await storage.loadProject(keep.project.id));
+});
+
+test('deleteProject leaves the last-project pointer alone when it points elsewhere', async () => {
+  const other = await storage.createProject('Other');
+  const open = await storage.createProject('Open');
+  await storage.deleteProject(other.project.id);
+  const last = await storage.loadLastProject();
+  assert.equal(last.project.id, open.project.id);
+});
+
+test('thumbnails round-trip, don\'t bump updatedAt, and survive the launch sweep', async () => {
+  const { project, frames } = await storage.createProject();
+  assert.equal(await storage.loadThumbnail(project.id), null, 'none until drawn');
+
+  await sleep(5);
+  await storage.saveThumbnail(project.id, png(9, 8, 7));
+  const back = await storage.loadThumbnail(project.id);
+  assert.equal(back.type, 'image/png');
+  assert.deepEqual(new Uint8Array(await back.arrayBuffer()), new Uint8Array([9, 8, 7]));
+  assert.equal((await storage.loadProject(project.id)).project.updatedAt, project.updatedAt);
+
+  const { referencedBlobIds } = await import('../../js/storage/layers.js');
+  const deleted = await storage.deleteUnreferencedBlobs(project.id, referencedBlobIds(project, frames));
+  assert.equal(deleted, 0);
+  assert.ok(await storage.loadThumbnail(project.id));
+});
+
+test('saveLastProjectId points relaunch at that project', async () => {
+  const a = await storage.createProject('A');
+  await storage.createProject('B');
+  await storage.saveLastProjectId(a.project.id);
+  relaunch();
+  assert.equal((await storage.loadLastProject()).project.id, a.project.id);
 });

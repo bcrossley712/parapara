@@ -1,20 +1,22 @@
 // js/ui/ui.js
 //
-// Owns: tool rail (draw/erase/fill/smudge/brush-size/color/image-
-// import/mic/pan), transport controls, project gallery screen, DOM
-// glue between the other modules. Custom-styled dialogs only — no
+// Owns: the editor screen — top bar, tool rail (draw/erase/fill/
+// smudge/brush-size/color; later image-import/mic/pan), transport
+// controls — plus toasts and banners, and DOM glue between the other
+// modules. The gallery screen is gallery.js. Custom-styled dialogs only — no
 // native confirm()/alert()/date-input/color chrome, per the working
 // agreement.
 //
 // Bare-bones so far: enough of the rail (draw/erase/fill/smudge,
 // brush size, color) to drive canvas.js for the drawing-engine
-// testing pass. Transport, timeline, gallery, and the rest of the
+// testing pass. Transport, timeline, and the rest of the
 // tool rail (image-import/mic/pan) land with their respective build
 // steps. Color picker itself lives in color-picker.js.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { createColorPicker } from './color-picker.js';
-import { createSettingsPanel } from './settings-panel.js';
+import { attachSettingsMenu } from './settings-panel.js';
+import { GEAR_ICON, GALLERY_ICON } from './icons.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 import { createFrameStrip } from '../timeline/frame-strip.js';
 
@@ -32,9 +34,13 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 // options.layersPanelOpen: open the layers panel at startup.
 // options.frames: callbacks for the frame strip ({ onSelect, onAdd },
 //   see timeline/frame-strip.js).
+// options.onGallery: the top bar's Gallery button. Omit (or null) to
+//   leave the button out — when saving doesn't work there's no gallery
+//   to go back to.
 //
 // Returns { canvas, layers (the panel), frames (the strip),
-// setHistoryState(canUndo, canRedo) }.
+// setHistoryState(canUndo, canRedo), destroy() }. destroy() removes
+// the editor and everything it hooked up outside its own elements.
 export function initUI(container, options = {}) {
   const {
     settings = null,
@@ -45,8 +51,15 @@ export function initUI(container, options = {}) {
     layers: layersCallbacks = {},
     layersPanelOpen = false,
     frames: framesCallbacks = {},
+    onGallery = null,
   } = options;
   container.innerHTML = '';
+
+  // Every listener outside the editor's own elements (document-level
+  // tap-outside handlers) goes through this, so destroy() can remove
+  // them all at once.
+  const listeners = new AbortController();
+  const { signal } = listeners;
 
   const shell = document.createElement('div');
   shell.className = 'pp-app-shell';
@@ -64,6 +77,7 @@ export function initUI(container, options = {}) {
   const layersBtn = createIconButton('Layers', LAYERS_ICON, () => {
     layersPanel.setOpen(!layersPanel.isOpen);
   });
+  if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
   topBar.append(undoBtn, redoBtn, topBarSpacer, layersBtn);
 
   const body = document.createElement('div');
@@ -169,7 +183,7 @@ export function initUI(container, options = {}) {
     if (!pickerOpen) return;
     if (picker.element.contains(event.target) || event.target === colorSwatch) return;
     setPickerOpen(false);
-  });
+  }, { signal });
 
   const sizeControl = document.createElement('label');
   sizeControl.className = 'pp-brush-size';
@@ -200,27 +214,19 @@ export function initUI(container, options = {}) {
   rail.appendChild(gearBtn);
 
   const unavailable = async () => 'unsupported';
-  const settingsPanel = createSettingsPanel({
-    getVersionLabel: appActions.getVersionLabel ?? (async () => 'Unknown'),
-    checkForUpdate: appActions.checkForUpdate ?? unavailable,
-    applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
-    freshReload: appActions.freshReload ?? (async () => window.location.reload()),
-    clearDrawing: () => canvasApi.clear(),
-    fillAllLayers: appActions.fillAllLayers ?? (() => {}),
-  });
-  shell.appendChild(settingsPanel.element);
-
-  gearBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (pickerOpen) setPickerOpen(false);
-    settingsPanel.setOpen(!settingsPanel.isOpen, gearBtn);
-  });
-
-  // Same tap-outside-to-close behavior as the color picker.
-  document.addEventListener('pointerdown', (event) => {
-    if (!settingsPanel.isOpen) return;
-    if (settingsPanel.element.contains(event.target) || gearBtn.contains(event.target)) return;
-    settingsPanel.setOpen(false);
+  const settingsPanel = attachSettingsMenu({
+    button: gearBtn,
+    container: shell,
+    actions: {
+      getVersionLabel: appActions.getVersionLabel ?? (async () => 'Unknown'),
+      checkForUpdate: appActions.checkForUpdate ?? unavailable,
+      applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
+      freshReload: appActions.freshReload ?? (async () => window.location.reload()),
+      clearDrawing: () => canvasApi.clear(),
+      fillAllLayers: appActions.fillAllLayers ?? (() => {}),
+    },
+    onOpen: () => { if (pickerOpen) setPickerOpen(false); },
+    signal,
   });
 
   function setActiveTool(tool) {
@@ -270,7 +276,14 @@ export function initUI(container, options = {}) {
     layersBtn.setAttribute('aria-pressed', 'true');
   }
 
-  return { canvas: canvasApi, layers: layersPanel, frames: frameStrip, setHistoryState };
+  function destroy() {
+    listeners.abort();
+    settingsPanel.setOpen(false);
+    canvasApi.destroy();
+    container.innerHTML = '';
+  }
+
+  return { canvas: canvasApi, layers: layersPanel, frames: frameStrip, setHistoryState, destroy };
 }
 
 // PWA update prompt — shown when a new service worker has installed
@@ -358,19 +371,4 @@ const REDO_ICON = `
 <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false" style="transform: scaleX(-1)">
   <path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
   <path d="M10 2.5 4.5 7 10 11.5Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-</svg>`;
-
-// Gear icon, drawn here rather than pulled from an icon set: four bars
-// crossed at 45° make the eight teeth, a disc makes the body, and the
-// hole is filled with the button's own background color.
-const GEAR_ICON = `
-<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
-  <g fill="currentColor">
-    <rect x="10" y="1.5" width="4" height="21" rx="1"/>
-    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(45 12 12)"/>
-    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(90 12 12)"/>
-    <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(135 12 12)"/>
-    <circle cx="12" cy="12" r="7.5"/>
-  </g>
-  <circle cx="12" cy="12" r="3" fill="var(--pp-ink-light)"/>
 </svg>`;

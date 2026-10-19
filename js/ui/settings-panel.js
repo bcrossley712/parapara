@@ -13,7 +13,8 @@
 //   Clear drawing (moved here from the rail before undo existed, so a
 //   stray tap couldn't wipe her work), and Fill all layers — adds layers
 //   up to the cap and paints each one, to stress-test canvas memory on
-//   the iPad. Both edits are undoable.
+//   the iPad. Both edits are undoable. Clear and Fill only exist in the
+//   editor; the gallery's gear menu leaves them out.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -24,8 +25,8 @@ export function createSettingsPanel(actions) {
     checkForUpdate,    // () => Promise<'ready'|'none'|'error'|'unsupported'>
     applyUpdate,       // () => Promise<void>, reloads the page
     freshReload,       // () => Promise<void>, reloads the page
-    clearDrawing,      // () => void
-    fillAllLayers,     // () => void
+    clearDrawing,      // () => void, optional (editor only)
+    fillAllLayers,     // () => void, optional (editor only)
   } = actions;
 
   const panel = document.createElement('div');
@@ -67,7 +68,9 @@ export function createSettingsPanel(actions) {
   fillHint.className = 'pp-settings__hint';
   fillHint.textContent = 'Memory test: adds layers up to the limit and paints each. Undoable.';
 
-  panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint, clearBtn, fillBtn, fillHint);
+  panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint);
+  if (clearDrawing) panel.append(clearBtn);
+  if (fillAllLayers) panel.append(fillBtn, fillHint);
 
   let open = false;
   let busy = false;
@@ -126,16 +129,26 @@ export function createSettingsPanel(actions) {
     setOpen(false);
   });
 
-  // Opens beside `anchor`, bottom-aligned with it (the gear sits at
-  // the bottom of the rail, so the panel grows upward).
-  function setOpen(next, anchor) {
+  // Opens next to `anchor`. 'beside' (the editor's gear, at the bottom
+  // of the rail): to its right, bottom-aligned, growing upward.
+  // 'below' (the gallery's gear, top right): under it, right-aligned.
+  function setOpen(next, anchor, placement = 'beside') {
     open = next;
     panel.classList.toggle('pp-settings--hidden', !next);
     if (next) {
       if (anchor) {
         const rect = anchor.getBoundingClientRect();
-        panel.style.left = `${rect.right + 8}px`;
-        panel.style.bottom = `${window.innerHeight - rect.bottom}px`;
+        if (placement === 'below') {
+          panel.style.left = '';
+          panel.style.bottom = '';
+          panel.style.top = `${rect.bottom + 8}px`;
+          panel.style.right = `${window.innerWidth - rect.right}px`;
+        } else {
+          panel.style.top = '';
+          panel.style.right = '';
+          panel.style.left = `${rect.right + 8}px`;
+          panel.style.bottom = `${window.innerHeight - rect.bottom}px`;
+        }
       }
       if (!busy) status.textContent = '';
       refreshVersion();
@@ -147,6 +160,30 @@ export function createSettingsPanel(actions) {
     get isOpen() { return open; },
     setOpen,
   };
+}
+
+// Wires a gear `button` to a settings panel appended to `container`:
+// the button toggles it, a tap anywhere outside closes it (like the
+// color picker). `onOpen` runs before it opens (e.g. to close another
+// floating panel). Document listeners are removed when `signal`
+// aborts, so a screen that closes leaves nothing behind.
+export function attachSettingsMenu({ button, container, actions, placement, onOpen, signal }) {
+  const panel = createSettingsPanel(actions);
+  container.appendChild(panel.element);
+
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (!panel.isOpen) onOpen?.();
+    panel.setOpen(!panel.isOpen, button, placement);
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!panel.isOpen) return;
+    if (panel.element.contains(event.target) || button.contains(event.target)) return;
+    panel.setOpen(false);
+  }, { signal });
+
+  return panel;
 }
 
 function makeButton(label) {

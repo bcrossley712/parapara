@@ -1,7 +1,8 @@
 // js/storage/storage.js
 //
 // Owns: the IndexedDB wrapper and the project/frame schema (source of
-// truth — see PROJECT_NOTES.md "Schema"). Later:
+// truth — see PROJECT_NOTES.md "Schema"), plus the gallery's project
+// list, rename, delete and thumbnails. Later:
 // storage-used estimation for the quota warning.
 //
 // Undo/redo is NOT here and is never persisted — it's one project-wide
@@ -20,7 +21,7 @@ const DB_VERSION = 2;
 
 const STORE_PROJECTS = 'projects';
 const STORE_FRAMES = 'frames';
-const STORE_BLOBS = 'blobs';   // layer bitmaps (and, later, images/audio)
+const STORE_BLOBS = 'blobs';   // layer bitmaps, thumbnails (later images/audio)
 const STORE_META = 'meta';     // small app-level records, e.g. last project
 
 const META_LAST_PROJECT = 'lastProjectId';
@@ -30,6 +31,7 @@ const META_UI_STATE = 'uiState';
 const DEFAULT_CANVAS = { width: 1920, height: 1080 };
 const DEFAULT_FPS = 12;
 const DEFAULT_PROJECT_NAME = 'Untitled';
+const PROJECT_NAME_PREFIX = 'Animation';
 const DEFAULT_LAYER_NAME = 'Layer 1';
 
 let dbPromise = null;
@@ -107,6 +109,33 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     frames: [],
     audioClips: [],
   };
+}
+
+// "Animation N" for a new project, one past the highest N already in
+// use (like nextLayerName in layers.js), so deleting one never leads to
+// two with the same name. Renamed projects don't count.
+export function nextProjectName(names) {
+  let highest = 0;
+  for (const name of names) {
+    const match = new RegExp(`^${PROJECT_NAME_PREFIX} (\\d+)$`).exec(name ?? '');
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return `${PROJECT_NAME_PREFIX} ${highest + 1}`;
+}
+
+// The gallery thumbnail's id in the blob store. Derived from the
+// project id rather than stored on the project, so no project-record
+// write (which could race the open editor's own saves) is ever needed
+// to give a project a thumbnail. referencedBlobIds (layers.js) lists
+// it, so the launch sweep keeps it.
+export function thumbnailBlobId(projectId) {
+  return `thumb-${projectId}`;
+}
+
+// Newest first, by when the project was last changed — the gallery's
+// order (Procreate and Flipaclip sort the same way).
+export function sortByRecent(projects) {
+  return [...projects].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
 // --- migrations (pure — the upgrade branch feeds records through) ---
@@ -345,18 +374,91 @@ export async function loadProject(projectId) {
   return { project, frames: frames.filter(Boolean) };
 }
 
-// Opens whichever project was open last, or creates the first one.
-// Temporary startup behavior until the gallery exists (step 2d).
-export async function openLastProject() {
+// Loads whichever project was open last, or returns null if there is
+// none (first launch) or it no longer exists. A project with no frames
+// is broken; treat it as missing rather than opening it.
+export async function loadLastProject() {
   const meta = await withTransaction([STORE_META], 'readonly', (s) =>
     promisifyRequest(s[STORE_META].get(META_LAST_PROJECT))
   );
+  if (!meta?.value) return null;
+  const loaded = await loadProject(meta.value);
+  return loaded && loaded.frames.length > 0 ? loaded : null;
+}
 
-  if (meta?.value) {
-    const loaded = await loadProject(meta.value);
-    if (loaded && loaded.frames.length > 0) return loaded;
-  }
-  return createProject();
+export async function saveLastProjectId(projectId) {
+  await withTransaction([STORE_META], 'readwrite', (s) => {
+    s[STORE_META].put({ key: META_LAST_PROJECT, value: projectId });
+  });
+}
+
+// --- gallery ---
+
+// Every project record, newest first. Records are small (layer names,
+// frame ids) — pixels live in the blob store — so listing all of them
+// is cheap.
+export async function listProjects() {
+  const projects = await withTransaction([STORE_PROJECTS], 'readonly', (s) =>
+    promisifyRequest(s[STORE_PROJECTS].getAll())
+  );
+  return sortByRecent(projects);
+}
+
+// Renames without touching updatedAt: a new name isn't new work, so it
+// shouldn't move the card to the front of the gallery. Read and write
+// happen in one transaction.
+export async function renameProject(projectId, name) {
+  await withTransaction([STORE_PROJECTS], 'readwrite', (s) => {
+    const getReq = s[STORE_PROJECTS].get(projectId);
+    getReq.onsuccess = () => {
+      const project = getReq.result;
+      if (project) s[STORE_PROJECTS].put({ ...project, name });
+    };
+  });
+}
+
+// Deletes a project for good: its record, every frame, every blob
+// (layer pixels, thumbnail, later images and audio), all in one
+// transaction so a failure leaves it whole. Clears the last-project
+// pointer if it pointed here. Not undoable — that's why the gallery
+// asks first.
+export async function deleteProject(projectId) {
+  await withTransaction(
+    [STORE_PROJECTS, STORE_FRAMES, STORE_BLOBS, STORE_META],
+    'readwrite',
+    (s) => {
+      s[STORE_PROJECTS].delete(projectId);
+      for (const store of [STORE_FRAMES, STORE_BLOBS]) {
+        const req = s[store].index('projectId').openKeyCursor(IDBKeyRange.only(projectId));
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return;
+          s[store].delete(cursor.primaryKey);
+          cursor.continue();
+        };
+      }
+      const metaReq = s[STORE_META].get(META_LAST_PROJECT);
+      metaReq.onsuccess = () => {
+        if (metaReq.result?.value === projectId) s[STORE_META].delete(META_LAST_PROJECT);
+      };
+    }
+  );
+}
+
+// Thumbnail: a small PNG of frame 1, stored like a layer bitmap
+// (ArrayBuffer + MIME type). Doesn't bump updatedAt — redrawing the
+// thumbnail isn't an edit.
+export async function saveThumbnail(projectId, blob) {
+  const buffer = await blob.arrayBuffer();
+  const type = blob.type || 'image/png';
+  await withTransaction([STORE_BLOBS], 'readwrite', (s) => {
+    s[STORE_BLOBS].put({ id: thumbnailBlobId(projectId), projectId, type, buffer });
+  });
+}
+
+// Returns the thumbnail Blob, or null if there isn't one yet.
+export async function loadThumbnail(projectId) {
+  return loadLayerBitmap(thumbnailBlobId(projectId));
 }
 
 export async function saveProject(project) {

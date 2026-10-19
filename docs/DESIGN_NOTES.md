@@ -343,6 +343,28 @@ Sections: [Process lessons](#process-lessons) ·
   mid-install update test does exactly that in Chromium; it's kept as a
   behavior guard, with that caveat in its comment.
 
+## Gallery
+
+- **Mount/unmount, not reload, to switch projects.** A reload is
+  little code but flashes white and cold-starts on every open. The
+  editor's outside hooks were few (two document listeners, the
+  visibility flush, one ResizeObserver), so tearing it down cleanly
+  was cheap. Undo history resetting per project matches Procreate and
+  Flipaclip.
+- **Reopen where she left off.** Procreate and Sketchbook do;
+  Flipaclip and Rough Animator always open the gallery. Matching the
+  former kept 2c's behavior (straight into her drawing) for her.
+- **Thumbnail id derived from the project id** instead of a
+  `thumbnailRef` field (the scoped plan): giving a project a thumbnail
+  then never writes the project record, which the open editor also
+  saves — no chance of one overwriting the other. Thumbnails are drawn
+  from saved bitmaps so the same code serves the open project and
+  ones that were never opened since 2d.
+- **Frame 1 as the thumbnail**, as Flipaclip shows it.
+- **One-tap create** ("Animation N") rather than Flipaclip's setup
+  dialog; size/fps are already stored per project, so a setup dialog
+  can come later without a schema change.
+
 ## Planned features
 
 - **Imported reference image** per frame: stored once, referenced by

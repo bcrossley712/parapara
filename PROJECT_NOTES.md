@@ -97,11 +97,12 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Step 2c (layers + bare-bones frame strip): done and confirmed on
   the iPad.** Shared layers, layers panel, frame strip, fading banner,
   gestures off the page.
-- **Next: 2d** project gallery (list/create/open/delete, custom
-  confirm). Gallery first so project create/delete exists before 2e
-  adds more per-project data. Swap 2d/2e if she needs copy frame
-  sooner.
-- **Then 2e** (before step 3) — scope in detail when it starts:
+- **Step 2d (project gallery): built, not yet confirmed on the iPad.**
+  Gallery of cards (frame-1 thumbnail, name, frame count), New
+  animation, open, rename (tap the name, or ⋯), delete with a custom
+  confirm; Gallery button in the editor; relaunch reopens where she
+  left off.
+- **Next: 2e** (before step 3) — scope in detail when it starts:
   - **Copy frame:** duplicate the current frame (every layer's drawing)
     right after itself and move onto it; undoable like add frame.
   - **Copy layer:** duplicate the active layer (its drawing on every
@@ -109,6 +110,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Per-project palette** (saved swatches) and **app-wide recent
     colors** (last ~8 drawn with), both in the color picker.
   - **Eyedropper:** pick a color from the canvas.
+  - **Duplicate project** (deferred from 2d; shares code with copy
+    frame/layer).
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -128,6 +131,8 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Color opacity** — not in the picker on purpose; revisit if she asks
   (palette, recents and eyedropper are planned for 2e).
 - **Export format** (container/codec) — decide at step 6.
+- **Rename from the editor** (tap the title, as Procreate does) —
+  gallery-only for now.
 - **How-to / tutorials** reachable from the settings (gear) menu —
   later, once there's enough to explain (gestures, layers, frames).
 
@@ -224,14 +229,38 @@ Short rules; reasoning in the linked sections.
   pan/zoom/rotate; visible undo/redo buttons too. Later, with a brush
   library: three-finger swipe up = color, down = brushes.
 - **Tool settings** (tool, color, per-tool sizes) are remembered
-  app-wide, not per project. Per project: the open frame and active
-  layer. App-wide: whether the layers panel was open. The view
-  (pan/zoom/rotation) resets on launch.
+  app-wide, not per project, and carry from one project into the next.
+  Per project: the open frame and active layer. App-wide: whether the
+  layers panel was open, which screen she was on, and the last
+  project. The view (pan/zoom/rotation) resets on launch and on every
+  open.
 - **Messages:** information that isn't a problem (locked/hidden
   layer, layer cap) is a fading banner that never blocks touches
   (`showBanner`); real problems (couldn't save) are a toast that waits
   for OK (`showNotice`).
-- **Projects:** a gallery, one project open at a time.
+- **Projects and screens** ([why](docs/DESIGN_NOTES.md#gallery)):
+  - The gallery or one project in the editor, never both. `main.js`
+    routes: `mountEditor(session)` builds the editor; its Gallery
+    button runs `close()`, which flushes, redraws the thumbnail, then
+    `ui.destroy()` → `canvas.destroy()`. No page reload.
+  - **Launch reopens where she left off** (`uiState.screen` +
+    `lastProjectId`), like Procreate/Sketchbook. Installs from before
+    2d have no `screen` and open the editor. No projects → the empty
+    gallery (no auto-created project).
+  - **Load before switching:** a project is fully loaded (including
+    decoding frame layers) before the gallery is torn down; if it
+    fails, she stays on the gallery with a notice.
+  - Undo history is per open project and is dropped on close.
+  - New project: one tap, named "Animation N" (one past the highest);
+    size/fps defaults, no setup dialog. Rename doesn't bump
+    `updatedAt`; drawing does (`saveLayerBitmap`), so newest-first
+    means most recently drawn on.
+  - **Thumbnail = frame 1**, visible layers at their opacity over
+    white, 480 px wide PNG (`canvas/thumbnail.js`, drawn from saved
+    bitmaps). Redrawn on close and on hide when something in frame 1
+    changed; the gallery draws any that are missing.
+  - Delete is a custom confirm and not undoable; it removes the
+    project, frames and blobs in one transaction.
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
 - **Updates:** a new version waits for the user (toast or gear menu),
@@ -276,11 +305,17 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Bitmaps stored as ArrayBuffer + MIME type, not Blob.
 - Don't await non-IndexedDB work inside `withTransaction` (it
   auto-commits early).
-- If loading saved work fails, saving stays off.
-- **The launch sweep deletes every blob of the project not listed by
-  `referencedBlobIds` (`layers.js`).** Any new kind of blob reference
-  (step 3 images, step 5 audio) must be added there, or it's deleted
-  on the next launch.
+- Never save over work that failed to load: opening a project that
+  fails leaves her on the gallery; if the database can't open at all,
+  the editor runs on an unsaved in-memory project with no Gallery
+  button.
+- **The sweep (on every project open) deletes every blob of the
+  project not listed by `referencedBlobIds` (`layers.js`).** Any new
+  kind of blob reference (step 3 images, step 5 audio) must be added
+  there, or it's deleted on the next open. The thumbnail
+  (`thumbnailBlobId`) is listed.
+- `savedDrawingBytes` in the e2e helpers skips `thumb-` blobs — keep
+  that if thumbnail ids change.
 - Tool-settings validation lives in `canvas.js`
   (`sanitizeToolSettings`); bad fields fall back individually.
 
@@ -297,6 +332,13 @@ Each is here because breaking it caused (or would cause) a real bug.
   `nowrap` on content that could grow.
 - The canvas re-measures via `ResizeObserver` on the canvas area, not
   window resize.
+- **Anything an editor screen hooks up outside its own elements**
+  (document listeners, observers) must be undone by `destroy()` —
+  `ui.js` and `gallery.js` route document listeners through an
+  `AbortController`. `canvas.destroy()` shrinks every canvas to 0×0 so
+  iOS frees that memory before the next project loads.
+- Screen switches save `uiState` immediately, not debounced, so
+  closing the app straight after still reopens the right screen.
 - `sw.js` `APP_SHELL` lists every module reachable from `main.js`
   (a test enforces this). Pre-cache uses `cache: 'reload'`.
 - **Shared origin:** all of the account's GitHub Pages projects share
@@ -310,8 +352,9 @@ Each is here because breaking it caused (or would cause) a real bug.
     index.html, manifest.json, style.css
     sw.js                 service worker; VERSION stamped by CI
     js/
-      main.js             entry + glue: storage ↔ canvas ↔ ui, autosave,
-                          updater ↔ toast/gear; screen routing (2d)
+      main.js             entry + glue: screen routing (gallery ↔ editor),
+                          storage ↔ canvas ↔ ui, autosave, thumbnails,
+                          updater ↔ toast/gear
       updater.js          SW registration, update checks/apply, version,
                           fresh reload — no UI
       canvas/
@@ -322,7 +365,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           onChange / exportPNG(layerId) (persistence),
                           getSettings / applySettings, swapRegion(…,
                           layerId) / isBusy / onGesture / onBlocked /
-                          setInputBlocked (undo, lock)
+                          setInputBlocked (undo, lock), destroy
+        thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
         region.js         pure dirty-rect helpers
@@ -333,11 +377,15 @@ Each is here because breaking it caused (or would cause) a real bug.
         layers.js         pure layer-list + bitmap-slot ops, MAX_LAYERS,
                           referencedBlobIds (launch sweep)
       ui/
-        ui.js             top bar (undo/redo, Layers), tool rail, toasts,
-                          DOM glue
+        ui.js             editor: top bar (Gallery, undo/redo, Layers),
+                          tool rail, toasts/banners, DOM glue, destroy
+        gallery.js        gallery screen (UI only; intents via callbacks)
+        confirm-dialog.js custom modal: showConfirm / showPrompt
+        icons.js          icons shared by both screens
         layers-panel.js   layers panel (UI only; intents via callbacks)
         color-picker.js   custom HSV picker
-        settings-panel.js gear menu (dev section is temporary)
+        settings-panel.js gear menu (dev section is temporary);
+                          attachSettingsMenu for either screen
       timeline/
         frames.js         pure frame-order ops (insert/remove/neighbor)
         frame-strip.js    frame strip (UI only; intents via callbacks)
@@ -375,6 +423,7 @@ bitmap. Planned fields are marked. Extend additively.
       frames: [frameId, ...],                 // timeline order
       currentFrameId,                         // the frame she was on
       palette: [ '#rrggbb', ... ],            // planned (2e)
+      // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
 
@@ -386,8 +435,10 @@ bitmap. Planned fields are marked. Extend additively.
 
 **IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
-type, buffer }`), `meta` (`lastProjectId`, `toolSettings`, `uiState`
-= `{ layersPanelOpen }`; planned for 2e: `recentColors`).
+type, buffer }` — layer bitmaps and the gallery thumbnail
+`thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
+`uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor' }`;
+planned for 2e: `recentColors`).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
 every frame record. Undo is never stored.
@@ -425,7 +476,10 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     exception: proving something *doesn't* happen.
   - **Check a new test fails without its fix**, or note that it
     doesn't.
-  - **When e2e passes ~2 minutes,** parallelize — first isolating the
+  - `openApp` (helpers) starts from the empty gallery on a fresh
+    install and taps New animation; specs that need the gallery go
+    through the Gallery button.
+  - **When e2e passes ~2 minutes,** parallelize (at ~1.5 min after 2d) — first isolating the
     update tests into their own serial group.
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
@@ -434,4 +488,5 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   folder to that exclude list** in `deploy.yml`.
 - **Device-only (say so at handoff):** iOS storage eviction, stylus
   feel, iPadOS gesture conflicts, Safari-only rendering, iOS
-  suspend/relaunch behavior.
+  suspend/relaunch behavior, gallery touch scrolling, canvas memory
+  release between projects.

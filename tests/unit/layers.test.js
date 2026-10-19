@@ -83,14 +83,14 @@ test('attach gives a frame without a saved ref a fresh blank one', () => {
   assert.ok(out[1].bitmapRefs.n && out[1].bitmapRefs.n !== 'kept');
 });
 
-test('referencedBlobIds covers layer bitmaps, frame images and audio', () => {
-  const project = { audioClips: [{ id: 'c', blobRef: 'audio1' }] };
+test('referencedBlobIds covers layer bitmaps, frame images, audio and the thumbnail', () => {
+  const project = { id: 'p1', audioClips: [{ id: 'c', blobRef: 'audio1' }] };
   const frames = [
     { id: 'f1', bitmapRefs: { a: 'b1', b: 'b2' }, image: { blobRef: 'img1' } },
     { id: 'f2', bitmapRefs: { a: 'b3' }, image: null },
   ];
   assert.deepEqual(
     [...L.referencedBlobIds(project, frames)].sort(),
-    ['audio1', 'b1', 'b2', 'b3', 'img1']
+    ['audio1', 'b1', 'b2', 'b3', 'img1', 'thumb-p1']
   );
 });

@@ -1316,6 +1316,32 @@ export function initCanvas(container, options = {}) {
       if (surface) tctx.drawImage(surface.canvas, 0, 0, target.width, target.height);
     },
 
+    // Tears the canvas down when the editor closes (back to the
+    // gallery): stops watching for resizes, ignores input, and frees
+    // every canvas's pixel memory right away by shrinking it to 0×0 —
+    // iOS reclaims detached canvases lazily, and the next project's
+    // layers need that memory. Unusable afterwards.
+    destroy() {
+      areaObserver.disconnect();
+      inputBlocked = true;
+      for (const surface of surfaces.values()) {
+        surface.canvas.width = 0;
+        surface.canvas.height = 0;
+      }
+      surfaces.clear();
+      order = [];
+      canvas = null;
+      ctx = null;
+      for (const c of [committedCanvas, scratchCanvas]) {
+        c.width = 0;
+        c.height = 0;
+      }
+      changeListeners.clear();
+      gestureListeners.clear();
+      blockedListeners.clear();
+      stack.remove();
+    },
+
     // Ignores new touches while true — main.js sets it around async
     // work (bringing a layer back from storage) so a stroke can't land
     // on pixels that are about to be replaced.

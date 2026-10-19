@@ -7,7 +7,7 @@
 // Arrays are never mutated in place: each function returns new ones,
 // so an undo entry can hold onto the "before" safely.
 
-import { newId } from './storage.js';
+import { newId, thumbnailBlobId } from './storage.js';
 
 // Most layers a project can have. Each is ~8 MB of canvas memory on
 // the iPad (see DESIGN_NOTES "Layers and undo"); the one place to
@@ -96,10 +96,11 @@ export function attachLayerRefs(frames, layerId, refs = {}) {
 
 // Every blob id the project still uses. Anything else in the blob
 // store for this project is garbage (e.g. a deleted layer's pixels
-// once its undo entry is gone). Images (step 3) and audio (step 5) add
-// their refs here when they land.
+// once its undo entry is gone). Includes the gallery thumbnail (2d).
+// Images (step 3) and audio (step 5) add their refs here when they
+// land — anything not listed is deleted at the next launch.
 export function referencedBlobIds(project, frames) {
-  const ids = new Set();
+  const ids = new Set([thumbnailBlobId(project.id)]);
   for (const frame of frames) {
     for (const ref of Object.values(frame.bitmapRefs ?? {})) ids.add(ref);
     if (frame.image?.blobRef) ids.add(frame.image.blobRef);

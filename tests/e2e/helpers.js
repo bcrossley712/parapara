@@ -8,8 +8,15 @@
 
 import { expect } from '@playwright/test';
 
+// Opens the app into the editor. A fresh install starts on the empty
+// gallery (2d), so this makes a new animation from there; an install
+// that was left in the editor reopens it.
 export async function openApp(page) {
   await page.goto('/index.html');
+  await page.locator('.pp-canvas, .pp-gallery').first().waitFor();
+  if (await page.locator('.pp-gallery').count()) {
+    await page.getByRole('button', { name: 'New animation' }).click();
+  }
   await page.locator('.pp-canvas').waitFor();
 }
 
@@ -27,7 +34,7 @@ export async function setVisibility(page, state) {
 }
 
 // Reads one record from the app's IndexedDB, straight from the page.
-function readDb(page, storeName, key) {
+export function readDb(page, storeName, key) {
   return page.evaluate(([store, k]) => new Promise((resolve, reject) => {
     const req = indexedDB.open('parapara');
     req.onerror = () => reject(req.error);
@@ -43,7 +50,7 @@ function readDb(page, storeName, key) {
 }
 
 // A fingerprint of the saved drawing (total PNG bytes across saved
-// layer bitmaps), or null if nothing is saved yet. Changes whenever a
+// layer bitmaps, not thumbnails), or null if nothing is saved yet. Changes whenever a
 // new save lands.
 export async function savedDrawingBytes(page) {
   const records = await page.evaluate(() => new Promise((resolve, reject) => {
@@ -53,7 +60,11 @@ export async function savedDrawingBytes(page) {
       const db = req.result;
       if (!db.objectStoreNames.contains('blobs')) { db.close(); resolve([]); return; }
       const r = db.transaction('blobs').objectStore('blobs').getAll();
-      r.onsuccess = () => { db.close(); resolve(r.result.map((rec) => rec.buffer.byteLength)); };
+      // Gallery thumbnails aren't the drawing.
+      r.onsuccess = () => {
+        db.close();
+        resolve(r.result.filter((rec) => !rec.id.startsWith('thumb-')).map((rec) => rec.buffer.byteLength));
+      };
       r.onerror = () => { db.close(); reject(r.error); };
     };
   }));

@@ -9,7 +9,7 @@
 // home-screen apps around an update.
 
 import { test, expect } from '@playwright/test';
-import { setVisibility } from './helpers.js';
+import { setVisibility, openApp } from './helpers.js';
 
 const INITIAL_VERSION = '0123456789abcdef0123456789abcdef01234567-20261018131500';
 const NEW_VERSION = 'fedcba9876543210fedcba9876543210fedcba98-20261019090000';
@@ -23,8 +23,7 @@ async function setServerState(page, params) {
 // Opens the app and waits until the service worker controls the page
 // (an installed app, as on the iPad — not a first-ever visit).
 async function openInstalledApp(page) {
-  await page.goto('/index.html');
-  await page.locator('.pp-canvas').waitFor();
+  await openApp(page);
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
 }
 
