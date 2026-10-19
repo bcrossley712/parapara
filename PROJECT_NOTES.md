@@ -94,11 +94,21 @@ icon, manifest `name`/`short_name`, and repo copy.
   swipe, two-finger double-tap reset), with iPadOS's own undo kept out
   of the way; Clear and fill undoable; fill is a gesture candidate;
   zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
-- **Step 2c (layers + bare-bones frame strip): built.** Shared layers
-  and the layers panel confirmed on the iPad; the frame strip, fading
-  banner and gestures off the page not yet.
+- **Step 2c (layers + bare-bones frame strip): done and confirmed on
+  the iPad.** Shared layers, layers panel, frame strip, fading banner,
+  gestures off the page.
 - **Next: 2d** project gallery (list/create/open/delete, custom
-  confirm).
+  confirm). Gallery first so project create/delete exists before 2e
+  adds more per-project data. Swap 2d/2e if she needs copy frame
+  sooner.
+- **Then 2e** (before step 3) — scope in detail when it starts:
+  - **Copy frame:** duplicate the current frame (every layer's drawing)
+    right after itself and move onto it; undoable like add frame.
+  - **Copy layer:** duplicate the active layer (its drawing on every
+    frame) above itself; undoable. Counts toward the layer cap.
+  - **Per-project palette** (saved swatches) and **app-wide recent
+    colors** (last ~8 drawn with), both in the color picker.
+  - **Eyedropper:** pick a color from the canvas.
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -106,8 +116,7 @@ icon, manifest `name`/`short_name`, and repo copy.
   links, Krita reference import).
 
 **Open items**
-- **Duplicate layer, merge down** — deferred from 2c on purpose
-  (duplicate copies a bitmap on every frame; merge needs opacity-aware
+- **Merge down** — deferred on purpose (needs opacity-aware
   compositing and a two-layer undo entry). Revisit after step 4.
 - **Fill sample toggle** (current layer vs all visible, as Sketchbook
   offers) — fill always samples all visible layers; add the toggle if
@@ -116,8 +125,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   it to brushes that soften their own edges). Don't retune it alone.
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
 - **Brush variety** (sizes, chisel tips, edge blending) — after step 2.
-- **Color picker has no presets/recents, eyedropper or opacity** — on
-  purpose; revisit if she asks.
+- **Color opacity** — not in the picker on purpose; revisit if she asks
+  (palette, recents and eyedropper are planned for 2e).
 - **Export format** (container/codec) — decide at step 6.
 - **How-to / tutorials** reachable from the settings (gear) menu —
   later, once there's enough to explain (gestures, layers, frames).
@@ -365,6 +374,7 @@ bitmap. Planned fields are marked. Extend additively.
       activeLayerId,
       frames: [frameId, ...],                 // timeline order
       currentFrameId,                         // the frame she was on
+      palette: [ '#rrggbb', ... ],            // planned (2e)
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
 
@@ -377,7 +387,7 @@ bitmap. Planned fields are marked. Extend additively.
 **IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
 type, buffer }`), `meta` (`lastProjectId`, `toolSettings`, `uiState`
-= `{ layersPanelOpen }`).
+= `{ layersPanelOpen }`; planned for 2e: `recentColors`).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
 every frame record. Undo is never stored.
