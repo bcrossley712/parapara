@@ -76,9 +76,9 @@ test('Clear is saved like any other edit', async ({ page }) => {
   await waitForDrawingSave(page, null);
   const withStroke = await savedDrawingBytes(page);
 
-  // Clear lives in the gear menu (moved off the rail — no undo yet).
-  await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('button', { name: 'Clear drawing' }).click();
+  // Clear lives in the layers panel (2e).
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
   await waitForDrawingSave(page, withStroke);
   await reloadApp(page);
 

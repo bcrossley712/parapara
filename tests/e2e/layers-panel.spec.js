@@ -374,3 +374,76 @@ test('the developer fill tool reaches the layer cap and paints every layer', asy
     return counts.every((n) => n === 1920 * 1080);
   }, { timeout: 15000 }).toBe(true);
 });
+
+// --- Clear, and lock protecting a layer (2e) ---
+
+const clearBtn = (page) => page.getByRole('button', { name: 'Clear', exact: true });
+const deleteBtn = (page) => page.getByRole('button', { name: 'Delete', exact: true });
+
+test('Clear empties the active layer on this frame only, and is undoable', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const l1 = await activeId(page);
+  await stroke(page, 300, 300, 800, 300);
+  await addLayer(page);
+  const l2 = await activeId(page);
+  await stroke(page, 300, 600, 800, 600);
+  const l1Painted = await painted(page, l1);
+  const l2Painted = await painted(page, l2);
+
+  // Frame 2 (a copy, so Layer 2 is drawn there too): clear it there.
+  await page.locator('.pp-frame-strip__tile.is-current').click();
+  await page.getByRole('menuitem', { name: 'Duplicate' }).click();
+  await expect(page.locator('.pp-frame-strip__tile')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Add frame' })).toBeEnabled();
+  expect(await painted(page, l2)).toBe(l2Painted);
+
+  await clearBtn(page).click();
+  expect(await painted(page, l2)).toBe(0);
+  expect(await painted(page, l1)).toBe(l1Painted); // other layer untouched
+
+  await undo(page);
+  expect(await painted(page, l2)).toBe(l2Painted);
+  await clearBtn(page).click();
+
+  // Frame 1's Layer 2 still has its drawing.
+  await page.getByRole('button', { name: 'Frame 1', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Frame 1', exact: true })).toHaveClass(/is-current/);
+  await expect(page.getByRole('button', { name: 'Add frame' })).toBeEnabled();
+  expect(await painted(page, l2)).toBe(l2Painted);
+});
+
+test('a locked layer can\'t be cleared or deleted; the banner says why', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  await addLayer(page);
+  const id = await activeId(page);
+  await stroke(page, 300, 300, 800, 300);
+  const before = await painted(page, id);
+  await page.getByRole('button', { name: 'Lock Layer 2' }).click();
+
+  await clearBtn(page).click();
+  await expect(page.locator('#pp-banner')).toContainText('Unlock it in Layers to clear it');
+  expect(await painted(page, id)).toBe(before);
+
+  await deleteBtn(page).click();
+  await expect(page.locator('#pp-banner')).toContainText('Unlock it in Layers to delete it');
+  await expect(rows(page)).toHaveCount(2);
+
+  // Unlocked, both work again.
+  await page.getByRole('button', { name: 'Unlock Layer 2' }).click();
+  await deleteBtn(page).click();
+  await expect(rows(page)).toHaveCount(1);
+});
+
+test('a hidden layer can\'t be cleared', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const id = await activeId(page);
+  await stroke(page, 300, 300, 800, 300);
+  const before = await painted(page, id);
+  await page.getByRole('button', { name: 'Hide Layer 1' }).click();
+  await clearBtn(page).click();
+  await expect(page.locator('#pp-banner')).toContainText('Show it in Layers to clear it');
+  expect(await painted(page, id)).toBe(before);
+});

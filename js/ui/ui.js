@@ -254,8 +254,7 @@ export function initUI(container, options = {}) {
   rail.appendChild(sizeControl);
 
   // Gear menu (settings-panel.js) at the bottom of the rail: version,
-  // check for updates, and dev tools (including Clear, which is
-  // undoable — undo is the safety net, no confirm dialog).
+  // check for updates, and (temporary) dev tools.
   const gearBtn = document.createElement('button');
   gearBtn.type = 'button';
   gearBtn.className = 'pp-tool-btn pp-tool-btn--secondary pp-gear-btn';
@@ -272,7 +271,6 @@ export function initUI(container, options = {}) {
       checkForUpdate: appActions.checkForUpdate ?? unavailable,
       applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
       freshReload: appActions.freshReload ?? (async () => window.location.reload()),
-      clearDrawing: () => canvasApi.clear(),
       fillAllLayers: appActions.fillAllLayers ?? (() => {}),
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },

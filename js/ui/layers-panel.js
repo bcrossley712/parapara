@@ -5,7 +5,9 @@
 // Like Sketchbook/Procreate/Flipaclip: top layer listed first, each row
 // with a thumbnail, name, visibility and lock toggles and a drag handle;
 // tap a row to make it the active layer. Below the list, the active
-// layer's opacity, Rename, Duplicate and Delete.
+// layer's opacity, Rename, Duplicate, Clear and Delete. Clear and Delete
+// stay tappable on a locked layer — main.js refuses with a banner that
+// says why, as a stroke on a locked layer does.
 //
 // Pure UI: knows nothing about storage (beyond the shared name-length
 // limit), history or the canvas. main.js
@@ -17,7 +19,7 @@ import { MAX_LAYER_NAME } from '../storage/layers.js';
 
 // callbacks:
 //   onSelect(id), onAdd(), onDelete(id), onRename(id, name),
-//   onDuplicate(id),
+//   onDuplicate(id), onClear(id),
 //   onToggleVisible(id), onToggleLock(id),
 //   onMove(id, toIndex)            toIndex: 0 = bottom
 //   onOpacityInput(id, opacity)    live while dragging (0-1)
@@ -57,9 +59,10 @@ export function createLayersPanel(callbacks) {
   actions.className = 'pp-layers__actions';
   const renameBtn = textButton('Rename');
   const duplicateBtn = textButton('Duplicate');
+  const clearBtn = textButton('Clear');
   const deleteBtn = textButton('Delete');
   deleteBtn.classList.add('pp-layers__delete');
-  actions.append(renameBtn, duplicateBtn, deleteBtn);
+  actions.append(renameBtn, duplicateBtn, clearBtn, deleteBtn);
   footer.append(opacityLabel, actions);
 
   panel.append(header, list, footer);
@@ -74,6 +77,9 @@ export function createLayersPanel(callbacks) {
   addBtn.addEventListener('click', () => callbacks.onAdd());
   deleteBtn.addEventListener('click', () => {
     if (state.activeLayerId) callbacks.onDelete(state.activeLayerId);
+  });
+  clearBtn.addEventListener('click', () => {
+    if (state.activeLayerId) callbacks.onClear(state.activeLayerId);
   });
   duplicateBtn.addEventListener('click', () => {
     if (state.activeLayerId) callbacks.onDuplicate(state.activeLayerId);
@@ -274,6 +280,7 @@ export function createLayersPanel(callbacks) {
     addBtn.disabled = state.busy || state.layers.length >= state.maxLayers;
     deleteBtn.disabled = state.busy || !active || state.layers.length <= 1;
     renameBtn.disabled = state.busy || !active;
+    clearBtn.disabled = state.busy || !active;
     duplicateBtn.disabled = state.busy || !active || state.layers.length >= state.maxLayers;
   }
 

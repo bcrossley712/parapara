@@ -291,7 +291,6 @@ test('the gallery has the gear menu, without the editor-only actions', async ({ 
   const panel = page.getByRole('dialog', { name: 'Settings' });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Check for updates' })).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'Clear drawing' })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Fill all layers' })).toHaveCount(0);
   await page.locator('.pp-gallery').click({ position: { x: 20, y: 400 } });
   await expect(panel).toBeHidden();

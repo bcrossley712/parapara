@@ -212,14 +212,3 @@ test('Fresh reload re-downloads the app but keeps the drawing and other apps\' c
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 10000 });
 });
 
-test('Clear drawing in the panel clears and closes the panel', async ({ page }) => {
-  await openInstalledApp(page);
-  await drawStroke(page);
-  expect(await paintedPixels(page)).toBeGreaterThan(200);
-
-  await gear(page).click();
-  await page.getByRole('button', { name: 'Clear drawing' }).click();
-
-  expect(await paintedPixels(page)).toBe(0);
-  await expect(panel(page)).toBeHidden();
-});

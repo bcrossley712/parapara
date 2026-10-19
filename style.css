@@ -782,14 +782,15 @@ html, body {
   width: 100%;
 }
 
+/* Two rows of two: Rename · Duplicate / Clear · Delete. */
 .pp-layers__actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .pp-layers__btn {
-  flex: 1 1 auto; /* sized to the label, so three fit on one row */
+  min-width: 0;
   border: none;
   border-radius: 8px;
   padding: 10px 12px;

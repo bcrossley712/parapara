@@ -10,11 +10,10 @@
 // - Check for updates (permanent). If an update is found it's applied
 //   right away (with a reload).
 // - Developer section (temporary, remove before "done"): Fresh reload,
-//   Clear drawing (moved here from the rail before undo existed, so a
-//   stray tap couldn't wipe her work), and Fill all layers — adds layers
-//   up to the cap and paints each one, to stress-test canvas memory on
-//   the iPad. Both edits are undoable. Clear and Fill only exist in the
-//   editor; the gallery's gear menu leaves them out.
+//   and Fill all layers — adds layers up to the cap and paints each
+//   one, to stress-test canvas memory on the iPad (undoable; editor
+//   only, the gallery's gear menu leaves it out). Clear moved to the
+//   layers panel in 2e.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -25,7 +24,6 @@ export function createSettingsPanel(actions) {
     checkForUpdate,    // () => Promise<'ready'|'none'|'error'|'unsupported'>
     applyUpdate,       // () => Promise<void>, reloads the page
     freshReload,       // () => Promise<void>, reloads the page
-    clearDrawing,      // () => void, optional (editor only)
     fillAllLayers,     // () => void, optional (editor only)
   } = actions;
 
@@ -61,15 +59,12 @@ export function createSettingsPanel(actions) {
   freshHint.className = 'pp-settings__hint';
   freshHint.textContent = 'Re-downloads the app. Drawings are kept.';
 
-  const clearBtn = makeButton('Clear drawing');
-
   const fillBtn = makeButton('Fill all layers');
   const fillHint = document.createElement('div');
   fillHint.className = 'pp-settings__hint';
   fillHint.textContent = 'Memory test: adds layers up to the limit and paints each. Undoable.';
 
   panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint);
-  if (clearDrawing) panel.append(clearBtn);
   if (fillAllLayers) panel.append(fillBtn, fillHint);
 
   let open = false;
@@ -117,11 +112,6 @@ export function createSettingsPanel(actions) {
     setBusy(true);
     status.textContent = 'Reloading…';
     await freshReload(); // reloads
-  });
-
-  clearBtn.addEventListener('click', () => {
-    clearDrawing();
-    setOpen(false);
   });
 
   fillBtn.addEventListener('click', () => {

@@ -150,10 +150,8 @@ test('fill is undoable', async ({ page }) => {
 
 test('Clear is undoable, and clearing a blank canvas adds no undo step', async ({ page }) => {
   await openApp(page);
-  const clear = async () => {
-    await page.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('button', { name: 'Clear drawing' }).click();
-  };
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  const clear = () => page.getByRole('button', { name: 'Clear', exact: true }).click();
 
   await clear();
   await expect(undoBtn(page)).toBeDisabled();

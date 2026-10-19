@@ -429,6 +429,7 @@ function mountEditor(session, { canSave }) {
       onAdd: () => addLayer(),
       onDelete: (id) => deleteLayer(id),
       onDuplicate: (id) => duplicateLayer(id),
+      onClear: (id) => clearLayer(id),
       onRename: (id, name) => renameLayer(id, name),
       onToggleVisible: (id) => toggleLayerProp(id, 'visible'),
       onToggleLock: (id) => toggleLayerProp(id, 'locked'),
@@ -935,8 +936,32 @@ function mountEditor(session, { canSave }) {
     });
   }
 
+  // Clear: the active layer's drawing on this frame only (Procreate's
+  // and Sketchbook's Clear). Undoable like a stroke. A locked or hidden
+  // layer is refused here with wording for clearing (the canvas would
+  // refuse too, but its banner talks about drawing).
+  function clearLayer(id) {
+    if (!canAct() || id !== project.activeLayerId) return;
+    const layer = project.layers.find((l) => l.id === id);
+    if (layer?.locked) {
+      showBanner('This layer is locked. Unlock it in Layers to clear it.');
+      return;
+    }
+    if (layer && !layer.visible) {
+      showBanner('This layer is hidden. Show it in Layers to clear it.');
+      return;
+    }
+    canvasApi.clear();
+  }
+
+  // A locked layer can't be deleted (lock protects it, not just its
+  // pixels) — the banner says why rather than a dead button.
   function deleteLayer(id) {
     if (!canAct() || project.layers.length <= 1) return;
+    if (project.layers.find((l) => l.id === id)?.locked) {
+      showBanner('This layer is locked. Unlock it in Layers to delete it.');
+      return;
+    }
     exclusive(async () => {
       const record = await detach(id);
       history.push({ type: 'layer-delete', record, bytes: record.blob?.size ?? 0 });

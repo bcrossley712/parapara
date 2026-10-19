@@ -115,6 +115,11 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
 - **Export format** (container/codec) — decide at step 6.
+- **Copy / paste a layer's drawing between frames** (copy this
+  layer on this frame, paste into the same layer on another) — the
+  usual animation-app way; goes with step 4's frame strip, or step 3's
+  transform if she'll want to move what she pastes. Until then:
+  duplicate the frame and Clear the layers she doesn't want.
 - **Rename from the editor** (tap the title, as Procreate does) —
   gallery-only for now.
 - **How-to / tutorials** reachable from the settings (gear) menu —
@@ -166,6 +171,12 @@ Short rules; reasoning in the linked sections.
     delete the layer below becomes active. No delete confirm (undoable).
   - **Locked or hidden active layer:** strokes, fill and Clear are
     refused with a notice; a touch on it can still become a gesture.
+    **Lock also blocks Delete** (2e) — lock protects the layer, not
+    just its pixels. Rename, move, opacity and Duplicate stay allowed.
+    The buttons stay tappable; the banner says why. Merge down (later)
+    must respect lock too.
+  - **Clear** (panel footer, 2e): the active layer on this frame only,
+    undoable. Replaced the gear menu's dev "Clear drawing".
   - **Frames:** add frame inserts a blank frame *after* the current
     one, with a slot for every layer, and moves onto it. Tapping the
     current frame's tile opens the frame menu (Duplicate; step 4's
@@ -442,8 +453,8 @@ debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
 20 px; swipe ≥ 60 px, mostly horizontal. Undo caps in `history.js`.
 
 **Dev-only, remove before calling the app done:** the gear menu's
-Developer section (Fresh reload, Clear drawing, and from 2c a
-fill-all-layers memory stress test).
+Developer section (Fresh reload, and from 2c a fill-all-layers
+memory stress test).
 
 ## Schema
 
