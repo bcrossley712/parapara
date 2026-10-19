@@ -28,7 +28,10 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--pp-bg);
+  /* Dark, never seen (the app shell covers it): newer iPadOS reads the
+     page background, with theme-color, to style the status bar. A light
+     one turned its text black over a light frosted band. */
+  background: var(--pp-ink);
   overscroll-behavior: none;
   touch-action: none;
 }
