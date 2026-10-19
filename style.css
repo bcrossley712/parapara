@@ -180,8 +180,12 @@ html, body {
   opacity: 0.4;
 }
 
+/* The whole drawing area takes touch input (canvas.js listens here,
+   not on the page), so gestures work with fingers off the page. */
 .pp-canvas-area {
   flex: 1;
+  min-height: 0; /* shrink for the frame strip; canvas.js re-fits */
+  touch-action: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -205,7 +209,7 @@ html, body {
 }
 
 /* One per layer, stacked in DOM order (bottom layer first). Input goes
-   to the wrapper, never to a layer canvas. */
+   to the canvas area, never to a layer canvas. */
 .pp-layer {
   position: absolute;
   inset: 0;
@@ -648,6 +652,113 @@ html, body {
 }
 
 .pp-layers__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Fading banner (js/ui/ui.js showBanner): brief info, no button, never
+   blocks touches. Same spot as the notice toast; dark, like the top. */
+.pp-banner {
+  position: fixed;
+  left: 50%;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 14px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 1;
+  transition: opacity 400ms ease;
+}
+
+.pp-banner--fading {
+  opacity: 0;
+}
+
+/* Canvas area over the frame strip (js/ui/ui.js). min-height: 0 lets
+   the canvas area shrink to make room for the strip. */
+.pp-stage {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Frame strip (js/timeline/frame-strip.js): numbered tiles that scroll
+   sideways, with the dashed add tile pinned at the right end. */
+.pp-frame-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--pp-ink);
+  border-top: 1px solid var(--pp-ink-light);
+  font-family: var(--pp-font);
+}
+
+.pp-frame-strip__list {
+  position: relative; /* tiles' offsetLeft is measured from here */
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+
+.pp-frame-strip__list::-webkit-scrollbar {
+  display: none;
+}
+
+.pp-frame-strip__tile,
+.pp-frame-strip__add {
+  flex-shrink: 0;
+  width: 64px;
+  height: 48px;
+  border-radius: 8px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pp-frame-strip__tile {
+  border: none;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-frame-strip__tile.is-current {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+
+.pp-frame-strip__tile:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pp-frame-strip__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--pp-ink-light);
+  background: transparent;
+  color: var(--pp-bg);
+}
+
+.pp-frame-strip__add:disabled {
   opacity: 0.4;
   cursor: default;
 }

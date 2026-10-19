@@ -145,6 +145,12 @@ Sections: [Process lessons](#process-lessons) ·
   with 3+ touches down. Cancelling `touchstart` shouldn't suppress
   pointer events in WebKit, but that's unverified on the device — if
   three-finger gestures stop registering, remove this listener first.
+- **Input is heard on the whole canvas area, not just the page.**
+  Originally the listeners sat on the canvas element, so a finger on
+  the dark backdrop didn't exist to the app and a gesture with one
+  finger off the page failed — worse once zoom-out to 0.25× made most
+  of the screen backdrop. Sketchbook and Procreate treat the whole
+  drawing area as live, and let a stroke start off the page.
 
 ## Layers and undo
 

@@ -8,7 +8,7 @@
 // Screen routing (gallery <-> editor) lands here with step 2d; for now
 // it opens straight into the editor.
 
-import { initUI, showUpdatePrompt, showNotice } from './ui/ui.js';
+import { initUI, showUpdatePrompt, showNotice, showBanner } from './ui/ui.js';
 import {
   initStorage,
   openLastProject,
@@ -40,6 +40,12 @@ import {
   attachLayerRefs,
   referencedBlobIds,
 } from './storage/layers.js';
+import {
+  insertIndexAfter,
+  insertFrameId,
+  removeFrameId,
+  frameAfterRemoval,
+} from './timeline/frames.js';
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -76,13 +82,13 @@ async function startEditor() {
   try {
     await initStorage();
     const { project, frames } = await openLastProject();
-    // Which frame was open is remembered once the frame strip exists;
-    // until then there's only ever one.
-    const frame = frames[0];
+    // Reopen the frame she was on.
+    const frame = frames.find((f) => f.id === project.currentFrameId) ?? frames[0];
+    project.currentFrameId = frame.id;
     // A frame should have a bitmap slot for every layer; fill any gap
     // (and save it) rather than failing to load.
     if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
-    savedImages = await decodeFrameImages(project.layers, frame);
+    savedImages = await decodeFrameImages(project.layers, frame, loadLayerBitmap);
     session = { project, frames, frame };
     canSave = true;
 
@@ -97,6 +103,7 @@ async function startEditor() {
     const project = createProjectRecord();
     const frame = createFrame(project.id, project.layers);
     project.frames = [frame.id];
+    project.currentFrameId = frame.id;
     session = { project, frames: [frame], frame };
   }
 
@@ -150,9 +157,14 @@ async function startEditor() {
       onOpacityCommit: (id, before, after) => commitOpacity(id, before, after),
       onOpenChange: () => uiStateSaver?.schedule(),
     },
+    frames: {
+      onSelect: (id) => selectFrame(id),
+      onAdd: () => addFrame(),
+    },
   });
   const canvasApi = ui.canvas;
   const panel = ui.layers;
+  const strip = ui.frames;
 
   canvasApi.loadFrame({
     layers: project.layers,
@@ -165,10 +177,11 @@ async function startEditor() {
 
   // --- async work guard ---
   //
-  // Adding, removing or bringing back a layer touches storage, so it's
-  // async. While one runs, undo/redo and panel actions are ignored and
-  // the canvas takes no new touches — nothing can land on a layer
-  // that's mid-change. One at a time, in order.
+  // Adding, removing or bringing back a layer or frame, and moving to
+  // another frame, touch storage, so they're async. While one runs,
+  // undo/redo, panel and strip actions are ignored and the canvas takes
+  // no new touches — nothing can land on pixels that are mid-change.
+  // One at a time, in order.
   let busy = false;
 
   function refreshPanel() {
@@ -178,6 +191,7 @@ async function startEditor() {
       maxLayers: MAX_LAYERS,
       busy,
     });
+    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
   }
 
   function exclusive(task) {
@@ -188,8 +202,8 @@ async function startEditor() {
     return Promise.resolve()
       .then(task)
       .catch((err) => {
-        console.error('Parapara! layer change failed:', err);
-        showNotice("That layer change didn't work.");
+        console.error('Parapara! layer or frame change failed:', err);
+        showNotice("That change didn't work.");
       })
       .finally(() => {
         busy = false;
@@ -213,10 +227,85 @@ async function startEditor() {
     autosaver?.schedule();
   }
 
-  // Layer added or removed: the project and every frame's bitmap slots
+  // Layer or frame added or removed: the project and the frame records
   // change together, saved in one transaction.
-  async function persistStructure() {
-    if (canSave) await saveProjectAndFrames(project, session.frames);
+  async function persistStructure(removedFrameIds = []) {
+    if (canSave) await saveProjectAndFrames(project, session.frames, removedFrameIds);
+  }
+
+  // --- frames ---
+  //
+  // Only the open frame's layers are in memory. Leaving a frame saves
+  // its unsaved layers first; the next frame's layers are read back from
+  // storage into the same layer canvases. If a layer can't be saved (or
+  // saving is off), its pixels are kept here instead, by bitmapRef, and
+  // reloaded from here — then retried to storage once that frame is
+  // open again.
+  const heldBitmaps = new Map(); // bitmapRef -> PNG Blob
+
+  async function readBitmap(ref) {
+    if (heldBitmaps.has(ref)) return heldBitmaps.get(ref);
+    return canSave ? loadLayerBitmap(ref) : null;
+  }
+
+  async function leaveFrame() {
+    if (canSave) await autosaver.flush();
+    for (const layerId of unsavedLayers) {
+      heldBitmaps.set(session.frame.bitmapRefs[layerId], await canvasApi.exportPNG(layerId));
+    }
+    unsavedLayers.clear();
+  }
+
+  // Shows `frameId` (must be in the timeline). Call inside exclusive().
+  async function showFrame(frameId) {
+    if (frameId === session.frame.id) return;
+    const next = session.frames.find((f) => f.id === frameId);
+    if (!next) throw new Error(`No frame ${frameId}`);
+    await leaveFrame();
+    if (ensureBitmapRefs(next, project.layers) && canSave) await saveFrame(next);
+    const images = await decodeFrameImages(project.layers, next, readBitmap);
+
+    session.frame = next;
+    project.currentFrameId = next.id;
+    canvasApi.loadFrame({ layers: project.layers, activeLayerId: project.activeLayerId, images });
+    for (const image of images.values()) image.close?.();
+
+    // Pixels that were held in memory go back to storage now.
+    if (canSave) {
+      for (const layer of project.layers) {
+        const ref = next.bitmapRefs[layer.id];
+        if (heldBitmaps.delete(ref)) markUnsaved(layer.id);
+      }
+    }
+    scheduleProjectSave();
+    panel.refreshThumbnails();
+  }
+
+  // Puts a frame (new, or taken out by undo) into the timeline at
+  // record.index and shows it.
+  async function insertFrame(record) {
+    const { frame } = record;
+    ensureBitmapRefs(frame, project.layers);
+    project.frames = insertFrameId(project.frames, frame.id, record.index);
+    const byId = new Map([...session.frames, frame].map((f) => [f.id, f]));
+    session.frames = project.frames.map((id) => byId.get(id));
+    await persistStructure();
+    await showFrame(frame.id);
+  }
+
+  // Takes a frame out of the timeline (moving off it first if it's
+  // open). Its pixels stay in storage under its refs, which the record
+  // keeps, for undo; the launch sweep clears them once that's moot.
+  async function takeOutFrame(record) {
+    const id = record.frame.id;
+    const { frameIds, index } = removeFrameId(project.frames, id);
+    if (index < 0) throw new Error(`No frame ${id} to remove`);
+    if (session.frame.id === id) await showFrame(frameAfterRemoval(frameIds, index));
+    record.frame = session.frames.find((f) => f.id === id);
+    record.index = index;
+    project.frames = frameIds;
+    session.frames = session.frames.filter((f) => f.id !== id);
+    await persistStructure([id]);
   }
 
   // Reorder, rename, visibility, lock, opacity, active layer: only the
@@ -233,13 +322,14 @@ async function startEditor() {
   //   'layer-delete'  { record }
   //   'layer-move'    { layerId, from, to }
   //   'layer-props'   { layerId, before, after }   (opacity)
+  //   'frame-add'     { record }  record = { frame, index }
   // Adding and deleting are the same two operations run in opposite
   // directions: detach (pixels stay in storage under the frames' old
   // refs, which the record keeps) and attach (put the layer and refs
   // back, reload its pixels). So undo history never holds a removed
   // layer's pixels in memory — except when they couldn't be saved
-  // first (record.blob). The frame strip adds the jump to
-  // entry.frameId.
+  // first (record.blob). An entry for another frame moves there first
+  // (undo jumps to the frame), asynchronously.
   const history = createHistory({
     onChange: () => ui.setHistoryState(history.canUndo, history.canRedo),
   });
@@ -276,9 +366,7 @@ async function startEditor() {
     const { layer, index, refs } = record;
     const frames = attachLayerRefs(session.frames, layer.id, refs);
     let blob = record.blob;
-    if (!blob && canSave && refs[session.frame.id]) {
-      blob = await loadLayerBitmap(refs[session.frame.id]);
-    }
+    if (!blob && refs[session.frame.id]) blob = await readBitmap(refs[session.frame.id]);
     const image = blob ? await createImageBitmap(blob) : null;
 
     project.layers = insertLayer(project.layers, layer, index);
@@ -335,7 +423,19 @@ async function startEditor() {
     const undoing = direction === 'undo';
     switch (entry.type) {
       case 'pixels':
+        if (entry.frameId !== session.frame.id) {
+          // Jump to that frame, then swap. The entry moves stacks now;
+          // its patch is filled in once the frame is showing.
+          exclusive(async () => {
+            await showFrame(entry.frameId);
+            Object.assign(entry, swapPixels(entry));
+          });
+          return entry;
+        }
         return swapPixels(entry);
+      case 'frame-add':
+        exclusive(() => (undoing ? takeOutFrame(entry.record) : insertFrame(entry.record)));
+        return entry;
       case 'layer-add':
       case 'layer-delete': {
         const remove = (entry.type === 'layer-add') === undoing;
@@ -386,10 +486,32 @@ async function startEditor() {
   canvasApi.onGesture((name) => (name === 'undo' ? undo() : redo()));
 
   canvasApi.onBlocked((reason) => {
-    showNotice(reason === 'locked'
+    showBanner(reason === 'locked'
       ? 'This layer is locked. Unlock it in Layers to draw on it.'
       : 'This layer is hidden. Show it in Layers to draw on it.');
   });
+
+  // --- frame strip actions ---
+
+  function selectFrame(id) {
+    if (!canAct() || id === session.frame.id) return;
+    exclusive(() => showFrame(id));
+  }
+
+  // A blank frame right after the current one, with a slot for every
+  // layer; she's moved onto it. Undoable (stands in for delete until
+  // the full strip in step 4).
+  function addFrame() {
+    if (!canAct()) return;
+    exclusive(async () => {
+      const record = {
+        frame: createFrame(project.id, project.layers),
+        index: insertIndexAfter(project.frames, session.frame.id),
+      };
+      await insertFrame(record);
+      history.push({ type: 'frame-add', record, bytes: 0 });
+    });
+  }
 
   // --- layers panel actions ---
 
@@ -404,7 +526,7 @@ async function startEditor() {
   function addLayer() {
     if (!canAct()) return;
     if (project.layers.length >= MAX_LAYERS) {
-      showNotice(`A project can have up to ${MAX_LAYERS} layers.`);
+      showBanner(`A project can have up to ${MAX_LAYERS} layers.`);
       return;
     }
     exclusive(async () => {
@@ -551,10 +673,10 @@ async function startEditor() {
 // Decodes a frame's saved layer bitmaps: a Map of layer id ->
 // ImageBitmap, with blank layers left out. A bitmap that won't decode
 // throws — the caller treats that like any failed load (saving off).
-async function decodeFrameImages(layers, frame) {
+async function decodeFrameImages(layers, frame, read) {
   const images = new Map();
   for (const layer of layers) {
-    const blob = await loadLayerBitmap(frame.bitmapRefs[layer.id]);
+    const blob = await read(frame.bitmapRefs[layer.id]);
     if (blob) images.set(layer.id, await createImageBitmap(blob));
   }
   return images;

@@ -94,10 +94,11 @@ icon, manifest `name`/`short_name`, and repo copy.
   swipe, two-finger double-tap reset), with iPadOS's own undo kept out
   of the way; Clear and fill undoable; fill is a gesture candidate;
   zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
-- **Now: 2c** — passes 1–2 of 3 done: shared layers and one canvas per
-  layer (confirmed on the iPad), then the layers panel (not yet on the
-  iPad). Next: frame strip. Then **2d** project gallery
-  (list/create/open/delete, custom confirm).
+- **Step 2c (layers + bare-bones frame strip): built.** Shared layers
+  and the layers panel confirmed on the iPad; the frame strip, fading
+  banner and gestures off the page not yet.
+- **Next: 2d** project gallery (list/create/open/delete, custom
+  confirm).
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -168,11 +169,16 @@ Short rules; reasoning in the linked sections.
   - **Locked or hidden active layer:** strokes, fill and Clear are
     refused with a notice; a touch on it can still become a gesture.
   - **Frames:** add frame inserts a blank frame *after* the current
-    one, with a slot for every layer.
+    one, with a slot for every layer, and moves onto it. Moving to
+    another frame saves the current one first, then reads the next
+    one's layers from storage; a layer that can't be saved (or saving
+    is off) is held in memory by bitmapRef until it can be.
   - **Rendering:** one `<canvas>` per layer stacked in a wrapper
-    (`.pp-canvas`) that carries the view transform and takes all input;
-    visibility/opacity are CSS. Only the open frame's layers are in
-    memory; changing frames reuses the same layer canvases.
+    (`.pp-canvas`) that carries the view transform; visibility/opacity
+    are CSS. Input is heard on the whole canvas area, so gestures work
+    with fingers off the page and a stroke can start off it. Only the
+    open frame's layers are in memory; changing frames reuses the same
+    layer canvases.
   - **Fill reads every visible layer** (composited at opacity) and
     writes only the active one, so color fills up to line art on
     another layer. **Smudge reads and writes the active layer only.**
@@ -191,8 +197,9 @@ Short rules; reasoning in the linked sections.
   - Layer structure changes are undoable on the same stack (new entry
     `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
     frame. **Visibility and lock are not undoable** (view state, as in
-    Photoshop). Rename isn't either. An entry for another frame loads
-    that frame first.
+    Photoshop). Rename isn't either. An entry for another frame moves
+    to that frame first. Undoing an add frame takes the frame out (its
+    record is deleted, its pixels stay in storage for redo).
   - **Removing a layer** (delete, or undoing an add) saves its pixels
     first and leaves them in storage under the frames' old refs, which
     the entry keeps; bringing it back reloads them. Undo never holds a
@@ -211,6 +218,10 @@ Short rules; reasoning in the linked sections.
   app-wide, not per project. Per project: the open frame and active
   layer. App-wide: whether the layers panel was open. The view
   (pan/zoom/rotation) resets on launch.
+- **Messages:** information that isn't a problem (locked/hidden
+  layer, layer cap) is a fading banner that never blocks touches
+  (`showBanner`); real problems (couldn't save) are a toast that waits
+  for OK (`showNotice`).
 - **Projects:** a gallery, one project open at a time.
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
@@ -231,8 +242,9 @@ Each is here because breaking it caused (or would cause) a real bug.
 - The wrapper's (`.pp-canvas`) `transform-origin` is `0 0`, set in JS
   where it's created — the gesture math depends on it. The transform
   goes on the wrapper, never on a layer canvas.
-- Layer canvases are `pointer-events: none`; input and pointer capture
-  belong to the wrapper.
+- Layer canvases are `pointer-events: none`; pointer listeners and
+  capture belong to the canvas area (`.pp-canvas-area`), never the
+  page or a layer — fingers off the page must still count.
 - Fill's region comes from the visible-layer composite, its pixels go
   to the active layer only — never write the composite back.
 - `toCanvasPoint` is computed analytically from viewport state, never
@@ -317,7 +329,11 @@ Each is here because breaking it caused (or would cause) a real bug.
         layers-panel.js   layers panel (UI only; intents via callbacks)
         color-picker.js   custom HSV picker
         settings-panel.js gear menu (dev section is temporary)
-      timeline/ export/ audio/   placeholders for later steps
+      timeline/
+        frames.js         pure frame-order ops (insert/remove/neighbor)
+        frame-strip.js    frame strip (UI only; intents via callbacks)
+        timeline.js       placeholder: playback, onion skin (step 4)
+      export/ audio/      placeholders for later steps
     icons/                app icon set
     tests/unit/, tests/e2e/      see Testing
     docs/DESIGN_NOTES.md  reasoning and lessons
@@ -348,7 +364,7 @@ bitmap. Planned fields are marked. Extend additively.
       ],
       activeLayerId,
       frames: [frameId, ...],                 // timeline order
-      currentFrameId,                         // planned (2c frame strip)
+      currentFrameId,                         // the frame she was on
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
 

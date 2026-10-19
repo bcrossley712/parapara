@@ -409,13 +409,15 @@ export async function saveUiState(state) {
 }
 
 // Saves the project and the given frames in one transaction, so a
-// layer added or removed can never be saved on the project without its
-// frames' bitmap slots (or the reverse).
-export async function saveProjectAndFrames(project, frames) {
+// layer or frame added or removed can never be saved on the project
+// without its frame records (or the reverse). `removedFrameIds` are
+// frame records to delete (a frame taken out of project.frames).
+export async function saveProjectAndFrames(project, frames, removedFrameIds = []) {
   const record = { ...project, updatedAt: Date.now() };
   await withTransaction([STORE_PROJECTS, STORE_FRAMES], 'readwrite', (s) => {
     s[STORE_PROJECTS].put(record);
     for (const frame of frames) s[STORE_FRAMES].put(frame);
+    for (const id of removedFrameIds) s[STORE_FRAMES].delete(id);
   });
   return record;
 }

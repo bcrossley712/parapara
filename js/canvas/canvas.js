@@ -8,7 +8,8 @@
 //
 // Layers (step 2c): one <canvas> per layer, stacked bottom-to-top
 // inside a wrapper element (.pp-canvas). The wrapper carries the
-// pan/zoom/rotate transform and receives all pointer input; layer
+// pan/zoom/rotate transform; pointer input is heard on the whole canvas
+// area around it (the container), so gestures work off the page; layer
 // visibility and opacity are plain CSS on each layer canvas, so the
 // browser composites them. Only the open frame's layers exist — layers
 // are shared across frames (see PROJECT_NOTES.md "Schema"), so moving
@@ -811,7 +812,7 @@ export function initCanvas(container, options = {}) {
           && gesture.totalMovement <= THREE_FINGER_JOIN_MAX_MOVEMENT_PX
         ) {
           const local = toLocalPoint(event);
-          stack.setPointerCapture(event.pointerId);
+          container.setPointerCapture(event.pointerId);
           gesture.pointerIds.push(event.pointerId);
           gesture.points.set(event.pointerId, local);
           gesture.startPoints.set(event.pointerId, local);
@@ -831,14 +832,14 @@ export function initCanvas(container, options = {}) {
           // Revert whatever the first finger had started drawing (or
           // filling) from the committed copy.
           revertUncommitted();
-          if (stack.hasPointerCapture?.(pendingTouch.pointerId)) {
-            stack.releasePointerCapture(pendingTouch.pointerId);
+          if (container.hasPointerCapture?.(pendingTouch.pointerId)) {
+            container.releasePointerCapture(pendingTouch.pointerId);
           }
 
           const firstLocal = pendingTouch.lastLocal;
           const secondLocal = toLocalPoint(event);
 
-          stack.setPointerCapture(event.pointerId);
+          container.setPointerCapture(event.pointerId);
           gesture = {
             pointerIds: [pendingTouch.pointerId, event.pointerId],
             points: new Map([
@@ -887,7 +888,7 @@ export function initCanvas(container, options = {}) {
       const point = toCanvasPoint(event);
       activePointerId = event.pointerId;
       strokeBlocked = paintBlockReason();
-      stack.setPointerCapture(event.pointerId);
+      container.setPointerCapture(event.pointerId);
 
       const local = toLocalPoint(event);
       pendingTouch = {
@@ -915,7 +916,7 @@ export function initCanvas(container, options = {}) {
 
     activePointerId = event.pointerId;
     strokeBlocked = paintBlockReason();
-    stack.setPointerCapture(event.pointerId);
+    container.setPointerCapture(event.pointerId);
 
     if (tool === 'fill') {
       floodFill(toCanvasPoint(event));
@@ -1015,7 +1016,7 @@ export function initCanvas(container, options = {}) {
       }
 
       for (const id of gesture.pointerIds) {
-        if (stack.hasPointerCapture?.(id)) stack.releasePointerCapture(id);
+        if (container.hasPointerCapture?.(id)) container.releasePointerCapture(id);
       }
       const ended = gesture;
       gesture = null;
@@ -1051,8 +1052,8 @@ export function initCanvas(container, options = {}) {
     }
 
     if (event.pointerId !== activePointerId) return;
-    if (stack.hasPointerCapture?.(event.pointerId)) {
-      stack.releasePointerCapture(event.pointerId);
+    if (container.hasPointerCapture?.(event.pointerId)) {
+      container.releasePointerCapture(event.pointerId);
     }
     endStroke();
   }
@@ -1077,19 +1078,26 @@ export function initCanvas(container, options = {}) {
     else if (kind === 'swipe-right') emitGesture('redo');
   }
 
-  stack.addEventListener('pointerdown', onPointerDown);
-  stack.addEventListener('pointermove', onPointerMove);
-  stack.addEventListener('pointerup', onPointerUp);
-  stack.addEventListener('pointercancel', onPointerUp);
+  // Input is heard on the whole canvas area, not just the page: a
+  // gesture works with fingers on the dark backdrop around it (as in
+  // Sketchbook/Procreate — and it's most of the screen when zoomed
+  // out), and a stroke can start off the page and paint from where it
+  // crosses on. Positions are already measured from the area
+  // (toLocalPoint), so nothing else changes. Off-page stamps are simply
+  // clipped; a fill tap off the page does nothing.
+  container.addEventListener('pointerdown', onPointerDown);
+  container.addEventListener('pointermove', onPointerMove);
+  container.addEventListener('pointerup', onPointerUp);
+  container.addEventListener('pointercancel', onPointerUp);
   // Pointer capture should keep move/up events routed here even if
   // the pointer slides off the canvas edge mid-stroke/gesture, but
   // this is a belt-and-suspenders fallback in case capture isn't
   // honored.
-  stack.addEventListener('pointerleave', (event) => {
+  container.addEventListener('pointerleave', (event) => {
     const isTracked = event.pointerId === activePointerId
       || (pendingTouch && event.pointerId === pendingTouch.pointerId)
       || (gesture && gesture.pointerIds.includes(event.pointerId));
-    if (isTracked && !stack.hasPointerCapture?.(event.pointerId)) {
+    if (isTracked && !container.hasPointerCapture?.(event.pointerId)) {
       onPointerUp(event);
     }
   });

@@ -268,3 +268,20 @@ test('UI state round-trips, and is null before anything is saved', async () => {
   relaunch();
   assert.deepEqual(await storage.loadUiState(), { layersPanelOpen: true });
 });
+
+test('saveProjectAndFrames deletes removed frame records', async () => {
+  const { project, frames } = await storage.openLastProject();
+  const frame2 = storage.createFrame(project.id, project.layers);
+  await storage.saveProjectAndFrames({ ...project, frames: [frames[0].id, frame2.id] }, [...frames, frame2]);
+  await storage.saveProjectAndFrames({ ...project, frames: [frames[0].id] }, frames, [frame2.id]);
+
+  const remaining = await new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onsuccess = () => {
+      const r = req.result.transaction('frames').objectStore('frames').getAllKeys();
+      r.onsuccess = () => { req.result.close(); resolve(r.result); };
+      r.onerror = () => reject(r.error);
+    };
+  });
+  assert.deepEqual(remaining, [frames[0].id]);
+});

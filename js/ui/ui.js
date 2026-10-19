@@ -16,6 +16,7 @@ import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { createColorPicker } from './color-picker.js';
 import { createSettingsPanel } from './settings-panel.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
+import { createFrameStrip } from '../timeline/frame-strip.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -29,9 +30,11 @@ import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 // options.layers: callbacks for the layers panel (see layers-panel.js);
 //   onOpenChange also fires when the top-bar button toggles it.
 // options.layersPanelOpen: open the layers panel at startup.
+// options.frames: callbacks for the frame strip ({ onSelect, onAdd },
+//   see timeline/frame-strip.js).
 //
-// Returns { canvas, layers (the panel), setHistoryState(canUndo,
-// canRedo) }.
+// Returns { canvas, layers (the panel), frames (the strip),
+// setHistoryState(canUndo, canRedo) }.
 export function initUI(container, options = {}) {
   const {
     settings = null,
@@ -41,6 +44,7 @@ export function initUI(container, options = {}) {
     onRedo = () => {},
     layers: layersCallbacks = {},
     layersPanelOpen = false,
+    frames: framesCallbacks = {},
   } = options;
   container.innerHTML = '';
 
@@ -87,7 +91,16 @@ export function initUI(container, options = {}) {
   });
   layersBtn.setAttribute('aria-pressed', 'false');
 
-  body.append(rail, canvasArea, layersPanel.element);
+  // Canvas area above, frame strip below (the transport will sit
+  // between them with step 4). The rail runs the full height beside.
+  const frameStrip = createFrameStrip({
+    onSelect: () => {}, onAdd: () => {}, ...framesCallbacks,
+  });
+  const stage = document.createElement('div');
+  stage.className = 'pp-stage';
+  stage.append(canvasArea, frameStrip.element);
+
+  body.append(rail, stage, layersPanel.element);
   shell.append(topBar, body);
   container.appendChild(shell);
 
@@ -257,7 +270,7 @@ export function initUI(container, options = {}) {
     layersBtn.setAttribute('aria-pressed', 'true');
   }
 
-  return { canvas: canvasApi, layers: layersPanel, setHistoryState };
+  return { canvas: canvasApi, layers: layersPanel, frames: frameStrip, setHistoryState };
 }
 
 // PWA update prompt — shown when a new service worker has installed
@@ -291,6 +304,33 @@ export function showNotice(message) {
   toast.classList.add('pp-toast--notice');
   toast.querySelector('.pp-toast__btn').addEventListener('click', () => toast.remove());
   document.body.appendChild(toast);
+}
+
+// Brief, self-dismissing message for things that aren't problems —
+// e.g. "this layer is locked" after a refused stroke. No button, and
+// touches pass straight through it, so it never interrupts drawing.
+// For real problems (couldn't save) use showNotice, which waits for OK.
+// A repeat while it's showing updates the text and restarts the timer.
+const BANNER_SHOW_MS = 2000;
+const BANNER_FADE_MS = 400;
+let bannerTimers = [];
+
+export function showBanner(message) {
+  let banner = document.getElementById('pp-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'pp-banner';
+    banner.className = 'pp-banner';
+    banner.setAttribute('role', 'status');
+    document.body.appendChild(banner);
+  }
+  bannerTimers.forEach(clearTimeout);
+  banner.textContent = message;
+  banner.classList.remove('pp-banner--fading');
+  bannerTimers = [
+    setTimeout(() => banner.classList.add('pp-banner--fading'), BANNER_SHOW_MS),
+    setTimeout(() => banner.remove(), BANNER_SHOW_MS + BANNER_FADE_MS),
+  ];
 }
 
 function createToast(id, message, buttonLabel) {

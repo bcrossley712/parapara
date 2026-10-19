@@ -245,16 +245,21 @@ test('a locked or hidden layer refuses strokes with a notice; toggles are saved 
   await page.getByRole('button', { name: 'Lock Layer 1' }).click();
   await stroke(page, 300, 300, 800, 400);
   expect(await painted(page, id)).toBe(0);
-  await expect(page.locator('#pp-notice-toast')).toContainText('locked');
+  // A fading banner, not a toast that needs OK: no button, and it goes
+  // away on its own.
+  const banner = page.locator('#pp-banner');
+  await expect(banner).toContainText('locked');
+  await expect(banner.locator('button')).toHaveCount(0);
+  await expect(banner).toHaveCSS('pointer-events', 'none');
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  await page.locator('#pp-notice-toast button').click();
+  await expect(banner).toHaveCount(0, { timeout: 5000 });
 
   await page.getByRole('button', { name: 'Unlock Layer 1' }).click();
   await page.getByRole('button', { name: 'Hide Layer 1' }).click();
   await expect(page.locator(`.pp-layer[data-layer-id="${id}"]`)).toHaveCSS('visibility', 'hidden');
   await stroke(page, 300, 300, 800, 400);
   expect(await painted(page, id)).toBe(0);
-  await expect(page.locator('#pp-notice-toast')).toContainText('hidden');
+  await expect(page.locator('#pp-banner')).toContainText('hidden');
 
   await expect.poll(async () => (await savedProject(page))?.layers[0].visible).toBe(false);
   await reloadApp(page);

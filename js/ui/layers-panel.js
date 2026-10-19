@@ -276,6 +276,13 @@ export function createLayersPanel(callbacks) {
     if (canvas) callbacks.drawThumbnail(id, canvas);
   }
 
+  // Redraws every thumbnail (another frame is showing). Skipped while
+  // closed, like refreshThumbnail.
+  function refreshThumbnails() {
+    if (!open) return;
+    for (const [id, canvas] of thumbs) callbacks.drawThumbnail(id, canvas);
+  }
+
   function setOpen(next, { notify = true } = {}) {
     if (next === open) return;
     open = next;
@@ -293,6 +300,7 @@ export function createLayersPanel(callbacks) {
     element: panel,
     render,
     refreshThumbnail,
+    refreshThumbnails,
     setOpen,
     get isOpen() { return open; },
   };

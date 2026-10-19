@@ -246,3 +246,58 @@ test('a single two-finger tap does not reset the view; a double-tap does', async
   await twoFingerTap(page);
   await expect.poll(() => canvasTransform(page)).toContain('scale(1)');
 });
+
+// --- fingers off the page --------------------------------------------
+//
+// Input is heard on the whole canvas area, so a finger on the dark
+// backdrop around the page still counts. Canvas y < 0 or > 1080 is off
+// the page but inside the area at this window size.
+
+test('a two-finger pan works with one finger off the page', async ({ page }) => {
+  await openApp(page);
+  const before = await canvasTransform(page);
+  const t = await touchSession(page);
+  const at = await mapper(page);
+  await t.start(1, at(900, 540));
+  await t.start(2, at(1000, -100)); // above the page
+  for (let i = 1; i <= 6; i++) {
+    await t.move(1, at(900 + i * 40, 540));
+    await t.move(2, at(1000 + i * 40, -100));
+  }
+  await t.end(1);
+  await t.end(2);
+  expect(await canvasTransform(page)).not.toBe(before);
+  expect(await paintedPixels(page)).toBe(0);
+});
+
+test('a three-finger tap with fingers off the page still undoes', async ({ page }) => {
+  await openApp(page);
+  await drawStroke(page);
+  expect(await paintedPixels(page)).toBeGreaterThan(0);
+  const t = await touchSession(page);
+  const at = await mapper(page);
+  const points = [at(800, -100), at(900, 500), at(1000, 1180)];
+  for (let i = 0; i < 3; i++) await t.start(i + 1, points[i]);
+  for (let i = 0; i < 3; i++) await t.end(i + 1);
+  await expect.poll(() => paintedPixels(page)).toBe(0);
+});
+
+test('a stroke can start off the page and paints where it crosses on', async ({ page }) => {
+  await openApp(page);
+  const at = await mapper(page);
+  const start = at(900, -100);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) {
+    const p = at(900, -100 + i * 40);
+    await page.mouse.move(p.x, p.y);
+  }
+  await page.mouse.up();
+  const onPage = await page.evaluate(() => {
+    const c = document.querySelector('.pp-layer--active').getContext('2d');
+    return [c.getImageData(900, 5, 1, 1).data[3], c.getImageData(900, 400, 1, 1).data[3]];
+  });
+  expect(onPage[0]).toBeGreaterThan(0); // right at the top edge
+  expect(onPage[1]).toBeGreaterThan(0);
+  await expect(undoBtn(page)).toBeEnabled();
+});
