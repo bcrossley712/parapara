@@ -83,26 +83,12 @@ icon, manifest `name`/`short_name`, and repo copy.
 
 ## Current state
 
-- **Step 1 (drawing engine): done**, on the iPad. Draw / erase / fill /
-  smudge, color picker, per-tool sizes, two-finger pan/zoom/rotate.
-- **Step 2a (saving): done and confirmed on the iPad.** One project,
-  one frame, one layer; autosaves and survives relaunch. Also
-  remembered tool settings, and the gear menu (version, Check for
-  updates, dev tools).
-- **Step 2b (undo/redo): done and confirmed on the iPad.** Undo/redo
-  buttons in a dark top bar; Sketchbook gestures (three-finger tap /
-  swipe, two-finger double-tap reset), with iPadOS's own undo kept out
-  of the way; Clear and fill undoable; fill is a gesture candidate;
-  zoom out to 0.25× (was capped at fit). She mostly uses the buttons.
-- **Step 2c (layers + bare-bones frame strip): done and confirmed on
-  the iPad.** Shared layers, layers panel, frame strip, fading banner,
-  gestures off the page.
-- **Step 2d (project gallery): done and confirmed on the iPad.**
-  Gallery of cards (frame-1 thumbnail, name, frame count), New
-  animation, open, rename (tap the name, or ⋯), delete with a custom
-  confirm; Gallery button in the editor; relaunch reopens where she
-  left off.
-- **Next: 2e** (before step 3) — scope in detail when it starts:
+- **Steps 1 and 2a–2d: done and confirmed on the iPad** — drawing
+  engine, saving, undo/redo, shared layers + bare-bones frame strip,
+  project gallery. How each works is under Architecture; she mostly
+  undoes with the buttons, not gestures.
+- **Next: 2e** (before step 3) — features she's requested; none block
+  later steps, so order is flexible. Scope in detail when it starts:
   - **Copy frame:** duplicate the current frame (every layer's drawing)
     right after itself and move onto it; undoable like add frame.
   - **Copy layer:** duplicate the active layer (its drawing on every
@@ -112,6 +98,21 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Eyedropper:** pick a color from the canvas.
   - **Duplicate project** (deferred from 2d; shares code with copy
     frame/layer).
+  - **Build these so later steps don't force a redo:**
+    - **Eyedropper and fill share one "visible canvas" sampler.** Step
+      3 adds a reference image under the layers, and both tools must
+      then see it (Sketchbook's eyedropper samples images). One shared
+      function means step 3 adds it in one place.
+    - **Duplicate project copies the blobs listed by
+      `referencedBlobIds`** (`layers.js`), not its own list — it
+      already covers `frame.image` and `audioClips`, so step 3 images
+      and step 5 audio come along automatically. Every copied blob gets
+      a new id and every reference to it is remapped; the thumbnail
+      follows the new project id (`thumb-<newId>`), or is just redrawn.
+    - **Copy frame copies the whole frame record** (new id, new
+      bitmapRefs with copied pixels, every other field as-is), so
+      step 3's `frame.image` comes along without changes — as
+      Flipaclip's duplicate frame does.
 - **Build order after step 2:** 3 image import + per-frame image
   transform · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
@@ -359,13 +360,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           fresh reload — no UI
       canvas/
         canvas.js         input dispatch, tools, viewport, layer surfaces,
-                          committed copy; API seams: loadFrame /
-                          syncLayers / setLayerImage / setActiveLayer /
-                          setLayerProps / drawThumbnail (layers),
-                          onChange / exportPNG(layerId) (persistence),
-                          getSettings / applySettings, swapRegion(…,
-                          layerId) / isBusy / onGesture / onBlocked /
-                          setInputBlocked (undo, lock), destroy
+                          committed copy; its returned API is the only
+                          way other modules touch the canvas
         thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers

@@ -53,7 +53,8 @@ Sections: [Process lessons](#process-lessons) ·
 - **Model choice:** step 2 (dense, interdependent state) moved to an
   Opus-class model. Early payoff: it found the stale service-worker
   pre-cache bug behind the viewport issue, and the shared-origin cache
-  bug. Still worth comparing step 2's bug-report rate against step 1's.
+  bug. (A planned bug-rate comparison against step 1 was never
+  tracked; dropped rather than left open.)
 
 ## Stack
 
@@ -102,8 +103,9 @@ Sections: [Process lessons](#process-lessons) ·
   pointer-coordinate mapping. Building storage, layers and image
   transforms on a no-zoom assumption would have meant retrofitting all
   of them.
-- **Mechanism:** a CSS `translate() rotate() scale()` on the canvas;
-  the bitmap never changes. `gestures.js` is pure math; `canvas.js`
+- **Mechanism:** a CSS `translate() rotate() scale()` on the wrapper
+  that holds the layer canvases (`.pp-canvas`); the bitmaps never
+  change. `gestures.js` is pure math; `canvas.js`
   dispatches.
 - **`toCanvasPoint` is analytic** because `getBoundingClientRect()` of
   a rotated element is the axis-aligned box *around* it.
@@ -251,8 +253,9 @@ Sections: [Process lessons](#process-lessons) ·
   line art.
 - **ArrayBuffer + MIME type, not Blob**, in IndexedDB — older WebKit
   had bugs storing Blobs.
-- **`bitmapRef` assigned at layer creation, never changed;** no blob =
-  blank. A stroke save writes only the blob store, not the frame.
+- **`bitmapRef` assigned when a frame or layer is created, never
+  changed;** no blob = blank. A stroke save writes only the blob
+  store, not the frame.
 - **Transactions resolve on *complete*** so "saved" means committed.
   Awaiting non-IndexedDB work inside one lets it auto-commit early.
 - **`projectId` indexes on frames/blobs were created up front** so
@@ -316,8 +319,8 @@ Sections: [Process lessons](#process-lessons) ·
 - **Version comes from the controlling worker**, since that worker
   decides which cached files the page actually got.
 - **Gear menu placement** matches Sketchbook/Procreate keeping
-  app-level actions behind one gear/wrench. Clear moved there because
-  there's no undo yet.
+  app-level actions behind one gear/wrench. Clear lives there (dev-only)
+  rather than on the rail so a stray tap can't wipe a drawing.
 
 ## Testing and CI
 
