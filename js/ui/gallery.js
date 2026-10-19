@@ -12,6 +12,7 @@
 import { attachSettingsMenu } from './settings-panel.js';
 import { showConfirm, showPrompt } from './confirm-dialog.js';
 import { GEAR_ICON } from './icons.js';
+import { MAX_PROJECT_NAME } from '../storage/storage.js';
 
 // callbacks: { onOpen(id), onCreate(), onRename(id, name),
 //   onDuplicate(id), onDelete(id) }
@@ -122,7 +123,9 @@ export function createGallery(container, { callbacks, appActions = {} }) {
 
   async function askRename(project) {
     if (busy) return;
-    const name = await showPrompt({ title: 'Rename animation', value: project.name, confirmLabel: 'Rename' });
+    const name = await showPrompt({
+      title: 'Rename animation', value: project.name, confirmLabel: 'Rename', maxLength: MAX_PROJECT_NAME,
+    });
     if (name && name !== project.name) onRename(project.id, name);
   }
 
@@ -181,7 +184,12 @@ export function createGallery(container, { callbacks, appActions = {} }) {
     const nameBtn = document.createElement('button');
     nameBtn.type = 'button';
     nameBtn.className = 'pp-gallery-card__name';
-    nameBtn.textContent = project.name;
+    // Clamped to two lines by CSS (on the span — line-clamp is
+    // unreliable on a <button> itself); the rename field shows it all.
+    const nameText = document.createElement('span');
+    nameText.className = 'pp-gallery-card__name-text';
+    nameText.textContent = project.name;
+    nameBtn.append(nameText);
     nameBtn.setAttribute('aria-label', `Rename ${project.name}`);
     nameBtn.addEventListener('click', () => askRename(project));
     const meta = document.createElement('div');

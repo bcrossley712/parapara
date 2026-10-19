@@ -7,10 +7,13 @@
 // tap a row to make it the active layer. Below the list, the active
 // layer's opacity, Rename, Duplicate and Delete.
 //
-// Pure UI: knows nothing about storage, history or the canvas. main.js
+// Pure UI: knows nothing about storage (beyond the shared name-length
+// limit), history or the canvas. main.js
 // passes state in through render() and gets intents back through the
 // callbacks. Custom controls only (no prompt()/confirm()) — rename is
 // an inline text field; delete is undoable, so there's no confirm.
+
+import { MAX_LAYER_NAME } from '../storage/layers.js';
 
 // callbacks:
 //   onSelect(id), onAdd(), onDelete(id), onRename(id, name),
@@ -144,7 +147,7 @@ export function createLayersPanel(callbacks) {
       name.type = 'text';
       name.className = 'pp-layers__name-input';
       name.value = layer.name;
-      name.maxLength = 40;
+      name.maxLength = MAX_LAYER_NAME;
       name.setAttribute('aria-label', 'Layer name');
       let done = false;
       const finish = (commit) => {

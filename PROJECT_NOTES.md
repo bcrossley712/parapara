@@ -350,6 +350,10 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Text inputs ≥ 16px font.
 - Layouts must tolerate wider text than desktop Chromium shows — no
   `nowrap` on content that could grow.
+- **Names she types wrap but clamp at two lines** (layer rows, gallery
+  cards) and have a length cap (`MAX_LAYER_NAME` 40 in `layers.js`,
+  `MAX_PROJECT_NAME` 60 in `storage.js`) that copies keep to too
+  (`copyName`) — an unclamped name grew the row without limit.
 - The canvas re-measures via `ResizeObserver` on the canvas area, not
   window resize.
 - **Anything an editor screen hooks up outside its own elements**

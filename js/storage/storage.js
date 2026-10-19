@@ -34,6 +34,10 @@ const DEFAULT_PROJECT_NAME = 'Untitled';
 const PROJECT_NAME_PREFIX = 'Animation';
 const DEFAULT_LAYER_NAME = 'Layer 1';
 
+// Longest a project name can be (the gallery's rename field and
+// duplicate's "<name> copy" both keep to it).
+export const MAX_PROJECT_NAME = 60;
+
 let dbPromise = null;
 
 // --- ids ---
@@ -121,6 +125,14 @@ export function nextProjectName(names) {
     if (match) highest = Math.max(highest, Number(match[1]));
   }
   return `${PROJECT_NAME_PREFIX} ${highest + 1}`;
+}
+
+// "<name> copy" for a duplicate, shortening the name first so the
+// result fits in `max` characters — otherwise copying a copy grows the
+// name without end.
+export function copyName(name, max) {
+  const suffix = ' copy';
+  return `${String(name ?? '').slice(0, Math.max(0, max - suffix.length)).trimEnd()}${suffix}`;
 }
 
 // The gallery thumbnail's id in the blob store. Derived from the

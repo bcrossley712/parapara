@@ -7,12 +7,16 @@
 // Arrays are never mutated in place: each function returns new ones,
 // so an undo entry can hold onto the "before" safely.
 
-import { newId, thumbnailBlobId } from './storage.js';
+import { newId, thumbnailBlobId, copyName } from './storage.js';
 
 // Most layers a project can have. Each is ~8 MB of canvas memory on
 // the iPad (see DESIGN_NOTES "Layers and undo"); the one place to
 // change it.
 export const MAX_LAYERS = 8;
+
+// Longest a layer name can be (the panel's rename field and copy
+// layer's "<name> copy" both keep to it).
+export const MAX_LAYER_NAME = 40;
 
 // "Layer N", one past the highest N already in use (Procreate and
 // Sketchbook number new layers the same way). Renamed layers don't
@@ -148,12 +152,12 @@ export function copyFrameRecord(frame) {
 }
 
 // Copy layer: a new layer just like `layer` (opacity, visibility),
-// named "<name> copy" and unlocked — a locked copy is rarely wanted.
+// named "<name> copy" (within MAX_LAYER_NAME) and unlocked — a locked copy is rarely wanted.
 // Returns { layer, refs, pairs }: refs = { [frameId]: newRef } for the
 // copy's slot on every frame, pairs = [[fromRef, toRef], ...] for the
 // pixel copy (frames without a slot for `layer` get a blank one).
 export function copyLayerRecord(layer, frames) {
-  const copy = { ...layer, id: newId(), name: `${layer.name} copy`, locked: false };
+  const copy = { ...layer, id: newId(), name: copyName(layer.name, MAX_LAYER_NAME), locked: false };
   const refs = {};
   const pairs = [];
   for (const frame of frames) {

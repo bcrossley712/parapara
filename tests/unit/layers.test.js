@@ -190,3 +190,13 @@ test('copyProjectRecords drops timeline ids with no frame record', () => {
   assert.equal(copy.project.frames.length, 2);
   assert.equal(copy.project.currentFrameId, copy.project.frames[0]);
 });
+
+test('a copied layer\'s name stays within MAX_LAYER_NAME, however often it is copied', () => {
+  let src = layer('a', 'x'.repeat(L.MAX_LAYER_NAME));
+  for (let i = 0; i < 5; i++) {
+    src = L.copyLayerRecord(src, []).layer;
+    assert.ok(src.name.length <= L.MAX_LAYER_NAME, src.name);
+    assert.ok(src.name.endsWith(' copy'));
+  }
+  assert.equal(L.copyLayerRecord(layer('a', 'Lines'), []).layer.name, 'Lines copy');
+});

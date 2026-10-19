@@ -260,3 +260,43 @@ test('Duplicate in the gallery makes an independent copy, first in the list', as
   await page.locator('.pp-canvas').waitFor();
   expect(await paintedAt(page, 900, 300)).toBe(true);
 });
+
+// --- long names (clamped to two lines, copies kept within the limit) ---
+
+test('a long layer name never makes its row taller than two lines, and its copy fits the limit', async ({ page }) => {
+  await openApp(page);
+  await openLayers(page);
+  const row = rows(page).first();
+  const shortHeight = (await row.boundingBox()).height;
+
+  await page.getByRole('button', { name: 'Rename' }).click();
+  const input = page.locator('.pp-layers__name-input');
+  await input.fill('W'.repeat(60)); // capped by maxLength
+  await input.press('Enter');
+  const name = page.locator('.pp-layers__name').first();
+  expect((await name.textContent()).length).toBe(40);
+  expect((await row.boundingBox()).height).toBe(shortHeight);
+  const lineHeight = await name.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+  expect((await name.boundingBox()).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+
+  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await expect(rows(page)).toHaveCount(2);
+  const copyName = await page.locator('.pp-layers__name').first().textContent();
+  expect(copyName.length).toBeLessThanOrEqual(40);
+  expect(copyName.endsWith(' copy')).toBe(true);
+});
+
+test('a long animation name is clamped to two lines on its card', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: 'Gallery', exact: true }).click();
+  await page.locator('.pp-gallery').waitFor();
+  await page.getByRole('button', { name: 'Rename Animation 1' }).click();
+  await page.locator('.pp-dialog__input').fill('Wide '.repeat(20));
+  await page.locator('.pp-dialog').getByRole('button', { name: 'Rename' }).click();
+  const text = page.locator('.pp-gallery-card__name-text');
+  await expect(text).toHaveText(/^Wide/);
+  expect((await text.textContent()).length).toBeLessThanOrEqual(60);
+  const lineHeight = await text.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight)
+    || parseFloat(getComputedStyle(el).fontSize) * 1.3);
+  expect((await text.boundingBox()).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+});

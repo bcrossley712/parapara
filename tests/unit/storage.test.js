@@ -433,3 +433,12 @@ test('a duplicated project opens with its own copies of every blob', async () =>
   assert.ok(await storage.loadThumbnail(copy.project.id));
   assert.equal((await storage.listProjects()).length, 1);
 });
+
+test('copyName adds " copy", shortening the name to fit the limit', () => {
+  assert.equal(storage.copyName('Walk cycle', 60), 'Walk cycle copy');
+  const long = storage.copyName('a'.repeat(storage.MAX_PROJECT_NAME), storage.MAX_PROJECT_NAME);
+  assert.equal(long.length, storage.MAX_PROJECT_NAME);
+  assert.ok(long.endsWith(' copy'));
+  // No dangling space where the cut lands after a word.
+  assert.equal(storage.copyName('ab cd', 8), 'ab copy');
+});

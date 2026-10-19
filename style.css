@@ -595,10 +595,22 @@ html, body {
 }
 
 /* Names may wrap (no nowrap: the iPad's font runs wider). */
+/* Long names wrap, but stop at two lines with an ellipsis (Procreate
+   and Flipaclip truncate too) so a row never grows; renaming shows the
+   whole name. */
+.pp-layers__name,
+.pp-gallery-card__name-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 .pp-layers__name {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
   line-height: 1.2;
 }
 

@@ -25,6 +25,8 @@ import {
   renameProject,
   deleteProject,
   nextProjectName,
+  copyName,
+  MAX_PROJECT_NAME,
   saveThumbnail,
   loadThumbnail,
   loadLayerBitmap,
@@ -265,7 +267,7 @@ async function showGallery() {
           const loaded = await loadProject(id);
           if (!loaded) throw new Error('Project not found');
           const copy = copyProjectRecords(loaded.project, loaded.frames, {
-            name: `${loaded.project.name} copy`,
+            name: copyName(loaded.project.name, MAX_PROJECT_NAME),
           });
           await saveProjectCopy(copy);
           const card = {
