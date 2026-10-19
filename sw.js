@@ -37,6 +37,7 @@ const APP_SHELL = [
   './js/storage/autosave.js',
   './js/storage/history.js',
   './js/storage/layers.js',
+  './js/storage/colors.js',
   './js/timeline/frames.js',
   './js/timeline/frame-strip.js',
   './icons/icon-192.png',

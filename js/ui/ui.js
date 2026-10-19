@@ -14,7 +14,7 @@
 // steps. Color picker itself lives in color-picker.js.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
-import { createColorPicker } from './color-picker.js';
+import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
 import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
@@ -35,12 +35,16 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 // options.frames: callbacks for the frame strip ({ onSelect, onAdd,
 //   onDuplicate },
 //   see timeline/frame-strip.js).
+// options.colors: palette intents from the color picker
+//   ({ onPaletteAdd(hex), onPaletteReplace(index, hex),
+//   onPaletteRemove(index) } — hex is the current color).
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
 //
 // Returns { canvas, layers (the panel), frames (the strip),
-// setHistoryState(canUndo, canRedo), destroy() }. destroy() removes
+// setHistoryState(canUndo, canRedo), setRecentColors(list),
+// setPalette(list), destroy() }. destroy() removes
 // the editor and everything it hooked up outside its own elements.
 export function initUI(container, options = {}) {
   const {
@@ -52,6 +56,7 @@ export function initUI(container, options = {}) {
     layers: layersCallbacks = {},
     layersPanelOpen = false,
     frames: framesCallbacks = {},
+    colors: colorCallbacks = {},
     onGallery = null,
   } = options;
   container.innerHTML = '';
@@ -130,6 +135,7 @@ export function initUI(container, options = {}) {
   const startSettings = canvasApi.getSettings();
 
   const pickTool = (tool) => {
+    setEyedropperArmed(false); // picking a tool cancels the eyedropper
     setActiveTool(tool);
     onSettingsChange();
   };
@@ -151,12 +157,50 @@ export function initUI(container, options = {}) {
   colorSwatch.className = 'pp-color-swatch';
   colorSwatch.setAttribute('aria-label', 'Color');
   colorSwatch.style.background = startSettings.color;
+  const swatchBadge = document.createElement('span');
+  swatchBadge.className = 'pp-color-swatch__badge';
+  swatchBadge.innerHTML = EYEDROPPER_ICON;
+  colorSwatch.appendChild(swatchBadge);
   rail.appendChild(colorSwatch);
 
-  const picker = createColorPicker(startSettings.color, (hex) => {
-    canvasApi.setColor(hex);
-    colorSwatch.style.background = hex;
-    onSettingsChange();
+  const currentColor = () => canvasApi.getSettings().color;
+  const picker = createColorPicker(startSettings.color, {
+    onChange: (hex) => {
+      canvasApi.setColor(hex);
+      colorSwatch.style.background = hex;
+      onSettingsChange();
+    },
+    onEyedropper: () => {
+      setPickerOpen(false);
+      setEyedropperArmed(!canvasApi.isEyedropperArmed());
+    },
+    onPaletteAdd: () => colorCallbacks.onPaletteAdd?.(currentColor()),
+    onPaletteReplace: (index) => colorCallbacks.onPaletteReplace?.(index, currentColor()),
+    onPaletteRemove: (index) => colorCallbacks.onPaletteRemove?.(index),
+  });
+
+  // Eyedropper (canvas.js has the mechanics): armed from the picker,
+  // the rail swatch wears a badge and previews the color under her
+  // finger; a pick sets the color like any other change, and the tool
+  // she had is still the tool.
+  function setEyedropperArmed(armed) {
+    canvasApi.setEyedropper(armed);
+    colorSwatch.classList.toggle('is-picking', armed);
+    colorSwatch.setAttribute('aria-label', armed ? 'Color (picking from canvas)' : 'Color');
+    if (!armed) colorSwatch.style.background = currentColor();
+    else showBanner('Tap the canvas to pick a color.');
+  }
+  canvasApi.onEyedropper(({ type, hex }) => {
+    if (type === 'preview') {
+      colorSwatch.style.background = hex;
+    } else if (type === 'preview-end') {
+      colorSwatch.style.background = currentColor();
+    } else if (type === 'pick') {
+      canvasApi.setColor(hex);
+      picker.setColor(hex);
+      setEyedropperArmed(false);
+      onSettingsChange();
+    }
   });
   picker.element.classList.add('pp-color-picker--hidden');
   shell.appendChild(picker.element);
@@ -169,7 +213,12 @@ export function initUI(container, options = {}) {
     if (open) {
       const rect = colorSwatch.getBoundingClientRect();
       picker.element.style.left = `${rect.right + 8}px`;
-      picker.element.style.top = `${rect.top}px`;
+      // Beside the swatch, but moved up if it would run off the bottom
+      // (it's taller since 2e's recents and palette).
+      const bottomLimit = window.innerHeight - picker.element.offsetHeight - 8;
+      picker.element.style.top = `${Math.max(8, Math.min(rect.top, bottomLimit))}px`;
+    } else {
+      picker.closeMenu();
     }
   }
 
@@ -182,7 +231,7 @@ export function initUI(container, options = {}) {
   // it, matching how a floating picker behaves in other apps.
   document.addEventListener('pointerdown', (event) => {
     if (!pickerOpen) return;
-    if (picker.element.contains(event.target) || event.target === colorSwatch) return;
+    if (picker.element.contains(event.target) || colorSwatch.contains(event.target)) return;
     setPickerOpen(false);
   }, { signal });
 
@@ -284,7 +333,15 @@ export function initUI(container, options = {}) {
     container.innerHTML = '';
   }
 
-  return { canvas: canvasApi, layers: layersPanel, frames: frameStrip, setHistoryState, destroy };
+  return {
+    canvas: canvasApi,
+    layers: layersPanel,
+    frames: frameStrip,
+    setHistoryState,
+    setRecentColors: (list) => picker.setRecents(list),
+    setPalette: (list) => picker.setPalette(list),
+    destroy,
+  };
 }
 
 // PWA update prompt — shown when a new service worker has installed

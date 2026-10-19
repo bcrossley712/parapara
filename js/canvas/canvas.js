@@ -310,7 +310,7 @@ export function initCanvas(container, options = {}) {
     if (!rect) return;
     const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
     syncCommitted(rect);
-    notifyChange({ rect, before, layerId: activeLayerId });
+    notifyChange({ rect, before, layerId: activeLayerId, tool });
   }
 
   let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
@@ -608,25 +608,31 @@ export function initCanvas(container, options = {}) {
       && Math.abs(a1 - a2) <= tolerance;
   }
 
-  // What fill "sees": every visible layer composited at its opacity,
-  // so a fill on a color layer stops at line art on another layer
-  // (Sketchbook's sample-all-layers). Hidden layers don't count. When
-  // the active layer is the only visible one at full opacity, that's
-  // just its own pixels — no composite needed.
-  function readFillSample() {
+  // THE "visible canvas" sampler — what fill and the eyedropper see:
+  // every visible layer composited at its opacity (Sketchbook's
+  // sample-all-layers), so a fill on a color layer stops at line art on
+  // another layer and the eyedropper picks what's on screen. Hidden
+  // layers don't count. Returns ImageData for `rect` (default: the
+  // whole canvas), unpremultiplied, transparent where nothing's drawn.
+  // Step 3's reference image gets added here, once, for both tools;
+  // step 4's onion skin must NOT be (ghost frames aren't her drawing).
+  // When the active layer is the only visible one at full opacity,
+  // that's just its own pixels — no composite needed.
+  function readVisible(rect = { x: 0, y: 0, w: width, h: height }) {
+    const { x, y, w, h } = rect;
     const visible = order.map((id) => surfaces.get(id)).filter((s) => s.visible);
     if (visible.length === 1 && visible[0].ctx === ctx && visible[0].opacity === 1) {
-      return ctx.getImageData(0, 0, width, height);
+      return ctx.getImageData(x, y, w, h);
     }
     const temp = document.createElement('canvas');
-    temp.width = width;
-    temp.height = height;
+    temp.width = w;
+    temp.height = h;
     const tctx = temp.getContext('2d');
     for (const surface of visible) {
       tctx.globalAlpha = surface.opacity;
-      tctx.drawImage(surface.canvas, 0, 0);
+      tctx.drawImage(surface.canvas, x, y, w, h, 0, 0, w, h);
     }
-    const sample = tctx.getImageData(0, 0, width, height);
+    const sample = tctx.getImageData(0, 0, w, h);
     // Release the backing store now rather than whenever GC runs —
     // iPad Safari counts canvas memory hard.
     temp.width = 0;
@@ -643,7 +649,7 @@ export function initCanvas(container, options = {}) {
     // `data` decides the region (all visible layers); `target` is the
     // active layer, where the fill color is written. Same object when
     // the sample is just the active layer.
-    const sampleData = readFillSample();
+    const sampleData = readVisible();
     const data = sampleData.data;
 
     const startIdx = (startY * width + startX) * 4;
@@ -705,6 +711,61 @@ export function initCanvas(container, options = {}) {
   }
 
   // --- stroke lifecycle, shared by draw/erase/smudge ---
+
+  // --- eyedropper ---
+  //
+  // Not one of TOOLS (never saved as a setting): armed from the color
+  // picker, it turns the next touch into a pick. While the finger is
+  // down, listeners get a live 'preview' of the color under it; on
+  // lift, a 'pick' — then it disarms and the tool she had is back
+  // (Flipaclip). A second finger turns the touch into a gesture as
+  // usual and leaves it armed. Lifting off the page picks nothing and
+  // stays armed. It only reads, so a locked or hidden active layer
+  // doesn't stop it.
+  let eyedropperArmed = false;
+  let picking = false;       // a pick touch is down
+  let pickHex = null;        // the color under it (null = off the page)
+  const eyedropperListeners = new Set();
+  function emitEyedropper(type, hex = null) {
+    for (const listener of eyedropperListeners) listener({ type, hex });
+  }
+
+  // The color she sees at a canvas point: the visible composite,
+  // flattened over the white page. Null off the page.
+  function colorAt(point) {
+    const px = Math.floor(point.x);
+    const py = Math.floor(point.y);
+    if (px < 0 || py < 0 || px >= width || py >= height) return null;
+    const [r, g, b, a] = readVisible({ x: px, y: py, w: 1, h: 1 }).data;
+    const over = (c) => Math.round((c * a + 255 * (255 - a)) / 255);
+    return `#${[over(r), over(g), over(b)].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  function beginPick(point) {
+    picking = true;
+    strokeBlocked = null;
+    pickHex = colorAt(point);
+    if (pickHex) emitEyedropper('preview', pickHex);
+  }
+
+  function movePick(point) {
+    const hex = colorAt(point);
+    if (hex && hex !== pickHex) emitEyedropper('preview', hex);
+    pickHex = hex;
+  }
+
+  function endPick() {
+    activePointerId = null;
+    picking = false;
+    const hex = pickHex;
+    pickHex = null;
+    if (!hex) {
+      emitEyedropper('preview-end');
+      return;
+    }
+    eyedropperArmed = false;
+    emitEyedropper('pick', hex);
+  }
 
   function beginStroke(point) {
     p0 = null;
@@ -782,8 +843,9 @@ export function initCanvas(container, options = {}) {
 
   const changeListeners = new Set();
 
-  // change = { rect, before, layerId }: the committed rect, its pixels
-  // before the edit (ImageData), and the layer it was on.
+  // change = { rect, before, layerId, tool }: the committed rect, its
+  // pixels before the edit (ImageData), the layer it was on, and what
+  // made it (a TOOLS name, or 'clear' / 'dev' for the gear menu's).
   function notifyChange(change) {
     for (const listener of changeListeners) listener(change);
   }
@@ -873,6 +935,12 @@ export function initCanvas(container, options = {}) {
           pendingTouch = null;
           activePointerId = null;
           strokeBlocked = null; // a gesture, not a refused stroke
+          if (picking) {
+            // Still armed: the next one-finger touch picks.
+            picking = false;
+            pickHex = null;
+            emitEyedropper('preview-end');
+          }
           p0 = null;
           p1 = null;
           return;
@@ -898,6 +966,11 @@ export function initCanvas(container, options = {}) {
         lastLocal: local,
       };
 
+      if (eyedropperArmed) {
+        beginPick(point);
+        return;
+      }
+
       if (tool === 'fill') {
         // Fills right away (no latency), but stays a gesture candidate
         // like a stroke: a second finger in the window reverts it from
@@ -917,6 +990,11 @@ export function initCanvas(container, options = {}) {
     activePointerId = event.pointerId;
     strokeBlocked = paintBlockReason();
     container.setPointerCapture(event.pointerId);
+
+    if (eyedropperArmed) {
+      beginPick(toCanvasPoint(event));
+      return;
+    }
 
     if (tool === 'fill') {
       floodFill(toCanvasPoint(event));
@@ -987,6 +1065,10 @@ export function initCanvas(container, options = {}) {
     }
 
     if (event.pointerId !== activePointerId) return;
+    if (picking) {
+      movePick(toCanvasPoint(event));
+      return;
+    }
     if (tool === 'fill') return; // nothing to drag for fill
 
     // Coalesced events give the actual sampled points between the
@@ -1054,6 +1136,12 @@ export function initCanvas(container, options = {}) {
     if (event.pointerId !== activePointerId) return;
     if (container.hasPointerCapture?.(event.pointerId)) {
       container.releasePointerCapture(event.pointerId);
+    }
+    if (picking) {
+      if (event.type === 'pointercancel') pickHex = null; // system took over
+      else movePick(toCanvasPoint(event));
+      endPick();
+      return;
     }
     endStroke();
   }
@@ -1146,6 +1234,21 @@ export function initCanvas(container, options = {}) {
       color = hex;
     },
 
+    // Eyedropper (see above). Arming while a touch is down waits for
+    // the next one. listener({ type, hex }): 'preview' (color under the
+    // finger), 'preview-end' (lifted without picking, or became a
+    // gesture — still armed), 'pick' (done; disarmed).
+    setEyedropper(armed) {
+      eyedropperArmed = armed === true;
+    },
+    isEyedropperArmed() {
+      return eyedropperArmed;
+    },
+    onEyedropper(listener) {
+      eyedropperListeners.add(listener);
+      return () => eyedropperListeners.delete(listener);
+    },
+
     // Current tool settings, in the shape sanitizeToolSettings()
     // returns — what main.js saves, and what ui.js syncs its controls
     // from after applySettings().
@@ -1175,7 +1278,7 @@ export function initCanvas(container, options = {}) {
       if (!hasPaint(before.data)) return;
       ctx.clearRect(0, 0, width, height);
       committedCtx.clearRect(0, 0, width, height);
-      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: activeLayerId });
+      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: activeLayerId, tool: 'clear' });
     },
 
     // --- undo/redo seam (step 2b) ---
@@ -1338,6 +1441,7 @@ export function initCanvas(container, options = {}) {
       }
       changeListeners.clear();
       gestureListeners.clear();
+      eyedropperListeners.clear();
       blockedListeners.clear();
       stack.remove();
     },
@@ -1372,7 +1476,7 @@ export function initCanvas(container, options = {}) {
       surface.ctx.fillRect(0, 0, width, height);
       surface.ctx.restore();
       if (isActive) syncCommitted({ x: 0, y: 0, w: width, h: height });
-      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: id });
+      notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: id, tool: 'dev' });
     },
   };
 }

@@ -442,3 +442,15 @@ test('copyName adds " copy", shortening the name to fit the limit', () => {
   // No dangling space where the cut lands after a word.
   assert.equal(storage.copyName('ab cd', 8), 'ab copy');
 });
+
+test('recent colors round-trip, and are null before anything is saved', async () => {
+  await storage.initStorage();
+  assert.equal(await storage.loadRecentColors(), null);
+  await storage.saveRecentColors(['#ff0000', '#00ff00']);
+  relaunch();
+  assert.deepEqual(await storage.loadRecentColors(), ['#ff0000', '#00ff00']);
+});
+
+test('a new project starts with an empty palette', () => {
+  assert.deepEqual(storage.createProjectRecord().palette, []);
+});

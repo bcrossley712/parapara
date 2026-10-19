@@ -35,6 +35,8 @@ import {
   saveToolSettings,
   loadUiState,
   saveUiState,
+  loadRecentColors,
+  saveRecentColors,
   saveFrame,
   saveProject,
   copyBlobs,
@@ -68,6 +70,15 @@ import {
   removeFrameId,
   frameAfterRemoval,
 } from './timeline/frames.js';
+import {
+  MAX_RECENTS,
+  MAX_PALETTE,
+  sanitizeColorList,
+  addRecent,
+  addToPalette,
+  replaceInPalette,
+  removeFromPalette,
+} from './storage/colors.js';
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { renderThumbnail } from './canvas/thumbnail.js';
@@ -86,6 +97,9 @@ let toolSettings = null;
 // { layersPanelOpen, screen: 'gallery' | 'editor' } — remembered
 // across launches.
 let uiState = {};
+// The last colors she drew or filled with, newest first — app-wide
+// (colors.js), shown in every project's color picker.
+let recentColors = [];
 // False if the database can't be opened at all; then there's no
 // gallery, just an unsaved editor.
 let storageWorks = false;
@@ -102,6 +116,11 @@ const settingsSaver = createAutosaver({
   save: () => saveToolSettings(toolSettings),
   delayMs: 300,
   onError: (err) => console.warn('Parapara! saving tool settings failed:', err),
+});
+const recentsSaver = createAutosaver({
+  save: () => saveRecentColors([...recentColors]),
+  delayMs: 300,
+  onError: (err) => console.warn('Parapara! saving recent colors failed:', err),
 });
 const uiStateSaver = createAutosaver({
   save: () => saveUiState({ ...uiState }),
@@ -120,7 +139,7 @@ function setUiState(changes, { now = false } = {}) {
 }
 
 function flushAll() {
-  const savers = storageWorks ? [settingsSaver.flush(), uiStateSaver.flush()] : [];
+  const savers = storageWorks ? [settingsSaver.flush(), uiStateSaver.flush(), recentsSaver.flush()] : [];
   return Promise.all([flushEditor?.(), ...savers]);
 }
 
@@ -169,6 +188,11 @@ async function launch() {
     toolSettings = await loadToolSettings();
   } catch (err) {
     console.warn('Parapara! could not load tool settings:', err);
+  }
+  try {
+    recentColors = sanitizeColorList(await loadRecentColors(), MAX_RECENTS);
+  } catch (err) {
+    console.warn('Parapara! could not load recent colors:', err);
   }
   try {
     const saved = await loadUiState();
@@ -377,6 +401,8 @@ function mountEditor(session, { canSave }) {
   }
 
   const project = session.project;
+  // Older projects have no palette; a bad saved one is cleaned up.
+  project.palette = sanitizeColorList(project.palette, MAX_PALETTE);
 
   // Created below if saving works; otherwise changes simply aren't
   // saved. Undo works either way — it's in memory only.
@@ -411,6 +437,11 @@ function mountEditor(session, { canSave }) {
       onOpacityCommit: (id, before, after) => commitOpacity(id, before, after),
       onOpenChange: (open) => setUiState({ layersPanelOpen: open }),
     },
+    colors: {
+      onPaletteAdd: (hex) => addPaletteColor(hex),
+      onPaletteReplace: (index, hex) => setPalette(replaceInPalette(project.palette, index, hex)),
+      onPaletteRemove: (index) => setPalette(removeFromPalette(project.palette, index)),
+    },
     frames: {
       onSelect: (id) => selectFrame(id),
       onAdd: () => addFrame(),
@@ -420,6 +451,39 @@ function mountEditor(session, { canSave }) {
   const canvasApi = ui.canvas;
   const panel = ui.layers;
   const strip = ui.frames;
+  ui.setRecentColors(recentColors);
+  ui.setPalette(project.palette);
+
+  // --- colors (2e) ---
+  //
+  // Palette edits aren't undoable (as in Procreate) — saved with the
+  // project like a rename. Recents follow what she actually draws or
+  // fills with, not every color she passes through in the picker.
+  function setPalette(palette) {
+    if (palette === project.palette) return;
+    project.palette = palette;
+    scheduleProjectSave();
+    ui.setPalette(palette);
+  }
+
+  function addPaletteColor(hex) {
+    const { palette, result } = addToPalette(project.palette, hex);
+    if (result === 'full') {
+      showBanner(`Your palette holds ${MAX_PALETTE} colors. Press and hold one to replace it.`);
+    } else if (result === 'duplicate') {
+      showBanner("That color's already in your palette.");
+    } else {
+      setPalette(palette);
+    }
+  }
+
+  function noteColorUsed(hex) {
+    const next = addRecent(recentColors, hex);
+    if (next === recentColors) return;
+    recentColors = next;
+    ui.setRecentColors(recentColors);
+    if (canSave) recentsSaver.schedule();
+  }
 
   canvasApi.loadFrame({
     layers: project.layers,
@@ -731,7 +795,8 @@ function mountEditor(session, { canSave }) {
     if (history.redo((e) => applyEntry(e, 'redo'))) autosaver?.schedule();
   }
 
-  canvasApi.onChange(({ rect, before, layerId }) => {
+  canvasApi.onChange(({ rect, before, layerId, tool }) => {
+    if (tool === 'draw' || tool === 'fill') noteColorUsed(canvasApi.getSettings().color);
     history.push({
       type: 'pixels',
       frameId: session.frame.id,
@@ -957,7 +1022,8 @@ function mountEditor(session, { canSave }) {
     },
   });
 
-  // Layer order, names, visibility, lock, opacity and the active layer.
+  // Layer order, names, visibility, lock, opacity, the active layer and
+  // the palette.
   projectSaver = createAutosaver({
     save: () => saveProject(project),
     delayMs: 300,

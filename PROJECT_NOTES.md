@@ -88,25 +88,13 @@ icon, manifest `name`/`short_name`, and repo copy.
   project gallery. How each works is under Architecture; she mostly
   undoes with the buttons, not gestures.
 - **2e (before step 3), in two passes:**
-  - **Pass 1 — copying: built and tested, not yet on the iPad.** How
-    it works is under Architecture (Copying).
-  - **Pass 2 — color: next.** Scope agreed:
-    - **One "visible canvas" sampler:** `readFillSample()` becomes
-      `readVisible(rect)` — fill reads the whole canvas, the eyedropper
-      1×1. Step 3 adds the reference image to it in one place
-      (Sketchbook's eyedropper samples images).
-    - **Eyedropper:** a button in the color picker; the next tap on
-      the canvas picks the color she sees (flattened over white) and
-      returns to the previous tool (Flipaclip). Not saved as a tool
-      setting. No touch-and-hold-to-pick (Procreate/Sketchbook) — it
-      clashes with a stylus resting mid-stroke.
-    - **Recent colors:** app-wide, last **8 drawn or filled with**
-      (added when a stroke commits, not when the picker changes), saved
-      in `meta.recentColors`.
-    - **Palette:** per project (`project.palette`, so a duplicate
-      brings it), up to **10** swatches. "+" adds the current color;
-      full → banner. **Long-press a swatch → Replace / Remove**
-      (Flipaclip's long-press replaces, so Replace keeps her habit).
+  - **Pass 1 — copying: done and confirmed on the iPad.** How it works
+    is under Architecture (Copying).
+  - **Pass 2 — color: built and tested, not yet on the iPad.** How it
+    works is under Architecture (Colors). The picker layout is a first
+    try — adjust if she wants it different.
+- **Next: the top-bar visual bug** (his fix in `8debdf3` didn't clear
+  it), then step 3.
 - **Build order after step 2:** 3 image import + per-frame image
   transform + **mirroring** (ask her which kind first — flip view,
   flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
@@ -124,8 +112,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   it to brushes that soften their own edges). Don't retune it alone.
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
 - **Brush variety** (sizes, chisel tips, edge blending) — after step 2.
-- **Color opacity** — not in the picker on purpose; revisit if she asks
-  (palette, recents and eyedropper are planned for 2e).
+- **Color opacity** — not in the picker on purpose; revisit if she
+  asks.
 - **Export format** (container/codec) — decide at step 6.
 - **Rename from the editor** (tap the title, as Procreate does) —
   gallery-only for now.
@@ -239,6 +227,26 @@ Short rules; reasoning in the linked sections.
     every blob (thumbnail → `thumb-<newId>`), layer ids kept, fresh
     `updatedAt` so it's first in the gallery; she stays on the gallery
     (Procreate). One transaction.
+- **Colors (2e)** — all in the floating color picker
+  (`color-picker.js`, UI only; lists and caps in `storage/colors.js`):
+  - **Eyedropper:** button beside the hex field. Armed, the rail swatch
+    wears a badge and the next one-finger touch picks: live preview on
+    the rail swatch while down, the color she sees (visible composite
+    over white) on lift, then disarmed — her tool never changed. Not one
+    of `TOOLS`, never saved. A second finger makes it a gesture and
+    leaves it armed; lifting off the page picks nothing; picking a
+    tool cancels it. Works on locked/hidden layers (it only reads).
+    Brush pixels aren't exactly the brush color (soft stamps overlap),
+    so a pick off a stroke can be a step off — as in Procreate.
+  - **Recent colors:** app-wide, newest first, 8 (`MAX_RECENTS`).
+    Added when a draw or fill commits (canvas `onChange` reports the
+    `tool`), not when the picker moves or on a pick. Saved in
+    `meta.recentColors`, debounced like tool settings.
+  - **Palette:** per project, 10 (`MAX_PALETTE`), 2×5 grid with "+" in
+    the first empty slot. "+" adds the current color; a duplicate or
+    a full palette gets a banner. Press and hold (0.5 s, cancelled by
+    sliding) → Replace / Remove. Edits aren't undoable (as in
+    Procreate); saved with the project record.
 - **Gestures — match Sketchbook defaults**
   ([why](docs/DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -300,6 +308,10 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Layer canvases are `pointer-events: none`; pointer listeners and
   capture belong to the canvas area (`.pp-canvas-area`), never the
   page or a layer — fingers off the page must still count.
+- **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
+  sampler** for fill and the eyedropper. Step 3's reference image goes
+  in it; step 4's onion skin must stay out (ghost frames aren't her
+  drawing).
 - Fill's region comes from the visible-layer composite, its pixels go
   to the active layer only — never write the composite back.
 - `toCanvasPoint` is computed analytically from viewport state, never
@@ -398,6 +410,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         layers.js         pure layer-list + bitmap-slot ops, MAX_LAYERS,
                           mapBlobRefs / referencedBlobIds (launch
                           sweep), copy record builders
+        colors.js         pure recents/palette list ops, MAX_RECENTS,
+                          MAX_PALETTE, saved-list validation
       ui/
         ui.js             editor: top bar (Gallery, undo/redo, Layers),
                           tool rail, toasts/banners, DOM glue, destroy
@@ -405,7 +419,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         confirm-dialog.js custom modal: showConfirm / showPrompt
         icons.js          icons shared by both screens
         layers-panel.js   layers panel (UI only; intents via callbacks)
-        color-picker.js   custom HSV picker
+        color-picker.js   custom HSV picker + eyedropper button,
+                          recents row, palette grid (UI only)
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
@@ -445,7 +460,7 @@ bitmap. Planned fields are marked. Extend additively.
       activeLayerId,
       frames: [frameId, ...],                 // timeline order
       currentFrameId,                         // the frame she was on
-      palette: [ '#rrggbb', ... ],            // planned (2e pass 2), max 10
+      palette: [ '#rrggbb', ... ],            // 2e, max 10; older projects: missing = []
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
@@ -461,7 +476,7 @@ bitmap. Planned fields are marked. Extend additively.
 type, buffer }` — layer bitmaps and the gallery thumbnail
 `thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
 `uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor' }`;
-planned for 2e: `recentColors`).
+`recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
 every frame record. Undo is never stored.
@@ -488,8 +503,12 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   at import time. `sw-precache.test.js` enforces the `APP_SHELL` rule.
 - **E2E (`tests/e2e/`):** real app in headless Chromium at 1080×810.
   `serve.js` serves the repo and simulates deploys
-  (`/__test__/state?version=…&slowInstallMs=…`); because of that
-  shared state, `workers: 1`. Mouse input for strokes; touch gestures
+  (`/__test__/state?version=…&slowInstallMs=…`). **Two projects** in
+  `playwright.config.js`: `app` (everything else, fully parallel, 2
+  workers — `E2E_WORKERS` overrides) then `updates` (serial, after
+  `app`, because changing the deploy version reaches every open page;
+  a failing `app` test skips it). New specs that touch
+  `/__test__/state` go in `updates`. Mouse input for strokes; touch gestures
   go through CDP `Input.dispatchTouchEvent` (`undo.spec.js`) — pass
   explicit `timestamp`s when the page may be busy (e.g. mid-fill), or
   the gesture window expires before the second touch is sent.
@@ -502,9 +521,8 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   - `openApp` (helpers) starts from the empty gallery on a fresh
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
-  - **When e2e passes ~2 minutes,** parallelize (~1.7 min after 2e
-    pass 1 — likely due during pass 2) — first isolating the update
-    tests into their own serial group.
+  - Each test gets its own browser context (own IndexedDB), so tests
+    must not depend on order or on each other. ~1.3 min after 2e.
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo

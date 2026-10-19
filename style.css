@@ -238,10 +238,12 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 192px;
+  width: 276px; /* 252 content: 8 recents or 5 palette swatches across */
   padding: 12px;
   background: var(--pp-ink);
   border-radius: 12px;
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
@@ -251,7 +253,7 @@ html, body {
 
 .pp-color-picker__sv-wrap {
   position: relative;
-  width: 160px;
+  width: 252px;
   height: 160px;
   border-radius: 8px;
   overflow: hidden;
@@ -331,6 +333,138 @@ html, body {
      closes. Keep it at 16px or above. */
   font-size: 16px;
   text-transform: uppercase;
+}
+
+/* 2e: hex field + eyedropper on one row; recents and palette below. */
+.pp-color-picker__field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pp-color-picker__field-row .pp-color-picker__hex-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.pp-color-picker__eyedropper {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  cursor: pointer;
+}
+
+.pp-color-picker__label {
+  margin-bottom: -4px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.pp-color-picker__recents {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.pp-color-picker__palette {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.pp-color-picker__recent,
+.pp-color-picker__swatch {
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 0;
+  cursor: pointer;
+  /* No iPadOS callout/magnifier on a long press. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pp-color-picker__recent {
+  height: 28px;
+}
+
+.pp-color-picker__swatch {
+  height: 40px;
+}
+
+.pp-color-picker__recent--empty,
+.pp-color-picker__swatch--empty {
+  border: 2px dashed var(--pp-ink-light);
+  cursor: default;
+}
+
+.pp-color-picker__swatch--add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--pp-bg);
+  background: transparent;
+  color: var(--pp-bg);
+}
+
+/* Replace / Remove under a long-pressed swatch. */
+.pp-color-picker__menu {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--pp-ink-light);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.pp-color-picker__menu-item {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pp-bg);
+  font-family: inherit;
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pp-color-picker__menu-item:active {
+  background: var(--pp-ink);
+}
+
+/* Rail swatch while the eyedropper is armed: an eyedropper badge. */
+.pp-color-swatch {
+  position: relative;
+}
+
+.pp-color-swatch__badge {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+  pointer-events: none;
+}
+
+.pp-color-swatch.is-picking .pp-color-swatch__badge {
+  display: flex;
 }
 
 /* Settings panel (js/ui/settings-panel.js) — floats beside the gear,

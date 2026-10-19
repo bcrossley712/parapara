@@ -27,6 +27,7 @@ const STORE_META = 'meta';     // small app-level records, e.g. last project
 const META_LAST_PROJECT = 'lastProjectId';
 const META_TOOL_SETTINGS = 'toolSettings';
 const META_UI_STATE = 'uiState';
+const META_RECENT_COLORS = 'recentColors';
 
 const DEFAULT_CANVAS = { width: 1920, height: 1080 };
 const DEFAULT_FPS = 12;
@@ -111,6 +112,7 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     layers: [layer],               // index 0 = bottom
     activeLayerId: layer.id,
     frames: [],
+    palette: [],                   // saved swatches (2e) — see colors.js
     audioClips: [],
   };
 }
@@ -500,6 +502,25 @@ export async function loadToolSettings() {
 export async function saveToolSettings(settings) {
   await withTransaction([STORE_META], 'readwrite', (s) => {
     s[STORE_META].put({ key: META_TOOL_SETTINGS, value: settings });
+  });
+}
+
+// --- recent colors (app-wide, remembered across launches) ---
+//
+// The last few colors she drew or filled with, newest first — like
+// Procreate's and Sketchbook's history row, shared by every project.
+// Stored as-is; colors.js (sanitizeColorList) cleans it on load.
+
+export async function loadRecentColors() {
+  const record = await withTransaction([STORE_META], 'readonly', (s) =>
+    promisifyRequest(s[STORE_META].get(META_RECENT_COLORS))
+  );
+  return record?.value ?? null;
+}
+
+export async function saveRecentColors(colors) {
+  await withTransaction([STORE_META], 'readwrite', (s) => {
+    s[STORE_META].put({ key: META_RECENT_COLORS, value: colors });
   });
 }
 
