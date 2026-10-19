@@ -32,7 +32,8 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 // options.layers: callbacks for the layers panel (see layers-panel.js);
 //   onOpenChange also fires when the top-bar button toggles it.
 // options.layersPanelOpen: open the layers panel at startup.
-// options.frames: callbacks for the frame strip ({ onSelect, onAdd },
+// options.frames: callbacks for the frame strip ({ onSelect, onAdd,
+//   onDuplicate },
 //   see timeline/frame-strip.js).
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
@@ -108,8 +109,8 @@ export function initUI(container, options = {}) {
   // Canvas area above, frame strip below (the transport will sit
   // between them with step 4). The rail runs the full height beside.
   const frameStrip = createFrameStrip({
-    onSelect: () => {}, onAdd: () => {}, ...framesCallbacks,
-  });
+    onSelect: () => {}, onAdd: () => {}, onDuplicate: () => {}, ...framesCallbacks,
+  }, { signal });
   const stage = document.createElement('div');
   stage.className = 'pp-stage';
   stage.append(canvasArea, frameStrip.element);

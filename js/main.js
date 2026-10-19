@@ -35,6 +35,8 @@ import {
   saveUiState,
   saveFrame,
   saveProject,
+  copyBlobs,
+  saveProjectCopy,
   saveProjectAndFrames,
   deleteUnreferencedBlobs,
   createLayer,
@@ -54,6 +56,9 @@ import {
   detachLayerRefs,
   attachLayerRefs,
   referencedBlobIds,
+  copyFrameRecord,
+  copyLayerRecord,
+  copyProjectRecords,
 } from './storage/layers.js';
 import {
   insertIndexAfter,
@@ -251,6 +256,33 @@ async function showGallery() {
           showNotice("That animation couldn't be renamed.");
         }
       },
+      // A copy of the whole animation, "<name> copy", as a new card at
+      // the front (it's the newest); she stays on the gallery, as in
+      // Procreate.
+      onDuplicate: async (id) => {
+        gallery.setBusy(true);
+        try {
+          const loaded = await loadProject(id);
+          if (!loaded) throw new Error('Project not found');
+          const copy = copyProjectRecords(loaded.project, loaded.frames, {
+            name: `${loaded.project.name} copy`,
+          });
+          await saveProjectCopy(copy);
+          const card = {
+            id: copy.project.id,
+            name: copy.project.name,
+            frameCount: copy.project.frames.length,
+            thumbnail: await loadThumbnail(copy.project.id).catch(() => null),
+          };
+          cards = [card, ...cards];
+          gallery.render(cards);
+        } catch (err) {
+          console.error('Parapara! duplicate failed:', err);
+          showNotice("That animation couldn't be copied. The iPad may be out of space.");
+        } finally {
+          gallery.setBusy(false);
+        }
+      },
       onDelete: async (id) => {
         gallery.setBusy(true);
         try {
@@ -368,6 +400,7 @@ function mountEditor(session, { canSave }) {
       onSelect: (id) => selectLayer(id),
       onAdd: () => addLayer(),
       onDelete: (id) => deleteLayer(id),
+      onDuplicate: (id) => duplicateLayer(id),
       onRename: (id, name) => renameLayer(id, name),
       onToggleVisible: (id) => toggleLayerProp(id, 'visible'),
       onToggleLock: (id) => toggleLayerProp(id, 'locked'),
@@ -379,6 +412,7 @@ function mountEditor(session, { canSave }) {
     frames: {
       onSelect: (id) => selectFrame(id),
       onAdd: () => addFrame(),
+      onDuplicate: () => duplicateFrame(),
     },
   });
   const canvasApi = ui.canvas;
@@ -738,6 +772,43 @@ function mountEditor(session, { canSave }) {
     });
   }
 
+  // Copy frame: every layer's drawing on this frame, as a new frame
+  // right after it; she's moved onto the copy (Flipaclip's duplicate
+  // frame). The whole record is copied (copyFrameRecord), so fields
+  // added later come along. Undoable like add frame.
+  function duplicateFrame() {
+    if (!canAct()) return;
+    exclusive(async () => {
+      const { frame, pairs } = copyFrameRecord(session.frame);
+      await copyPixels(pairs);
+      const record = { frame, index: insertIndexAfter(project.frames, session.frame.id) };
+      await insertFrame(record);
+      history.push({ type: 'frame-add', record, bytes: 0 });
+    });
+  }
+
+  // Copies pixels from each `from` bitmapRef to its `to` ref (pairs
+  // from copyFrameRecord / copyLayerRecord), before anything points at
+  // the new refs. Reads what she sees: the open frame's unsaved layers
+  // are saved first, and pixels that couldn't be saved (held in memory)
+  // are copied in memory and saved once that frame is open again.
+  async function copyPixels(pairs) {
+    if (canSave) await autosaver.flush();
+    const openRefs = new Map(Object.entries(session.frame.bitmapRefs).map(([id, ref]) => [ref, id]));
+    const stored = [];
+    for (const [from, to] of pairs) {
+      const openLayer = openRefs.get(from);
+      if (openLayer && (!canSave || unsavedLayers.has(openLayer))) {
+        heldBitmaps.set(to, await canvasApi.exportPNG(openLayer));
+      } else if (heldBitmaps.has(from)) {
+        heldBitmaps.set(to, heldBitmaps.get(from));
+      } else {
+        stored.push([from, to]);
+      }
+    }
+    if (canSave) await copyBlobs(project.id, stored);
+  }
+
   // --- layers panel actions ---
 
   function selectLayer(id) {
@@ -760,6 +831,37 @@ function mountEditor(session, { canSave }) {
         index: insertIndexAbove(project.layers, project.activeLayerId),
         refs: {},
         blob: null,
+      };
+      await attach(record);
+      history.push({ type: 'layer-add', record, bytes: 0 });
+    });
+  }
+
+  // Copy layer: the layer's drawing on every frame, as a new layer
+  // directly above it, which becomes active (copyLayerRecord: "<name>
+  // copy", unlocked). Counts toward the cap; undoable like add layer.
+  // One blob copy per frame, so a long animation takes a moment.
+  function duplicateLayer(id) {
+    if (!canAct()) return;
+    const source = project.layers.find((l) => l.id === id);
+    if (!source) return;
+    if (project.layers.length >= MAX_LAYERS) {
+      showBanner(`A project can have up to ${MAX_LAYERS} layers.`);
+      return;
+    }
+    exclusive(async () => {
+      const { layer, refs, pairs } = copyLayerRecord(source, session.frames);
+      await copyPixels(pairs);
+      // The open frame's copy, if it's only in memory, goes in through
+      // the record so attach() shows it and saves it.
+      const openRef = refs[session.frame.id];
+      const blob = heldBitmaps.get(openRef) ?? null;
+      heldBitmaps.delete(openRef);
+      const record = {
+        layer,
+        index: project.layers.findIndex((l) => l.id === id) + 1,
+        refs,
+        blob,
       };
       await attach(record);
       history.push({ type: 'layer-add', record, bytes: 0 });

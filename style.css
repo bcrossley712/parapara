@@ -640,7 +640,7 @@ html, body {
 }
 
 .pp-layers__btn {
-  flex: 1;
+  flex: 1 1 auto; /* sized to the label, so three fit on one row */
   border: none;
   border-radius: 8px;
   padding: 10px 12px;
@@ -695,6 +695,7 @@ html, body {
 /* Frame strip (js/timeline/frame-strip.js): numbered tiles that scroll
    sideways, with the dashed add tile pinned at the right end. */
 .pp-frame-strip {
+  position: relative; /* the frame menu is placed from here */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -917,9 +918,19 @@ html, body {
 }
 
 .pp-gallery-menu {
-  position: absolute;
   right: 0;
   top: calc(100% - 4px);
+}
+
+/* The frame strip's menu: above the current tile. */
+.pp-frame-menu {
+  bottom: calc(100% + 6px);
+}
+
+/* Shared look: dark rounded menu of text items. */
+.pp-gallery-menu,
+.pp-frame-menu {
+  position: absolute;
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -930,7 +941,8 @@ html, body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
-.pp-gallery-menu__item {
+.pp-gallery-menu__item,
+.pp-frame-menu__item {
   padding: 12px 14px;
   border: none;
   border-radius: 8px;
@@ -942,8 +954,13 @@ html, body {
   cursor: pointer;
 }
 
-.pp-gallery-menu__item:active {
+.pp-gallery-menu__item:active,
+.pp-frame-menu__item:active {
   background: var(--pp-ink-light);
+}
+
+.pp-frame-menu__item:disabled {
+  opacity: 0.45;
 }
 
 .pp-gallery-menu__item--danger {

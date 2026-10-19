@@ -94,19 +94,100 @@ export function attachLayerRefs(frames, layerId, refs = {}) {
   }));
 }
 
+// THE list of where a project and its frames point at blobs. Returns
+// copies of project and frames with every blob ref replaced by
+// fn(ref) (records without refs come back as-is). Both the launch
+// sweep (referencedBlobIds) and duplicating a project
+// (copyProjectRecords) walk refs through here, so a new kind of blob
+// reference — step 3 images, step 5 audio — is added in this one
+// place, or the sweep deletes it and a duplicate shares it.
+// The thumbnail isn't a field (its id is derived), so it isn't here.
+export function mapBlobRefs(project, frames, fn) {
+  const outFrames = frames.map((frame) => {
+    const bitmapRefs = {};
+    for (const [layerId, ref] of Object.entries(frame.bitmapRefs ?? {})) bitmapRefs[layerId] = fn(ref);
+    const image = frame.image?.blobRef ? { ...frame.image, blobRef: fn(frame.image.blobRef) } : frame.image;
+    return { ...frame, bitmapRefs, image };
+  });
+  const outProject = {
+    ...project,
+    audioClips: (project.audioClips ?? []).map((clip) => (
+      clip.blobRef ? { ...clip, blobRef: fn(clip.blobRef) } : clip
+    )),
+  };
+  return { project: outProject, frames: outFrames };
+}
+
 // Every blob id the project still uses. Anything else in the blob
 // store for this project is garbage (e.g. a deleted layer's pixels
 // once its undo entry is gone). Includes the gallery thumbnail (2d).
-// Images (step 3) and audio (step 5) add their refs here when they
-// land — anything not listed is deleted at the next launch.
+// Anything not listed is deleted at the next launch — see mapBlobRefs.
 export function referencedBlobIds(project, frames) {
   const ids = new Set([thumbnailBlobId(project.id)]);
-  for (const frame of frames) {
-    for (const ref of Object.values(frame.bitmapRefs ?? {})) ids.add(ref);
-    if (frame.image?.blobRef) ids.add(frame.image.blobRef);
-  }
-  for (const clip of project.audioClips ?? []) {
-    if (clip.blobRef) ids.add(clip.blobRef);
-  }
+  mapBlobRefs(project, frames, (ref) => {
+    ids.add(ref);
+    return ref;
+  });
   return ids;
+}
+
+// Copy frame: the whole frame record with a new id and a new bitmapRef
+// per layer (the pixels get copied to those). Every other field comes
+// along as-is — step 3's frame.image keeps pointing at the same
+// stored image, which is stored once and shared, as in Flipaclip's
+// duplicate frame. Returns { frame, pairs } with pairs = [[fromRef,
+// toRef], ...] for the pixel copy.
+export function copyFrameRecord(frame) {
+  const pairs = [];
+  const bitmapRefs = {};
+  for (const [layerId, ref] of Object.entries(frame.bitmapRefs ?? {})) {
+    bitmapRefs[layerId] = newId();
+    pairs.push([ref, bitmapRefs[layerId]]);
+  }
+  return { frame: { ...frame, id: newId(), bitmapRefs }, pairs };
+}
+
+// Copy layer: a new layer just like `layer` (opacity, visibility),
+// named "<name> copy" and unlocked — a locked copy is rarely wanted.
+// Returns { layer, refs, pairs }: refs = { [frameId]: newRef } for the
+// copy's slot on every frame, pairs = [[fromRef, toRef], ...] for the
+// pixel copy (frames without a slot for `layer` get a blank one).
+export function copyLayerRecord(layer, frames) {
+  const copy = { ...layer, id: newId(), name: `${layer.name} copy`, locked: false };
+  const refs = {};
+  const pairs = [];
+  for (const frame of frames) {
+    refs[frame.id] = newId();
+    const from = frame.bitmapRefs?.[layer.id];
+    if (from) pairs.push([from, refs[frame.id]]);
+  }
+  return { layer: copy, refs, pairs };
+}
+
+// Duplicate project: new ids for the project, every frame and every
+// blob it references (thumbnail included, at thumb-<newId>), with
+// every reference remapped. Layer ids stay — they're only keys within
+// a project. Frame ids in project.frames that have no record are
+// dropped. Returns { project, frames, pairs } with pairs = [[fromBlob,
+// toBlob], ...] to copy.
+export function copyProjectRecords(project, frames, { name, now = Date.now() } = {}) {
+  const id = newId();
+  const frameIds = new Map(frames.map((f) => [f.id, newId()]));
+  const blobIds = new Map();
+  for (const ref of referencedBlobIds(project, frames)) {
+    blobIds.set(ref, ref === thumbnailBlobId(project.id) ? thumbnailBlobId(id) : newId());
+  }
+  const mapped = mapBlobRefs(project, frames, (ref) => blobIds.get(ref));
+  const order = project.frames.filter((fid) => frameIds.has(fid)).map((fid) => frameIds.get(fid));
+  const outProject = {
+    ...mapped.project,
+    id,
+    name: name ?? project.name,
+    createdAt: now,
+    updatedAt: now,
+    frames: order,
+    currentFrameId: frameIds.get(project.currentFrameId) ?? order[0],
+  };
+  const outFrames = mapped.frames.map((f) => ({ ...f, id: frameIds.get(f.id), projectId: id }));
+  return { project: outProject, frames: outFrames, pairs: [...blobIds] };
 }

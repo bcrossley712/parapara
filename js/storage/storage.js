@@ -547,6 +547,48 @@ export async function deleteUnreferencedBlobs(projectId, referenced) {
   return deleted;
 }
 
+// Copies stored blobs to new ids inside an open transaction:
+// pairs = [[fromId, toId], ...]. A missing source is a blank layer —
+// nothing to copy. One blob at a time (each get's put issues the next
+// get), so only one is in memory however many there are; requests
+// chained from callbacks keep the transaction alive. `projectId` is
+// the copies' owner.
+function copyBlobsIn(store, pairs, projectId) {
+  let i = 0;
+  const next = () => {
+    if (i >= pairs.length) return;
+    const [from, to] = pairs[i++];
+    const req = store.get(from);
+    req.onsuccess = () => {
+      if (req.result) store.put({ ...req.result, id: to, projectId });
+      next();
+    };
+  };
+  next();
+}
+
+// Copy frame / copy layer: the pixels under each `from` ref, copied to
+// `to`, all-or-nothing. Copied before the frame or layer records point
+// at them, so a failure here leaves nothing pointing at missing pixels.
+export async function copyBlobs(projectId, pairs) {
+  if (pairs.length === 0) return;
+  await withTransaction([STORE_BLOBS], 'readwrite', (s) => {
+    copyBlobsIn(s[STORE_BLOBS], pairs, projectId);
+  });
+}
+
+// Duplicates a saved project — record, frames and every blob it
+// references (see copyProjectRecords in layers.js) — in one
+// transaction, so a failure leaves no half copy. `copy` is a
+// copyProjectRecords() result. Doesn't change the last-opened project.
+export async function saveProjectCopy({ project, frames, pairs }) {
+  await withTransaction([STORE_PROJECTS, STORE_FRAMES, STORE_BLOBS], 'readwrite', (s) => {
+    s[STORE_PROJECTS].put(project);
+    for (const frame of frames) s[STORE_FRAMES].put(frame);
+    copyBlobsIn(s[STORE_BLOBS], pairs, project.id);
+  });
+}
+
 export async function saveFrame(frame) {
   await withTransaction([STORE_FRAMES], 'readwrite', (s) => {
     s[STORE_FRAMES].put(frame);

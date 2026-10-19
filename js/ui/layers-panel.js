@@ -5,7 +5,7 @@
 // Like Sketchbook/Procreate/Flipaclip: top layer listed first, each row
 // with a thumbnail, name, visibility and lock toggles and a drag handle;
 // tap a row to make it the active layer. Below the list, the active
-// layer's opacity, Rename and Delete.
+// layer's opacity, Rename, Duplicate and Delete.
 //
 // Pure UI: knows nothing about storage, history or the canvas. main.js
 // passes state in through render() and gets intents back through the
@@ -14,6 +14,7 @@
 
 // callbacks:
 //   onSelect(id), onAdd(), onDelete(id), onRename(id, name),
+//   onDuplicate(id),
 //   onToggleVisible(id), onToggleLock(id),
 //   onMove(id, toIndex)            toIndex: 0 = bottom
 //   onOpacityInput(id, opacity)    live while dragging (0-1)
@@ -52,9 +53,10 @@ export function createLayersPanel(callbacks) {
   const actions = document.createElement('div');
   actions.className = 'pp-layers__actions';
   const renameBtn = textButton('Rename');
+  const duplicateBtn = textButton('Duplicate');
   const deleteBtn = textButton('Delete');
   deleteBtn.classList.add('pp-layers__delete');
-  actions.append(renameBtn, deleteBtn);
+  actions.append(renameBtn, duplicateBtn, deleteBtn);
   footer.append(opacityLabel, actions);
 
   panel.append(header, list, footer);
@@ -69,6 +71,9 @@ export function createLayersPanel(callbacks) {
   addBtn.addEventListener('click', () => callbacks.onAdd());
   deleteBtn.addEventListener('click', () => {
     if (state.activeLayerId) callbacks.onDelete(state.activeLayerId);
+  });
+  duplicateBtn.addEventListener('click', () => {
+    if (state.activeLayerId) callbacks.onDuplicate(state.activeLayerId);
   });
   renameBtn.addEventListener('click', () => {
     if (state.activeLayerId) startRename(state.activeLayerId);
@@ -266,6 +271,7 @@ export function createLayersPanel(callbacks) {
     addBtn.disabled = state.busy || state.layers.length >= state.maxLayers;
     deleteBtn.disabled = state.busy || !active || state.layers.length <= 1;
     renameBtn.disabled = state.busy || !active;
+    duplicateBtn.disabled = state.busy || !active || state.layers.length >= state.maxLayers;
   }
 
   // Redraws one layer's thumbnail (after an edit lands). Skipped while

@@ -94,3 +94,99 @@ test('referencedBlobIds covers layer bitmaps, frame images, audio and the thumbn
     ['audio1', 'b1', 'b2', 'b3', 'img1', 'thumb-p1']
   );
 });
+
+// --- copy frame / copy layer / duplicate project (2e) ---
+
+const sampleProject = () => ({
+  id: 'p1',
+  name: 'Walk cycle',
+  createdAt: 1,
+  updatedAt: 2,
+  layers: [layer('a'), layer('b')],
+  activeLayerId: 'b',
+  frames: ['f1', 'f2'],
+  currentFrameId: 'f2',
+  palette: ['#ff0000'],
+  audioClips: [{ id: 'c', blobRef: 'audio1', trimStart: 0, trimEnd: 1 }],
+});
+const sampleFrames = () => [
+  { id: 'f1', projectId: 'p1', bitmapRefs: { a: 'b1', b: 'b2' }, image: { blobRef: 'img1', x: 5 } },
+  { id: 'f2', projectId: 'p1', bitmapRefs: { a: 'b3', b: 'b4' }, image: null },
+];
+
+test('mapBlobRefs rewrites every kind of ref and leaves the input alone', () => {
+  const project = sampleProject();
+  const frames = sampleFrames();
+  const out = L.mapBlobRefs(project, frames, (ref) => `new-${ref}`);
+  assert.deepEqual(out.frames[0].bitmapRefs, { a: 'new-b1', b: 'new-b2' });
+  assert.deepEqual(out.frames[0].image, { blobRef: 'new-img1', x: 5 });
+  assert.equal(out.frames[1].image, null);
+  assert.equal(out.project.audioClips[0].blobRef, 'new-audio1');
+  assert.deepEqual(frames, sampleFrames(), 'frames not mutated');
+  assert.deepEqual(project, sampleProject(), 'project not mutated');
+});
+
+test('copyFrameRecord: new id and refs, pairs to copy, image shared, rest as-is', () => {
+  const [frame] = sampleFrames();
+  const { frame: copy, pairs } = L.copyFrameRecord(frame);
+  assert.notEqual(copy.id, frame.id);
+  assert.equal(copy.projectId, 'p1');
+  assert.deepEqual(Object.keys(copy.bitmapRefs).sort(), ['a', 'b']);
+  assert.notEqual(copy.bitmapRefs.a, 'b1');
+  assert.deepEqual(pairs, [['b1', copy.bitmapRefs.a], ['b2', copy.bitmapRefs.b]]);
+  assert.deepEqual(copy.image, frame.image, 'reference image is stored once and shared');
+  assert.deepEqual(frame, sampleFrames()[0], 'source not mutated');
+});
+
+test('copyLayerRecord: "<name> copy", unlocked, same look, a slot on every frame', () => {
+  const src = { id: 'b', name: 'Lines', visible: false, opacity: 0.4, locked: true };
+  const frames = [...sampleFrames(), { id: 'f3', bitmapRefs: { a: 'b5' } }];
+  const { layer: copy, refs, pairs } = L.copyLayerRecord(src, frames);
+  assert.notEqual(copy.id, 'b');
+  assert.equal(copy.name, 'Lines copy');
+  assert.equal(copy.locked, false);
+  assert.equal(copy.visible, false);
+  assert.equal(copy.opacity, 0.4);
+  assert.deepEqual(Object.keys(refs), ['f1', 'f2', 'f3']);
+  assert.equal(new Set(Object.values(refs)).size, 3);
+  // f3 had no slot for the source layer: blank, nothing to copy.
+  assert.deepEqual(pairs, [['b2', refs.f1], ['b4', refs.f2]]);
+});
+
+test('copyProjectRecords remaps every frame and blob, thumbnail to thumb-<newId>', () => {
+  const project = sampleProject();
+  const frames = sampleFrames();
+  const copy = L.copyProjectRecords(project, frames, { name: 'Walk cycle copy', now: 99 });
+  const p = copy.project;
+
+  assert.notEqual(p.id, 'p1');
+  assert.equal(p.name, 'Walk cycle copy');
+  assert.equal(p.createdAt, 99);
+  assert.equal(p.updatedAt, 99);
+  assert.deepEqual(p.layers, project.layers, 'layer ids kept');
+  assert.equal(p.activeLayerId, 'b');
+  assert.deepEqual(p.palette, ['#ff0000']);
+
+  assert.deepEqual(p.frames, copy.frames.map((f) => f.id), 'timeline order kept');
+  assert.equal(p.currentFrameId, copy.frames[1].id);
+  for (const f of copy.frames) {
+    assert.equal(f.projectId, p.id);
+    assert.ok(!['f1', 'f2'].includes(f.id));
+  }
+
+  // Every old ref maps to a fresh one, and the copy references nothing
+  // of the original's.
+  const from = new Map(copy.pairs);
+  assert.deepEqual([...from.keys()].sort(), [...L.referencedBlobIds(project, frames)].sort());
+  assert.equal(from.get('thumb-p1'), `thumb-${p.id}`);
+  const copyRefs = L.referencedBlobIds(p, copy.frames);
+  assert.deepEqual([...copyRefs].sort(), [...from.values()].sort());
+  for (const ref of copyRefs) assert.ok(!from.has(ref), `${ref} is shared with the original`);
+});
+
+test('copyProjectRecords drops timeline ids with no frame record', () => {
+  const project = { ...sampleProject(), frames: ['f1', 'ghost', 'f2'], currentFrameId: 'ghost' };
+  const copy = L.copyProjectRecords(project, sampleFrames(), { name: 'x' });
+  assert.equal(copy.project.frames.length, 2);
+  assert.equal(copy.project.currentFrameId, copy.project.frames[0]);
+});

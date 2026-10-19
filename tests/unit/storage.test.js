@@ -9,6 +9,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as storage from '../../js/storage/storage.js';
+import * as L from '../../js/storage/layers.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -390,4 +391,45 @@ test('saveLastProjectId points relaunch at that project', async () => {
   await storage.saveLastProjectId(a.project.id);
   relaunch();
   assert.equal((await storage.loadLastProject()).project.id, a.project.id);
+});
+
+// --- copying (2e) ---
+
+test('copyBlobs copies pixels to new refs and skips blank sources', async () => {
+  const { project, frames } = await storage.createProject('A');
+  const ref = frames[0].bitmapRefs[project.activeLayerId];
+  await storage.saveLayerBitmap(project.id, ref, png(7));
+  await storage.copyBlobs(project.id, [[ref, 'copy-1'], ['never-saved', 'copy-2']]);
+
+  const copied = await storage.loadLayerBitmap('copy-1');
+  assert.deepEqual(new Uint8Array(await copied.arrayBuffer()), new Uint8Array(await png(7).arrayBuffer()));
+  assert.equal(await storage.loadLayerBitmap('copy-2'), null, 'blank stays blank');
+  assert.ok(await storage.loadLayerBitmap(ref), 'source kept');
+  const removed = await storage.deleteUnreferencedBlobs(project.id, new Set([ref, 'copy-1']));
+  assert.equal(removed, 0, 'copies belong to the same project');
+});
+
+test('a duplicated project opens with its own copies of every blob', async () => {
+  const { project, frames } = await storage.createProject('Orig');
+  const ref = frames[0].bitmapRefs[project.activeLayerId];
+  await storage.saveLayerBitmap(project.id, ref, png(5));
+  await storage.saveThumbnail(project.id, png(6));
+  const loaded = await storage.loadProject(project.id);
+
+  const copy = L.copyProjectRecords(loaded.project, loaded.frames, { name: 'Orig copy' });
+  await storage.saveProjectCopy(copy);
+
+  const reopened = await storage.loadProject(copy.project.id);
+  assert.equal(reopened.project.name, 'Orig copy');
+  assert.equal(reopened.frames.length, 1);
+  const newRef = reopened.frames[0].bitmapRefs[project.activeLayerId];
+  assert.notEqual(newRef, ref);
+  assert.ok(await storage.loadLayerBitmap(newRef));
+  assert.ok(await storage.loadThumbnail(copy.project.id));
+
+  // Deleting the original leaves the copy whole.
+  await storage.deleteProject(project.id);
+  assert.ok(await storage.loadLayerBitmap(newRef));
+  assert.ok(await storage.loadThumbnail(copy.project.id));
+  assert.equal((await storage.listProjects()).length, 1);
 });

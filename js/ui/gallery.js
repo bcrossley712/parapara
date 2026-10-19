@@ -6,14 +6,15 @@
 // then reports intents through callbacks; main.js does the storage.
 //
 // Conventions (Procreate / Flipaclip): tap a card to open it, tap its
-// name to rename it, and the ⋯ button for Rename / Delete. Delete asks
-// first because it can't be undone.
+// name to rename it, and the ⋯ button for Rename / Duplicate / Delete.
+// Delete asks first because it can't be undone.
 
 import { attachSettingsMenu } from './settings-panel.js';
 import { showConfirm, showPrompt } from './confirm-dialog.js';
 import { GEAR_ICON } from './icons.js';
 
-// callbacks: { onOpen(id), onCreate(), onRename(id, name), onDelete(id) }
+// callbacks: { onOpen(id), onCreate(), onRename(id, name),
+//   onDuplicate(id), onDelete(id) }
 // appActions: for the gear menu (see settings-panel.js) — no editor
 //   actions here.
 //
@@ -21,7 +22,7 @@ import { GEAR_ICON } from './icons.js';
 // destroy() }. A project for render() is { id, name, frameCount,
 // thumbnail: Blob | null }.
 export function createGallery(container, { callbacks, appActions = {} }) {
-  const { onOpen, onCreate, onRename, onDelete } = callbacks;
+  const { onOpen, onCreate, onRename, onDuplicate, onDelete } = callbacks;
   container.innerHTML = '';
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -97,9 +98,10 @@ export function createGallery(container, { callbacks, appActions = {} }) {
     menu.className = 'pp-gallery-menu';
     menu.setAttribute('role', 'menu');
     const renameBtn = menuButton('Rename', () => askRename(project));
+    const duplicateBtn = menuButton('Duplicate', () => { if (!busy) onDuplicate(project.id); });
     const deleteBtn = menuButton('Delete', () => askDelete(project));
     deleteBtn.classList.add('pp-gallery-menu__item--danger');
-    menu.append(renameBtn, deleteBtn);
+    menu.append(renameBtn, duplicateBtn, deleteBtn);
     anchor.closest('.pp-gallery-card').appendChild(menu);
     openMenu = menu;
     menuAnchor = anchor;

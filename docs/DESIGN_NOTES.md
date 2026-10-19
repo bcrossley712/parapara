@@ -373,6 +373,19 @@ Sections: [Process lessons](#process-lessons) ·
 - **Imported reference image** per frame: stored once, referenced by
   frames with a small transform record (x, y, scale, rotation,
   opacity). Onion skin shows the composite (image + strokes).
+- **Mirroring** (step 3) means three different features. Ask her
+  which one she wants before building:
+  - **Flip view:** a temporary horizontal mirror for checking
+    proportions (Procreate, Sketchbook). View-only, never saved, resets
+    with the view. Coupled to the viewport transform and the
+    `toCanvasPoint` math, the same lesson as rotation.
+  - **Flip drawing:** mirrors the active layer's pixels on this frame,
+    undoable as a `'pixels'` entry. Belongs with a transform tool and
+    shares step 3's per-frame transform handles. Not a frame action:
+    flipping every layer at once is unusual.
+  - **Symmetry:** strokes mirror live across an axis (Sketchbook,
+    Procreate). Lives in the brush/stamp code, so it pairs better with
+    the brush-variety work if that's what she means.
 - **Audio:** one project-wide clip, modeled as `audioClips: []` so a
   second clip later isn't a restructure. Non-destructive trim
   (`trimStart`/`trimEnd` in seconds); Web Audio plays just that slice.

@@ -87,34 +87,29 @@ icon, manifest `name`/`short_name`, and repo copy.
   engine, saving, undo/redo, shared layers + bare-bones frame strip,
   project gallery. How each works is under Architecture; she mostly
   undoes with the buttons, not gestures.
-- **Next: 2e** (before step 3) — features she's requested; none block
-  later steps, so order is flexible. Scope in detail when it starts:
-  - **Copy frame:** duplicate the current frame (every layer's drawing)
-    right after itself and move onto it; undoable like add frame.
-  - **Copy layer:** duplicate the active layer (its drawing on every
-    frame) above itself; undoable. Counts toward the layer cap.
-  - **Per-project palette** (saved swatches) and **app-wide recent
-    colors** (last ~8 drawn with), both in the color picker.
-  - **Eyedropper:** pick a color from the canvas.
-  - **Duplicate project** (deferred from 2d; shares code with copy
-    frame/layer).
-  - **Build these so later steps don't force a redo:**
-    - **Eyedropper and fill share one "visible canvas" sampler.** Step
-      3 adds a reference image under the layers, and both tools must
-      then see it (Sketchbook's eyedropper samples images). One shared
-      function means step 3 adds it in one place.
-    - **Duplicate project copies the blobs listed by
-      `referencedBlobIds`** (`layers.js`), not its own list — it
-      already covers `frame.image` and `audioClips`, so step 3 images
-      and step 5 audio come along automatically. Every copied blob gets
-      a new id and every reference to it is remapped; the thumbnail
-      follows the new project id (`thumb-<newId>`), or is just redrawn.
-    - **Copy frame copies the whole frame record** (new id, new
-      bitmapRefs with copied pixels, every other field as-is), so
-      step 3's `frame.image` comes along without changes — as
-      Flipaclip's duplicate frame does.
+- **2e (before step 3), in two passes:**
+  - **Pass 1 — copying: built and tested, not yet on the iPad.** How
+    it works is under Architecture (Copying).
+  - **Pass 2 — color: next.** Scope agreed:
+    - **One "visible canvas" sampler:** `readFillSample()` becomes
+      `readVisible(rect)` — fill reads the whole canvas, the eyedropper
+      1×1. Step 3 adds the reference image to it in one place
+      (Sketchbook's eyedropper samples images).
+    - **Eyedropper:** a button in the color picker; the next tap on
+      the canvas picks the color she sees (flattened over white) and
+      returns to the previous tool (Flipaclip). Not saved as a tool
+      setting. No touch-and-hold-to-pick (Procreate/Sketchbook) — it
+      clashes with a stylus resting mid-stroke.
+    - **Recent colors:** app-wide, last **8 drawn or filled with**
+      (added when a stroke commits, not when the picker changes), saved
+      in `meta.recentColors`.
+    - **Palette:** per project (`project.palette`, so a duplicate
+      brings it), up to **10** swatches. "+" adds the current color;
+      full → banner. **Long-press a swatch → Replace / Remove**
+      (Flipaclip's long-press replaces, so Replace keeps her habit).
 - **Build order after step 2:** 3 image import + per-frame image
-  transform · 4 playback, onion skin, full frame strip (reorder,
+  transform + **mirroring** (ask her which kind first — flip view,
+  flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
   delete, thumbnails) · 5 audio record/import + single-clip trim ·
   6 export + native share sheet · 7 Cloudflare Worker + R2 (share
   links, Krita reference import).
@@ -184,7 +179,9 @@ Short rules; reasoning in the linked sections.
   - **Locked or hidden active layer:** strokes, fill and Clear are
     refused with a notice; a touch on it can still become a gesture.
   - **Frames:** add frame inserts a blank frame *after* the current
-    one, with a slot for every layer, and moves onto it. Moving to
+    one, with a slot for every layer, and moves onto it. Tapping the
+    current frame's tile opens the frame menu (Duplicate; step 4's
+    delete/reorder go there too). Moving to
     another frame saves the current one first, then reads the next
     one's layers from storage; a layer that can't be saved (or saving
     is off) is held in memory by bitmapRef until it can be.
@@ -223,6 +220,25 @@ Short rules; reasoning in the linked sections.
     meanwhile undo/redo, panel actions and new touches are ignored.
   - `history.js` and `layers.js` are pure; `canvas.js` exposes the
     seams; `main.js` glues.
+- **Copying (2e)** — copy frame (frame menu), copy layer (panel
+  footer), duplicate project (gallery ⋯):
+  - Pure record builders in `layers.js` (`copyFrameRecord`,
+    `copyLayerRecord`, `copyProjectRecords`) return the new records
+    plus `pairs` of [fromBlob, toBlob]; storage copies the pixels
+    (`copyBlobs`, `saveProjectCopy`) **before** anything points at the
+    new refs, one blob in memory at a time.
+  - In the editor, `copyPixels` (`main.js`) saves the open frame first
+    and copies what she sees: unsaved or held-in-memory pixels are
+    copied in memory and saved when that frame is next open.
+  - Copy frame: whole record, new bitmapRefs, `frame.image` shared
+    (stored once). Undo entry is a plain `'frame-add'`.
+  - Copy layer: "<name> copy", **unlocked**, same opacity/visibility,
+    directly above, active; counts toward the cap (button off at the
+    cap). Undo entry is a plain `'layer-add'`.
+  - Duplicate project: "<name> copy", new ids for project, frames and
+    every blob (thumbnail → `thumb-<newId>`), layer ids kept, fresh
+    `updatedAt` so it's first in the gallery; she stays on the gallery
+    (Procreate). One transaction.
 - **Gestures — match Sketchbook defaults**
   ([why](docs/DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -311,10 +327,13 @@ Each is here because breaking it caused (or would cause) a real bug.
   the editor runs on an unsaved in-memory project with no Gallery
   button.
 - **The sweep (on every project open) deletes every blob of the
-  project not listed by `referencedBlobIds` (`layers.js`).** Any new
-  kind of blob reference (step 3 images, step 5 audio) must be added
-  there, or it's deleted on the next open. The thumbnail
-  (`thumbnailBlobId`) is listed.
+  project not listed by `referencedBlobIds` (`layers.js`).** Both it
+  and duplicate project walk refs through **`mapBlobRefs`** — the one
+  list of where blob refs live. Any new kind of blob reference (step 3
+  images, step 5 audio) must be added there, or the sweep deletes it
+  and a duplicate shares it with the original. The thumbnail
+  (`thumbnailBlobId`) is derived, not a field; both handle it
+  separately.
 - `savedDrawingBytes` in the e2e helpers skips `thumb-` blobs — keep
   that if thumbnail ids change.
 - Tool-settings validation lives in `canvas.js`
@@ -371,7 +390,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         autosave.js       save timing only (debounce, no overlap, flush)
         history.js        undo/redo stack, caps, byte budget (in memory)
         layers.js         pure layer-list + bitmap-slot ops, MAX_LAYERS,
-                          referencedBlobIds (launch sweep)
+                          mapBlobRefs / referencedBlobIds (launch
+                          sweep), copy record builders
       ui/
         ui.js             editor: top bar (Gallery, undo/redo, Layers),
                           tool rail, toasts/banners, DOM glue, destroy
@@ -384,7 +404,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           attachSettingsMenu for either screen
       timeline/
         frames.js         pure frame-order ops (insert/remove/neighbor)
-        frame-strip.js    frame strip (UI only; intents via callbacks)
+        frame-strip.js    frame strip + frame menu (UI only; intents
+                          via callbacks)
         timeline.js       placeholder: playback, onion skin (step 4)
       export/ audio/      placeholders for later steps
     icons/                app icon set
@@ -418,7 +439,7 @@ bitmap. Planned fields are marked. Extend additively.
       activeLayerId,
       frames: [frameId, ...],                 // timeline order
       currentFrameId,                         // the frame she was on
-      palette: [ '#rrggbb', ... ],            // planned (2e)
+      palette: [ '#rrggbb', ... ],            // planned (2e pass 2), max 10
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
@@ -475,8 +496,9 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   - `openApp` (helpers) starts from the empty gallery on a fresh
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
-  - **When e2e passes ~2 minutes,** parallelize (at ~1.5 min after 2d) — first isolating the
-    update tests into their own serial group.
+  - **When e2e passes ~2 minutes,** parallelize (~1.7 min after 2e
+    pass 1 — likely due during pass 2) — first isolating the update
+    tests into their own serial group.
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo

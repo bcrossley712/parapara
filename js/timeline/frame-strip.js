@@ -3,7 +3,9 @@
 // The frame strip below the canvas: a horizontally scrolling row of
 // frame tiles, the current one highlighted, ending in a dashed "add
 // frame" tile (the wireframe's layout). Tap a tile to go to that frame;
-// the add tile inserts a blank frame after the current one.
+// the add tile inserts a blank frame after the current one. Tapping
+// the frame she's already on opens a small menu above it (Flipaclip's
+// frame menu) — Duplicate today; step 4's delete and reorder join it.
 //
 // Bare-bones for now: tiles show the frame number only. Thumbnails,
 // reorder and delete come with step 4 (playback, onion skin), and the
@@ -12,8 +14,10 @@
 // Pure UI: main.js passes state in through render() and gets intents
 // back through the callbacks.
 
-// callbacks: onSelect(frameId), onAdd()
-export function createFrameStrip(callbacks) {
+// callbacks: onSelect(frameId), onAdd(), onDuplicate()
+// options.signal: aborts the document listener (the menu's tap-outside
+// close) when the editor is torn down.
+export function createFrameStrip(callbacks, { signal } = {}) {
   const strip = document.createElement('div');
   strip.className = 'pp-frame-strip';
   strip.setAttribute('aria-label', 'Frames');
@@ -31,9 +35,54 @@ export function createFrameStrip(callbacks) {
   strip.append(list, addTile);
 
   let lastCurrent = null;
+  let lastBusy = false;
+
+  // --- the frame menu (above the current tile) ---
+  let menu = null;
+  function closeMenu() {
+    menu?.remove();
+    menu = null;
+  }
+  function openMenu(tile) {
+    closeMenu();
+    menu = document.createElement('div');
+    menu.className = 'pp-frame-menu';
+    menu.setAttribute('role', 'menu');
+    menu.append(menuItem('Duplicate', () => callbacks.onDuplicate()));
+    strip.appendChild(menu);
+    // Centered over the tile, kept inside the strip.
+    const stripBox = strip.getBoundingClientRect();
+    const tileBox = tile.getBoundingClientRect();
+    const center = tileBox.left - stripBox.left + tileBox.width / 2;
+    const max = strip.clientWidth - menu.offsetWidth - 8;
+    menu.style.left = `${Math.max(8, Math.min(center - menu.offsetWidth / 2, max))}px`;
+  }
+  function menuItem(label, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pp-frame-menu__item';
+    btn.setAttribute('role', 'menuitem');
+    btn.textContent = label;
+    btn.disabled = lastBusy;
+    btn.addEventListener('click', () => {
+      closeMenu();
+      onClick();
+    });
+    return btn;
+  }
+  // A tap anywhere but the menu or the current tile (whose own click
+  // toggles it) closes it; so does scrolling the strip.
+  document.addEventListener('pointerdown', (event) => {
+    if (!menu || menu.contains(event.target)) return;
+    if (event.target.closest?.('.pp-frame-strip__tile.is-current')) return;
+    closeMenu();
+  }, { signal, capture: true });
+  list.addEventListener('scroll', () => closeMenu(), { passive: true });
 
   // state: { frameIds (timeline order), currentId, busy }
   function render({ frameIds, currentId, busy = false }) {
+    closeMenu();
+    lastBusy = busy;
     const tiles = frameIds.map((id, i) => {
       const tile = document.createElement('button');
       tile.type = 'button';
@@ -47,6 +96,8 @@ export function createFrameStrip(callbacks) {
       tile.disabled = busy && !isCurrent;
       tile.addEventListener('click', () => {
         if (id !== currentId) callbacks.onSelect(id);
+        else if (menu) closeMenu();
+        else openMenu(tile);
       });
       return tile;
     });
@@ -69,7 +120,7 @@ export function createFrameStrip(callbacks) {
     }
   }
 
-  return { element: strip, render };
+  return { element: strip, render, closeMenu };
 }
 
 const PLUS_ICON = `
