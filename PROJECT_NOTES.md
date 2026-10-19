@@ -97,7 +97,7 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Step 2c (layers + bare-bones frame strip): done and confirmed on
   the iPad.** Shared layers, layers panel, frame strip, fading banner,
   gestures off the page.
-- **Step 2d (project gallery): built, not yet confirmed on the iPad.**
+- **Step 2d (project gallery): done and confirmed on the iPad.**
   Gallery of cards (frame-1 thumbnail, name, frame count), New
   animation, open, rename (tap the name, or ⋯), delete with a custom
   confirm; Gallery button in the editor; relaunch reopens where she
