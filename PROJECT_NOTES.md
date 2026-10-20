@@ -93,9 +93,11 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Pass 2 — color: built and tested, not yet on the iPad.** How it
     works is under Architecture (Colors). The picker layout is a first
     try — adjust if she wants it different.
-- **Top-bar blur (iPadOS 26 scroll edge effect): fix built, not yet
-  confirmed on the iPad** — go to the gallery and back; the top bar
-  should stay sharp. Then step 3.
+- **Top-bar blur (iPadOS 26 scroll edge effect): second attempt built,
+  not yet confirmed on the iPad** (the first didn't fix it) — switch
+  screens a few times; the top bar should stay sharp. If not, next try
+  is nudging iPadOS to re-check after a switch ([details](docs/DESIGN_NOTES.md#pwa-layout-and-updates)).
+  Then step 3.
 - **Build order after step 2:** 3 image import + per-frame image
   transform + **mirroring** (ask her which kind first — flip view,
   flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
@@ -364,8 +366,9 @@ Each is here because breaking it caused (or would cause) a real bug.
   (`sanitizeToolSettings`); bad fields fall back individually.
 
 **Layout, PWA, updates** ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
-- App shell is `position: fixed; inset: 0` — never `vh`/`dvh` units
-  for full-screen layout without testing on the iPad.
+- `#app` is `position: fixed; inset: 0`; each screen's shell inside it
+  is `position: absolute; inset: 0` — never `vh`/`dvh` units for
+  full-screen layout without testing on the iPad.
 - Safe-area padding needs `viewport-fit=cover`,
   `black-translucent`, and global `box-sizing: border-box` — keep all
   three.
@@ -373,11 +376,11 @@ Each is here because breaking it caused (or would cause) a real bug.
   the manifest's `theme_color`/`background_color`, and the `html, body`
   background — iPadOS restyles the status bar from them.
   ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
-- **Something fixed, full-width and solid-colored is always at the top
-  edge** — `#app` is a fixed, full-screen dark box for that, and
-  screens swap with no empty moment (load the next screen's data
-  first). No `backdrop-filter`, gradient or see-through bar at the top.
-  Otherwise iPadOS 26 blurs the top of the app until relaunch.
+- **`#app` is the one fixed box at the top edge, and it's never
+  replaced** — screens inside it are absolute, not fixed, and swap
+  with no empty moment (load the next screen's data first). No
+  `backdrop-filter`, gradient or see-through bar at the top. Otherwise
+  iPadOS 26 blurs the top of the app until relaunch.
   ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
 - Text inputs ≥ 16px font.
 - Layouts must tolerate wider text than desktop Chromium shows — no

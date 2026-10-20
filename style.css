@@ -36,13 +36,15 @@ html, body {
   touch-action: none;
 }
 
-/* The screens' permanent container (index.html). Fixed, full-screen
-   and solid dark at all times — including the moment between one
-   screen being torn down and the next being built. iPadOS 26 blurs
-   the top of a home-screen web app (its frosted "scroll edge effect")
-   unless the element at the very top edge sits in a fixed, full-width,
-   solid-colored box; finding none once, it kept the blur until the app
-   was relaunched (2e). See DESIGN_NOTES "PWA, layout and updates". */
+/* The screens' permanent container (index.html) — and THE fixed box:
+   full-screen, solid dark, created once and never replaced. iPadOS 26
+   blurs the top of a home-screen web app (its frosted "scroll edge
+   effect") unless the top edge sits in a fixed, full-width,
+   solid-colored box, and it seems to latch onto the first such box it
+   finds: when each screen had its own fixed shell, switching screens
+   removed that box and the blur stayed until relaunch (2e). So the
+   screens inside are position: absolute, not fixed. See DESIGN_NOTES
+   "PWA, layout and updates". */
 #app {
   position: fixed;
   inset: 0;
@@ -58,11 +60,12 @@ html, body {
   /* Pinned to the screen edges instead of sized with 100vh/100vw.
      In an installed iPad PWA with black-translucent, iOS's idea of
      100vh doesn't match the visible area (off by the status-bar
-     height), which pushed the bottom of the rail off-screen. A
-     fixed, inset:0 box always matches the real viewport, and it also
-     can't be scrolled or nudged by page-level overflow. Don't go back
-     to vh units here without re-testing on the device. */
-  position: fixed;
+     height), which pushed the bottom of the rail off-screen. Pinned
+     with inset: 0 inside #app (itself fixed, inset: 0) it always
+     matches the real viewport, and can't be scrolled or nudged by
+     page-level overflow. Don't go back to vh units here without
+     re-testing on the device. Absolute, not fixed — see #app. */
+  position: absolute;
   inset: 0;
   flex-direction: column;
   /* Dark, so any inset area (and the status bar) has a dark backdrop. */

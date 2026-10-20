@@ -307,8 +307,9 @@ Sections: [Process lessons](#process-lessons) ·
   drawings, so never suggest that before she's backed up (step 6
   export).
 - **iPadOS 26's frosted top edge (2e).** Even with the status text
-  fixed (above), the top bar's contents went blurry on the gallery and
-  stayed blurry in the editor until relaunch. That's iPadOS 26's
+  fixed (above), the top bar's contents went blurry after switching
+  screens (either direction) and stayed blurry until relaunch — never
+  at launch, whichever screen opened first. That's iPadOS 26's
   "scroll edge effect", which home-screen web apps get by default
   (Messages shows the same frost). No meta tag or CSS property turns it
   off. Per WebKit (`LocalFrameView::fixedContainerEdges`, as documented
@@ -317,16 +318,25 @@ Sections: [Process lessons](#process-lessons) ·
   `sticky` box at least 90% of the viewport wide, no more than 5%
   taller than it, with a plain `background-color` and no
   `backdrop-filter` on the way up — iOS then just extends that color.
-  Our screens qualify, but leaving the editor tore it down *before* the
-  gallery had loaded its cards, so for that moment the top edge was
-  plain `body` — iOS switched to the blur and never re-checked. Fix:
-  `#app` itself is fixed, full-screen and dark (always qualifies), and
-  the editor stays up until the gallery's cards are loaded. Only the
-  iPad shows the effect; the e2e test guards the two conditions. If it
-  ever returns, the launch moment before the first screen is drawn is
-  the next suspect. Sources:
-  [discpress #24](https://github.com/PowerBeef/discpress/pull/24),
-  [folio #994](https://github.com/mbryantms/folio/pull/994).
+  - **Attempt 1 (didn't fix it):** guessed that the empty moment while
+    leaving the editor (torn down before the gallery loaded) was the
+    trigger. Fixed that gap and made `#app` fixed and dark anyway, but
+    gallery → editor never had a gap and still blurred.
+  - **Attempt 2 (current):** every screen had its own fixed shell, and
+    a switch deletes it. The guess is that iPadOS latches onto the
+    first qualifying fixed box and doesn't find a replacement. Now
+    `#app` (created once in `index.html`) is the only fixed box and the
+    shells inside are absolute, so the box iPadOS found at launch lives
+    as long as the app.
+  - **If it still blurs:** make iPadOS re-check after each switch (e.g.
+    nudge the page a pixel and back). Also note the custom dialog's
+    backdrop is fixed, full-screen and semi-transparent — while a
+    dialog is open, the top edge doesn't qualify; suspect it if the
+    blur turns out to start after a dialog.
+  - Only the iPad shows the effect; the e2e test guards the conditions
+    above. Sources:
+    [discpress #24](https://github.com/PowerBeef/discpress/pull/24),
+    [folio #994](https://github.com/mbryantms/folio/pull/994).
 - **16px inputs:** iOS zooms the page when a smaller text field gets
   focus, and the zoom can stick.
 - **ResizeObserver** on the canvas area: iOS layout (safe area,

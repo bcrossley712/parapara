@@ -300,13 +300,16 @@ test('the gallery has the gear menu, without the editor-only actions', async ({ 
 // and solid sits at the top edge — even for a moment — and keeps the
 // blur until relaunch. The blur itself only shows on the device; this
 // guards the two things that prevent it.
-test('switching to the gallery never leaves the screen empty, over a fixed dark backdrop', async ({ page }) => {
+test('screens sit in one fixed dark #app that switching never empties or replaces', async ({ page }) => {
   await openApp(page);
   await drawStroke(page);
 
   const app = page.locator('#app');
   await expect(app).toHaveCSS('position', 'fixed');
   await expect(app).toHaveCSS('background-color', 'rgb(58, 50, 38)');
+  // #app is the only fixed box at the top edge — a screen's own shell
+  // isn't, so switching screens never replaces it.
+  await expect(page.locator('.pp-app-shell')).toHaveCSS('position', 'absolute');
 
   await page.evaluate(() => {
     const root = document.getElementById('app');
@@ -318,4 +321,5 @@ test('switching to the gallery never leaves the screen empty, over a fixed dark 
   await galleryBtn(page).click();
   await page.locator('.pp-gallery').waitFor();
   expect(await page.evaluate(() => window.__appWasEmpty)).toBe(false);
+  await expect(page.locator('.pp-app-shell')).toHaveCSS('position', 'absolute');
 });
