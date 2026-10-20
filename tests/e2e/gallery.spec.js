@@ -295,3 +295,27 @@ test('the gallery has the gear menu, without the editor-only actions', async ({ 
   await page.locator('.pp-gallery').click({ position: { x: 20, y: 400 } });
   await expect(panel).toBeHidden();
 });
+
+// iPadOS 26 blurs the top of a home-screen app whenever nothing fixed
+// and solid sits at the top edge — even for a moment — and keeps the
+// blur until relaunch. The blur itself only shows on the device; this
+// guards the two things that prevent it.
+test('switching to the gallery never leaves the screen empty, over a fixed dark backdrop', async ({ page }) => {
+  await openApp(page);
+  await drawStroke(page);
+
+  const app = page.locator('#app');
+  await expect(app).toHaveCSS('position', 'fixed');
+  await expect(app).toHaveCSS('background-color', 'rgb(58, 50, 38)');
+
+  await page.evaluate(() => {
+    const root = document.getElementById('app');
+    window.__appWasEmpty = false;
+    new MutationObserver(() => {
+      if (root.childElementCount === 0) window.__appWasEmpty = true;
+    }).observe(root, { childList: true });
+  });
+  await galleryBtn(page).click();
+  await page.locator('.pp-gallery').waitFor();
+  expect(await page.evaluate(() => window.__appWasEmpty)).toBe(false);
+});

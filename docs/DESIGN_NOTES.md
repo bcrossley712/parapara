@@ -306,6 +306,27 @@ Sections: [Process lessons](#process-lessons) ·
   was added to the home screen, but re-adding it can delete her
   drawings, so never suggest that before she's backed up (step 6
   export).
+- **iPadOS 26's frosted top edge (2e).** Even with the status text
+  fixed (above), the top bar's contents went blurry on the gallery and
+  stayed blurry in the editor until relaunch. That's iPadOS 26's
+  "scroll edge effect", which home-screen web apps get by default
+  (Messages shows the same frost). No meta tag or CSS property turns it
+  off. Per WebKit (`LocalFrameView::fixedContainerEdges`, as documented
+  by other projects that hit it), it's skipped when a hit test just
+  below the middle of the top edge lands in a `position: fixed` or
+  `sticky` box at least 90% of the viewport wide, no more than 5%
+  taller than it, with a plain `background-color` and no
+  `backdrop-filter` on the way up — iOS then just extends that color.
+  Our screens qualify, but leaving the editor tore it down *before* the
+  gallery had loaded its cards, so for that moment the top edge was
+  plain `body` — iOS switched to the blur and never re-checked. Fix:
+  `#app` itself is fixed, full-screen and dark (always qualifies), and
+  the editor stays up until the gallery's cards are loaded. Only the
+  iPad shows the effect; the e2e test guards the two conditions. If it
+  ever returns, the launch moment before the first screen is drawn is
+  the next suspect. Sources:
+  [discpress #24](https://github.com/PowerBeef/discpress/pull/24),
+  [folio #994](https://github.com/mbryantms/folio/pull/994).
 - **16px inputs:** iOS zooms the page when a smaller text field gets
   focus, and the zoom can stick.
 - **ResizeObserver** on the canvas area: iOS layout (safe area,

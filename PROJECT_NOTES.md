@@ -93,8 +93,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Pass 2 — color: built and tested, not yet on the iPad.** How it
     works is under Architecture (Colors). The picker layout is a first
     try — adjust if she wants it different.
-- **Next: the top-bar visual bug** (his fix in `8debdf3` didn't clear
-  it), then step 3.
+- **Top-bar blur (iPadOS 26 scroll edge effect): fix built, not yet
+  confirmed on the iPad** — go to the gallery and back; the top bar
+  should stay sharp. Then step 3.
 - **Build order after step 2:** 3 image import + per-frame image
   transform + **mirroring** (ask her which kind first — flip view,
   flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
@@ -371,6 +372,12 @@ Each is here because breaking it caused (or would cause) a real bug.
 - **Anything at the top edge stays dark**, including `theme-color`,
   the manifest's `theme_color`/`background_color`, and the `html, body`
   background — iPadOS restyles the status bar from them.
+  ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
+- **Something fixed, full-width and solid-colored is always at the top
+  edge** — `#app` is a fixed, full-screen dark box for that, and
+  screens swap with no empty moment (load the next screen's data
+  first). No `backdrop-filter`, gradient or see-through bar at the top.
+  Otherwise iPadOS 26 blurs the top of the app until relaunch.
   ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
 - Text inputs ≥ 16px font.
 - Layouts must tolerate wider text than desktop Chromium shows — no

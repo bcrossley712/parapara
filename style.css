@@ -36,6 +36,19 @@ html, body {
   touch-action: none;
 }
 
+/* The screens' permanent container (index.html). Fixed, full-screen
+   and solid dark at all times — including the moment between one
+   screen being torn down and the next being built. iPadOS 26 blurs
+   the top of a home-screen web app (its frosted "scroll edge effect")
+   unless the element at the very top edge sits in a fixed, full-width,
+   solid-colored box; finding none once, it kept the blur until the app
+   was relaunched (2e). See DESIGN_NOTES "PWA, layout and updates". */
+#app {
+  position: fixed;
+  inset: 0;
+  background: var(--pp-ink);
+}
+
 /* App shell: tool rail + canvas area (js/ui/ui.js initUI).
    Deliberately minimal for the drawing-engine testing pass — not the
    real toolkit look, just enough to drive draw/erase and be usable

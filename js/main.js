@@ -244,14 +244,12 @@ async function prepareSession({ project, frames }) {
 
 // --- gallery ---
 
-async function showGallery() {
-  setUiState({ screen: 'gallery' }, { now: true });
-
-  // Cards: project records plus their stored thumbnails.
-  let cards = [];
+// Cards for the gallery: project records plus their stored
+// thumbnails. Never throws — a failure is reported and gives [].
+async function loadGalleryCards() {
   try {
     const projects = await listProjects();
-    cards = await Promise.all(projects.map(async (p) => ({
+    return await Promise.all(projects.map(async (p) => ({
       id: p.id,
       name: p.name,
       frameCount: p.frames.length,
@@ -260,7 +258,16 @@ async function showGallery() {
   } catch (err) {
     console.error('Parapara! could not list projects:', err);
     showNotice("Your animations couldn't be loaded.");
+    return [];
   }
+}
+
+// `preloaded`: cards already loaded by the caller (leaving the editor
+// loads them first, so the editor stays up until the gallery is ready
+// — no empty moment between screens).
+async function showGallery(preloaded = null) {
+  let cards = preloaded ?? await loadGalleryCards();
+  setUiState({ screen: 'gallery' }, { now: true });
 
   let closed = false;
 
@@ -1112,9 +1119,13 @@ function mountEditor(session, { canSave }) {
       }
     }
     await updateThumbnail();
+    // The gallery's cards load while the editor is still showing, so
+    // the swap is immediate — like opening a project, which loads
+    // before the gallery goes.
+    const cards = await loadGalleryCards();
     flushEditor = null;
     ui.destroy();
-    showGallery();
+    showGallery(cards);
   }
 }
 
