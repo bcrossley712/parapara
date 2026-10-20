@@ -113,6 +113,7 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     activeLayerId: layer.id,
     frames: [],
     palette: [],                   // saved swatches (2e) — see colors.js
+    referenceHidden: false,        // Hide images (3a); missing = false
     audioClips: [],
   };
 }
@@ -661,6 +662,16 @@ export async function loadLayerBitmap(bitmapRef) {
   );
   if (!record) return null;
   return new Blob([record.buffer], { type: record.type });
+}
+
+// A frame's reference image (3a): stored like a layer bitmap (same
+// blob store, same ArrayBuffer + type, bumps updatedAt), under its own
+// id, which frame.image.blobRef points at. Save it *before* any frame
+// record points at it. Several frames may point at one image; the
+// sweep keeps it while any does (mapBlobRefs). Read it back with
+// loadLayerBitmap — a blob is a blob.
+export function saveImageBlob(projectId, blobRef, blob) {
+  return saveLayerBitmap(projectId, blobRef, blob);
 }
 
 // Test-only: drop the cached connection so a test can start from a

@@ -19,6 +19,7 @@ import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 import { createFrameStrip } from '../timeline/frame-strip.js';
+import { createReferenceBar } from './reference-bar.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -38,13 +39,17 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 // options.colors: palette intents from the color picker
 //   ({ onPaletteAdd(hex), onPaletteReplace(index, hex),
 //   onPaletteRemove(index) } — hex is the current color).
+// options.reference: the adjust-image bar's intents ({ onOpacityInput,
+//   onReplace, onDelete, onDone }, see reference-bar.js). onDone also
+//   fires when she taps any other control while adjusting.
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
 //
 // Returns { canvas, layers (the panel), frames (the strip),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
-// setPalette(list), destroy() }. destroy() removes
+// setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
+// destroy() }. destroy() removes
 // the editor and everything it hooked up outside its own elements.
 export function initUI(container, options = {}) {
   const {
@@ -57,6 +62,7 @@ export function initUI(container, options = {}) {
     layersPanelOpen = false,
     frames: framesCallbacks = {},
     colors: colorCallbacks = {},
+    reference: referenceCallbacks = {},
     onGallery = null,
   } = options;
   container.innerHTML = '';
@@ -318,6 +324,75 @@ export function initUI(container, options = {}) {
 
   setActiveTool(startSettings.tool);
 
+  // --- reference image (3a) ---
+
+  // The photo picker: the one native picker the app uses, because
+  // iPadOS has no other way into Photos (see PROJECT_NOTES.md). Hidden;
+  // pickImage() must be called inside a tap.
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.className = 'pp-file-input';
+  fileInput.hidden = true;
+  shell.appendChild(fileInput);
+  let onPicked = null;
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0] ?? null;
+    const handler = onPicked;
+    onPicked = null;
+    fileInput.value = '';
+    if (file && handler) handler(file);
+  });
+  function pickImage(onFile) {
+    onPicked = onFile;
+    fileInput.value = '';
+    fileInput.click();
+  }
+
+  const referenceBar = createReferenceBar({
+    onOpacityInput: () => {}, onReplace: () => {}, onDelete: () => {}, onDone: () => {},
+    ...referenceCallbacks,
+  });
+  let adjustingOn = false;
+
+  // Adjust mode: the bar takes the rail's place. Tapping any control
+  // outside the bar and the canvas commits, as Done does — and the
+  // control still does its own thing (Procreate's transform). Disabled
+  // buttons (undo/redo while adjusting) don't count.
+  //
+  // Buttons commit on click, in the capture phase: the commit may
+  // re-render the frame strip, and a tile replaced between pointerdown
+  // and pointerup would never get its click. A slider (layer opacity)
+  // never clicks, so it commits as soon as it's touched.
+  function setAdjusting(on, opacity = 1) {
+    if (on === adjustingOn) {
+      if (on) referenceBar.setOpacity(opacity);
+      return;
+    }
+    adjustingOn = on;
+    if (on) {
+      setEyedropperArmed(false);
+      setPickerOpen(false);
+      referenceBar.setOpacity(opacity);
+      body.insertBefore(referenceBar.element, rail);
+    } else {
+      referenceBar.element.remove();
+    }
+    rail.classList.toggle('is-hidden', on);
+  }
+  function commitOnOutsideTap(event) {
+    if (!adjustingOn) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (referenceBar.element.contains(target) || canvasArea.contains(target)) return;
+    if (target.closest('button:disabled, input:disabled')) return;
+    const isInput = target.closest('input, textarea') !== null;
+    if ((event.type === 'pointerdown') !== isInput) return;
+    referenceCallbacks.onDone?.();
+  }
+  document.addEventListener('pointerdown', commitOnOutsideTap, { signal, capture: true });
+  document.addEventListener('click', commitOnOutsideTap, { signal, capture: true });
+
   if (layersPanelOpen) {
     layersPanel.setOpen(true, { notify: false });
     layersBtn.classList.add('is-active');
@@ -338,6 +413,8 @@ export function initUI(container, options = {}) {
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),
+    pickImage,
+    setAdjusting,
     destroy,
   };
 }

@@ -76,7 +76,9 @@ icon, manifest `name`/`short_name`, and repo copy.
 **Standing constraints**
 - **No native browser dialogs or pickers** (`confirm()`, `alert()`,
   `<input type="color">`, date inputs) — custom-styled only. Range
-  inputs are fine.
+  inputs are fine. **One exception:** image import uses
+  `<input type="file" accept="image/*">`, because iPadOS offers no
+  other way into Photos.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
@@ -91,15 +93,60 @@ icon, manifest `name`/`short_name`, and repo copy.
   is under Architecture; she mostly undoes with the buttons, not
   gestures. The color picker's layout is a first try — adjust if she
   wants it different.
-- **Next: step 3** — image import + per-frame image transform +
-  mirroring. Start by asking her which mirroring she means, then scope
-  in detail.
-- **Build order after step 2:** 3 image import + per-frame image
-  transform + **mirroring** (ask her which kind first — flip view,
-  flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
-  delete, thumbnails) · 5 audio record/import + single-clip trim ·
-  6 export + native share sheet · 7 Cloudflare Worker + R2 (share
-  links, Krita reference import).
+- **Step 3a: built and tested, awaiting her try on the iPad** (does
+  tracing a reference feel right? see the device-only list in
+  Testing). Then 3b. Step 3 is scoped and split; each sub-step gets
+  confirmed on the iPad before the next one starts
+  ([why each choice](docs/DESIGN_NOTES.md#step-3-decisions)):
+  - **3a Reference image core (built):** import from the photo picker, stored
+    once and drawn under every layer. She traces over it; it's never
+    drawn on. It's included in `readVisible`, the thumbnail and
+    export.
+    - **Entry points are in the frame menu** (the image belongs to the
+      frame): **Add image**, which becomes **Adjust image** once the
+      frame has one, and **Hide images / Show images**, a project-wide
+      toggle saved as `referenceHidden`. The layers panel stays
+      layers only.
+    - **Adjust mode:** one finger (or pen/mouse) moves the image; two
+      fingers always scale/rotate it, so the view can't pan or zoom
+      until Done. Two-finger double-tap still resets the view. A bar
+      replaces the rail: opacity, Replace, Delete, Done.
+    - **Committing:** Done, or tapping any control outside the bar,
+      commits the session as one undo entry. Undo/redo are off while
+      adjusting. Entering adjust mode while images are hidden shows
+      them.
+    - **Import defaults:** the image fits inside the canvas, centered,
+      at 50% opacity. Its long side is downscaled to at most the
+      canvas's (1×). Stored as JPEG at 0.7, or PNG only if it really
+      has transparency. Her iPad runs near full, so space wins over
+      sharpness. Import, adjust session, Delete and Replace are
+      all undoable (`'image'` history entries).
+    - How it's built is under Architecture → Reference image.
+  - **3b Reference across frames:** "Use on all frames" (adjust mode)
+    copies this frame's image and transform to every frame as one
+    undo entry. Each frame still keeps its own transform afterward. A
+    new frame inherits the image only if every existing frame shares
+    the same one; otherwise it starts without one. Also a flip-photo
+    button (negative scale) and the frame-strip marker.
+  - **3c Layer menu + flip drawing:** the footer would overflow, so
+    tapping the active layer row opens a **layer menu**, the same
+    pattern as the frame menu (Sketchbook/Flipaclip/Procreate do this
+    too). It holds Rename, Duplicate, Clear, Flip horizontal, Flip
+    vertical and Delete; merge down joins it later. The footer keeps
+    only the opacity slider. Flip acts on the active layer, this frame
+    only, as one undoable `'pixels'` entry. Lock or hide refuses it
+    with a banner, as Clear does.
+  - **3d Symmetry:** a rail toggle for vertical, horizontal or both
+    axes. The axis is fixed at canvas center and shown as a guide
+    line; it's **not movable**, because she doesn't want controls
+    competing with drawing on the canvas. Draw, erase and smudge
+    mirror; fill doesn't (as in Sketchbook). Mirrored stamps must grow
+    the dirty rect. Saved per project (as in Procreate).
+- **Build order after step 3:** 4 playback, onion skin, full frame
+  strip (reorder, delete, a picture thumbnail on each tile that keeps
+  its number) · 5 audio record/import +
+  single-clip trim · 6 export + native share sheet · 7 Cloudflare
+  Worker + R2 (share links, Krita reference import).
 
 **Open items**
 - **Merge down** — deferred on purpose (needs opacity-aware
@@ -123,6 +170,15 @@ icon, manifest `name`/`short_name`, and repo copy.
   gallery-only for now.
 - **How-to / tutorials** reachable from the settings (gear) menu —
   later, once there's enough to explain (gestures, layers, frames).
+- **Adjustable shortcut bar** (as in Clip Studio's command bar), after
+  step 6, once she knows which actions she reaches for. It needs one
+  registry of actions that every button calls. Shortcuts add a second
+  way to reach an action; they don't move it out of its home. Core
+  items stay fixed. Saved app-wide.
+  ([details](docs/DESIGN_NOTES.md#step-3-decisions))
+- **"Make into layer"** (bake the reference image into a new layer) —
+  only if tracing a reference doesn't feel right to her. This is
+  additive, not a rewrite.
 
 **Planned UI layout** (from wireframes): tool rail down the left;
 transport (skip / play / skip + fps) between canvas and timeline;
@@ -206,8 +262,8 @@ Short rules; reasoning in the linked sections.
     resyncs it. The same copy reverts a touch that became a gesture.
   - Layer structure changes are undoable on the same stack (new entry
     `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
-    frame. **Visibility and lock are not undoable** (view state, as in
-    Photoshop). Rename isn't either. An entry for another frame moves
+    frame, and `'image'` (3a). **Visibility, lock and Hide images are
+    not undoable** (view state, as in Photoshop). Rename isn't either. An entry for another frame moves
     to that frame first. Undoing an add frame takes the frame out (its
     record is deleted, its pixels stay in storage for redo).
   - **Removing a layer** (delete, or undoing an add) saves its pixels
@@ -301,8 +357,47 @@ Short rules; reasoning in the linked sections.
 - **Updates:** a new version waits for the user (toast or gear menu),
   never swaps silently. Every reload the app causes flushes unsaved
   work first. ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
+- **Reference image (3a)** ([why](docs/DESIGN_NOTES.md#step-3-decisions)):
+  - `frame.image` = `{ blobRef, x, y, scale, rotation, opacity }`.
+    (x, y) is the image center in canvas px, `scale` is canvas px per
+    image px, rotation is in radians. The math is pure, in
+    `canvas/transform.js`. The blob is stored with `saveImageBlob`
+    *before* the frame points at it, and frames may share one blob
+    (copy frame).
+  - **Display:** `canvas/reference.js` puts a holder sized in canvas
+    px as the wrapper's first child, scaled to the wrapper's CSS size
+    in `fitStack`. The image is a `<canvas>` inside it with a CSS
+    `matrix()`, so dragging never redraws pixels. The canvas keeps
+    the showing image by key (blobRef), so frames sharing one don't
+    decode it again (`decodeReference` in `main.js`). A missing or
+    undecodable image is skipped, not a failed load.
+  - **Adjust mode** (`canvas.setAdjusting`): pointers go to
+    `adjustDown/Move/Up`, not to tools or view gestures. Points are
+    converted with `toCanvasPoint`, so view zoom and rotation don't
+    change how far the image moves. Pinch rotation accumulates with
+    `shortestAngleDelta`. Whenever a finger joins or lifts, the motion
+    restarts from the current placement.
+  - **Commit** (`finishAdjust` in `main.js`) is synchronous: it sets
+    `frame.image`, pushes one `'image'` entry `{ frameId, before,
+    after }` (nothing if unchanged), and queues the frame save on
+    `frameSaves`, which `flush()` and `close()` wait on. Leaving the
+    app (`flush`) commits too. Delete commits `null`; Replace stores
+    a new blob and keeps adjusting with the same `before`.
+  - **Undo of `'image'`** jumps to that frame and puts the record
+    back. Blobs stay in storage (the sweep clears them next open), so
+    entries hold only small records.
+  - **Hide images** (`project.referenceHidden`) isn't undoable (view
+    state, like layer visibility). It's dropped from `readVisible` and
+    the thumbnail.
+  - **Import** (`prepareImport`): decode (the browser applies EXIF
+    orientation), downscale to `MAX_IMPORT_FACTOR` (1) × the canvas's
+    long side, re-encode as JPEG at `JPEG_QUALITY` (0.7). It stays PNG
+    only if a pixel is actually transparent (checked after
+    downscaling, whatever the file type). Scale
+    is clamped from `MIN_IMAGE_SIDE` (48 px) up to `MAX_IMAGE_ZOOM`
+    (8) × the canvas's long side.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  reference image stored once, per-frame transform; one audio clip as
+  reference image (step 3, scoped above under Current state); one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota.
@@ -319,9 +414,23 @@ Each is here because breaking it caused (or would cause) a real bug.
   capture belong to the canvas area (`.pp-canvas-area`), never the
   page or a layer — fingers off the page must still count.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
-  sampler** for fill and the eyedropper. Step 3's reference image goes
-  in it; step 4's onion skin must stay out (ghost frames aren't her
-  drawing).
+  sampler** for fill and the eyedropper. The reference image (3a) is
+  in it, under the layers, when showing (its single-layer fast path
+  is skipped then). Step 4's onion skin must stay out (ghost frames
+  aren't her drawing).
+- **The reference holder (`.pp-reference`) stays the wrapper's first
+  child** (`prepend`; `applyLayers` appends layers after it), so it's
+  under every layer. It and its image keep `transform-origin: 0 0`,
+  and the holder is rescaled in `fitStack`. Otherwise the image drifts
+  from where fill and the eyedropper think it is.
+- **Adjust mode commits on outside taps in the capture phase, on
+  `click` for buttons** (`ui.js`). The commit re-renders the frame
+  strip, and a tile replaced between pointerdown and pointerup never
+  gets its click. Sliders commit on pointerdown, since they never
+  click. Disabled controls don't commit.
+- **The picker opens inside the tap:** `ui.pickImage()` must run
+  synchronously from a click (frame menu item, Replace). An `await`
+  before it and iOS won't open the picker.
 - Fill's region comes from the visible-layer composite, its pixels go
   to the active layer only — never write the composite back.
 - `toCanvasPoint` is computed analytically from viewport state, never
@@ -417,6 +526,10 @@ Each is here because breaking it caused (or would cause) a real bug.
                           committed copy; its returned API is the only
                           way other modules touch the canvas
         thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
+                          (reference image first, unless hidden)
+        reference.js      reference image: on-screen view, drawReference,
+                          prepareImport (3a)
+        transform.js      pure placement math for the reference image
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
         region.js         pure dirty-rect helpers
@@ -436,13 +549,15 @@ Each is here because breaking it caused (or would cause) a real bug.
         confirm-dialog.js custom modal: showConfirm / showPrompt
         icons.js          icons shared by both screens
         layers-panel.js   layers panel (UI only; intents via callbacks)
+        reference-bar.js  adjust-image bar that replaces the rail (UI only)
         color-picker.js   custom HSV picker + eyedropper button,
                           recents row, palette grid (UI only)
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
         frames.js         pure frame-order ops (insert/remove/neighbor)
-        frame-strip.js    frame strip + frame menu (UI only; intents
+        frame-strip.js    frame strip + frame menu incl. Add/Adjust image,
+                          Hide/Show images (UI only; intents
                           via callbacks)
         timeline.js       placeholder: playback, onion skin (step 4)
       export/ audio/      placeholders for later steps
@@ -478,6 +593,8 @@ bitmap. Planned fields are marked. Extend additively.
       frames: [frameId, ...],                 // timeline order
       currentFrameId,                         // the frame she was on
       palette: [ '#rrggbb', ... ],            // 2e, max 10; older projects: missing = []
+      referenceHidden: false,                 // 3a, Hide images; missing = false
+      symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (3d); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
     }
@@ -485,7 +602,8 @@ bitmap. Planned fields are marked. Extend additively.
     frame = {
       id, projectId,
       bitmapRefs: { [layerId]: bitmapRef },   // one per project layer
-      image: { blobRef, x, y, scale, rotation, opacity } | null   // planned (step 3)
+      image: { blobRef, x, y, scale, rotation, opacity } | null   // 3a; 3b may add a flip field
+      // frames can share one image blob (copy frame, 3b's "all frames")
     }
 
 **IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
@@ -508,7 +626,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 **Run tests before handing off any change; add tests for new logic.**
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
-  `npm run test:e2e` (~1.3 min), or `npm test`.
+  `npm run test:e2e` (~1.5 min), or `npm test`.
 - **In a Claude sandbox:** Chromium is preinstalled — run
   `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
@@ -539,7 +657,10 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
   - Each test gets its own browser context (own IndexedDB), so tests
-    must not depend on order or on each other. ~1.3 min after 2e.
+    must not depend on order or on each other. ~1.5 min after 3a.
+  - **Images in e2e:** make the test image in the page (a canvas →
+    PNG buffer) and feed it through `page.waitForEvent('filechooser')`
+    so the real picker path runs (`reference.spec.js`).
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo
@@ -549,4 +670,6 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   feel, iPadOS gesture conflicts, Safari-only rendering, iOS
   suspend/relaunch behavior, gallery touch scrolling, canvas memory
   release between projects, the iPadOS 26 top-edge blur (desktop
-  Chromium never draws it), long-press feel.
+  Chromium never draws it), long-press feel, the photo picker (Photos
+  vs Files, HEIC arriving as JPEG), memory with large imported photos,
+  adjusting an image by finger and stylus.

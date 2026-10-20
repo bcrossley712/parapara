@@ -47,6 +47,8 @@ import {
   createFrame,
   createProjectRecord,
   ensureBitmapRefs,
+  saveImageBlob,
+  newId,
 } from './storage/storage.js';
 import {
   MAX_LAYERS,
@@ -82,6 +84,8 @@ import {
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { renderThumbnail } from './canvas/thumbnail.js';
+import { prepareImport } from './canvas/reference.js';
+import { sanitizePlacement, samePlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
 
 // Colors for the developer "Fill all layers" memory test.
@@ -239,7 +243,8 @@ async function prepareSession({ project, frames }) {
   // (and save it) rather than failing to load.
   if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
   const images = await decodeFrameImages(project.layers, frame, loadLayerBitmap);
-  return { project, frames, frame, images };
+  const reference = await decodeReference(frame, loadLayerBitmap, null);
+  return { project, frames, frame, images, reference };
 }
 
 // --- gallery ---
@@ -380,7 +385,13 @@ async function showGallery(preloaded = null) {
 function buildThumbnail(project, frames, read) {
   const first = frames.find((f) => f.id === project.frames[0]);
   if (!first) return null;
-  return renderThumbnail({ layers: project.layers, frame: first, canvasSize: project.canvas, read });
+  return renderThumbnail({
+    layers: project.layers,
+    frame: first,
+    canvasSize: project.canvas,
+    read,
+    referenceHidden: project.referenceHidden === true,
+  });
 }
 
 // --- editor ---
@@ -393,6 +404,8 @@ function buildThumbnail(project, frames, read) {
 function mountEditor(session, { canSave }) {
   let savedImages = session.images;
   delete session.images;
+  const savedReference = session.reference;
+  delete session.reference;
 
   if (canSave) {
     saveLastProjectId(session.project.id)
@@ -454,6 +467,17 @@ function mountEditor(session, { canSave }) {
       onSelect: (id) => selectFrame(id),
       onAdd: () => addFrame(),
       onDuplicate: () => duplicateFrame(),
+      onImage: () => addOrAdjustImage(),
+      onToggleImages: () => toggleImages(),
+    },
+    reference: {
+      onOpacityInput: (opacity) => {
+        const placement = canvasApi.getReferencePlacement();
+        if (placement) canvasApi.setReferencePlacement({ ...placement, opacity });
+      },
+      onReplace: () => pickImage(),
+      onDelete: () => deleteImage(),
+      onDone: () => finishAdjust(),
     },
   });
   const canvasApi = ui.canvas;
@@ -500,6 +524,8 @@ function mountEditor(session, { canSave }) {
   });
   for (const image of savedImages.values()) image.close?.();
   savedImages.clear();
+  canvasApi.setReferenceHidden(project.referenceHidden === true);
+  applyReference(session.frame, savedReference);
   project.activeLayerId = canvasApi.getActiveLayerId();
   // Settings may have been cleaned up by the canvas (bad saved values).
   toolSettings = canvasApi.getSettings();
@@ -520,7 +546,16 @@ function mountEditor(session, { canSave }) {
       maxLayers: MAX_LAYERS,
       busy,
     });
-    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
+    strip.render({
+      frameIds: project.frames,
+      currentId: session.frame.id,
+      busy,
+      images: {
+        current: Boolean(session.frame.image?.blobRef),
+        any: session.frames.some((f) => f.image?.blobRef),
+        hidden: project.referenceHidden === true,
+      },
+    });
   }
 
   function exclusive(task) {
@@ -595,11 +630,13 @@ function mountEditor(session, { canSave }) {
     await leaveFrame();
     if (ensureBitmapRefs(next, project.layers) && canSave) await saveFrame(next);
     const images = await decodeFrameImages(project.layers, next, readBitmap);
+    const reference = await decodeReference(next, readBitmap, canvasApi.getReferenceKey());
 
     session.frame = next;
     project.currentFrameId = next.id;
     canvasApi.loadFrame({ layers: project.layers, activeLayerId: project.activeLayerId, images });
     for (const image of images.values()) image.close?.();
+    applyReference(next, reference);
 
     // Pixels that were held in memory go back to storage now.
     if (canSave) {
@@ -654,6 +691,8 @@ function mountEditor(session, { canSave }) {
   //   'layer-move'    { layerId, from, to }
   //   'layer-props'   { layerId, before, after }   (opacity)
   //   'frame-add'     { record }  record = { frame, index }
+  //   'image'         { frameId, before, after }  (3a) frame.image
+  //                   records (null = none); blobs stay in storage
   // Adding and deleting are the same two operations run in opposite
   // directions: detach (pixels stay in storage under the frames' old
   // refs, which the record keeps) and attach (put the layer and refs
@@ -787,6 +826,9 @@ function mountEditor(session, { canSave }) {
       case 'layer-props':
         applyLayerChanges(entry.layerId, undoing ? entry.before : entry.after);
         return entry;
+      case 'image':
+        exclusive(() => setFrameImage(entry.frameId, undoing ? entry.before : entry.after));
+        return entry;
       default:
         throw new Error(`Unknown history entry type ${entry.type}`);
     }
@@ -794,12 +836,12 @@ function mountEditor(session, { canSave }) {
 
   // An undo/redo changes the saved drawing like any edit.
   function undo() {
-    if (!canAct()) return;
+    if (!canAct() || adjust) return;
     if (history.undo((e) => applyEntry(e, 'undo'))) autosaver?.schedule();
   }
 
   function redo() {
-    if (!canAct()) return;
+    if (!canAct() || adjust) return;
     if (history.redo((e) => applyEntry(e, 'redo'))) autosaver?.schedule();
   }
 
@@ -882,6 +924,161 @@ function mountEditor(session, { canSave }) {
       }
     }
     if (canSave) await copyBlobs(project.id, stored);
+  }
+
+  // --- reference image (step 3a) ---
+  //
+  // Each frame may have one image she traces over (frame.image =
+  // { blobRef, x, y, scale, rotation, opacity }); the blob is stored
+  // once and may be shared by several frames (copy frame). The frame
+  // menu adds or adjusts it; Hide images is project-wide view state
+  // (project.referenceHidden), not undoable, like layer visibility.
+  //
+  // Adjust mode: the canvas moves the image live; nothing is written
+  // until it ends (Done, Delete, or tapping any other control — see
+  // ui.js), and then the whole session is one 'image' undo entry,
+  // from the frame's image when adjusting began to what it is now.
+  // A fresh import starts adjust mode with before = whatever the frame
+  // had, so import + placing is one step.
+
+  // { frameId, before } while adjusting, else null.
+  let adjust = null;
+
+  // Frame records changed outside a structure change (image edits),
+  // saved in order; flush() and close() wait for them.
+  let frameSaves = Promise.resolve();
+  function saveFrameRecord(frame) {
+    if (frame.id === project.frames[0]) thumbnailStale = true;
+    if (!canSave) return;
+    frameSaves = frameSaves
+      .then(() => saveFrame(frame))
+      .catch((err) => {
+        console.error('Parapara! saving a frame failed:', err);
+        showNotice("Your image change couldn't be saved. The iPad may be out of space.");
+      });
+  }
+
+  function addOrAdjustImage() {
+    if (!canAct() || adjust) return;
+    const image = session.frame.image;
+    if (image?.blobRef && canvasApi.getReferenceKey() === image.blobRef) {
+      beginAdjust(image);
+      return;
+    }
+    // No image yet (or it couldn't be shown): pick one. Must stay
+    // inside the tap for iOS to open the picker.
+    pickImage();
+  }
+
+  function pickImage() {
+    ui.pickImage((file) => importImage(file));
+  }
+
+  // A picked file becomes this frame's image: stored first (before
+  // anything points at it), shown, and adjust mode starts so she can
+  // place it. If adjust mode was already on (Replace), it carries on
+  // with the new image, and its `before` stays what it was.
+  function importImage(file) {
+    if (busy) return;
+    exclusive(async () => {
+      let prepared;
+      try {
+        prepared = await prepareImport(file, project.canvas.width, project.canvas.height);
+      } catch (err) {
+        console.warn('Parapara! could not read the picked image:', err);
+        showNotice("That image couldn't be opened. Try a different photo.");
+        return;
+      }
+      const blobRef = newId();
+      if (canSave) {
+        try {
+          await saveImageBlob(project.id, blobRef, prepared.blob);
+        } catch (err) {
+          console.error('Parapara! saving an image failed:', err);
+          showNotice("That image couldn't be added. The iPad may be out of space.");
+          return;
+        }
+      } else {
+        heldBitmaps.set(blobRef, prepared.blob);
+      }
+      const bitmap = await createImageBitmap(prepared.blob);
+      canvasApi.setReference(blobRef, bitmap, prepared.placement);
+      bitmap.close?.();
+      if (adjust) ui.setAdjusting(true, prepared.placement.opacity);
+      else beginAdjust(session.frame.image ?? null);
+    });
+  }
+
+  function beginAdjust(before) {
+    if (!canvasApi.getReferenceKey() || !canvasApi.setAdjusting(true)) return;
+    adjust = { frameId: session.frame.id, before };
+    // She can't place what she can't see.
+    if (project.referenceHidden) setImagesHidden(false);
+    ui.setAdjusting(true, canvasApi.getReferencePlacement().opacity);
+    ui.setHistoryState(false, false);
+  }
+
+  // Ends adjust mode and records what changed, as one undo step.
+  function finishAdjust() {
+    if (!adjust) return;
+    const { frameId, before } = adjust;
+    adjust = null;
+    canvasApi.setAdjusting(false);
+    ui.setAdjusting(false);
+    ui.setHistoryState(history.canUndo, history.canRedo);
+    const key = canvasApi.getReferenceKey();
+    const after = key ? { blobRef: key, ...canvasApi.getReferencePlacement() } : null;
+    if (sameImage(before, after)) return;
+    const frame = session.frames.find((f) => f.id === frameId);
+    if (!frame) return;
+    frame.image = after;
+    saveFrameRecord(frame);
+    history.push({ type: 'image', frameId, before, after, bytes: 0 });
+    refreshPanel();
+  }
+
+  // Delete (adjust bar): the frame has no image once it's committed.
+  // The blob stays in storage for undo; the sweep clears it later.
+  function deleteImage() {
+    if (!adjust) return;
+    canvasApi.setReference(null);
+    finishAdjust();
+  }
+
+  // Undo/redo of an 'image' entry: go to that frame and put `image`
+  // back. Call inside exclusive().
+  async function setFrameImage(frameId, image) {
+    await showFrame(frameId);
+    const frame = session.frame;
+    frame.image = image;
+    saveFrameRecord(frame);
+    applyReference(frame, await decodeReference(frame, readBitmap, canvasApi.getReferenceKey()));
+  }
+
+  // Shows `frame`'s image from decodeReference's result.
+  function applyReference(frame, decoded) {
+    const image = frame.image;
+    if (!image?.blobRef || !decoded) {
+      canvasApi.setReference(null);
+      return;
+    }
+    const size = decoded.bitmap ?? canvasApi.getReferenceSize();
+    const placement = sanitizePlacement(image, size.width, size.height, project.canvas.width, project.canvas.height);
+    canvasApi.setReference(image.blobRef, decoded.bitmap, placement);
+    decoded.bitmap?.close?.();
+  }
+
+  function toggleImages() {
+    if (busy || adjust) return;
+    setImagesHidden(!project.referenceHidden);
+  }
+
+  function setImagesHidden(hidden) {
+    project.referenceHidden = hidden;
+    canvasApi.setReferenceHidden(hidden);
+    thumbnailStale = true;
+    scheduleProjectSave();
+    refreshPanel();
   }
 
   // --- layers panel actions ---
@@ -1068,7 +1265,8 @@ function mountEditor(session, { canSave }) {
   // Saves everything now, then redraws the thumbnail if frame 1
   // changed. Thumbnail failures are only logged.
   async function flush() {
-    await Promise.all([autosaver.flush(), projectSaver.flush()]);
+    finishAdjust();
+    await Promise.all([autosaver.flush(), projectSaver.flush(), frameSaves]);
     await updateThumbnail();
   }
 
@@ -1099,7 +1297,7 @@ function mountEditor(session, { canSave }) {
     refreshPanel();
     // Failures are reported by the savers' own onError (and left
     // marked unsaved), so check what's left rather than catching.
-    await Promise.all([autosaver.flush(), projectSaver.flush()]);
+    await Promise.all([autosaver.flush(), projectSaver.flush(), frameSaves]);
     if (unsavedLayers.size > 0 || heldBitmaps.size > 0 || projectSaver.hasPendingWork) {
       const leave = await showConfirm({
         title: "Some of your drawing isn't saved",
@@ -1127,6 +1325,31 @@ function mountEditor(session, { canSave }) {
     ui.destroy();
     showGallery(cards);
   }
+}
+
+// The frame's reference image, ready for the canvas: { bitmap } with a
+// decoded image, or { bitmap: null } when `currentKey` (the image the
+// canvas already shows) is the same one — frames sharing an image
+// don't decode it again. null when the frame has none, or it's
+// missing or won't decode: an image she traces over isn't worth
+// failing the frame for, and nothing ever saves over it.
+async function decodeReference(frame, read, currentKey) {
+  const ref = frame.image?.blobRef;
+  if (!ref) return null;
+  if (ref === currentKey) return { bitmap: null };
+  try {
+    const blob = await read(ref);
+    return blob ? { bitmap: await createImageBitmap(blob) } : null;
+  } catch (err) {
+    console.warn('Parapara! could not load a frame image:', err);
+    return null;
+  }
+}
+
+// Same placement and same stored image (or both none).
+function sameImage(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.blobRef === b.blobRef && samePlacement(a, b);
 }
 
 // Decodes a frame's saved layer bitmaps: a Map of layer id ->

@@ -199,6 +199,36 @@ html, body {
   opacity: 0.4;
 }
 
+/* Adjust-image bar (js/ui/reference-bar.js): takes the rail's place
+   while adjust mode is on, same size and look. */
+.pp-tool-rail.is-hidden {
+  display: none;
+}
+
+.pp-reference-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 76px;
+  padding: 12px 8px;
+  background: var(--pp-ink);
+  flex-shrink: 0;
+}
+
+.pp-reference-bar__title {
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.pp-reference-bar__delete {
+  margin-top: auto;
+  color: #ff8a7a;
+}
+
 /* The whole drawing area takes touch input (canvas.js listens here,
    not on the page), so gestures work with fingers off the page. */
 .pp-canvas-area {
@@ -236,6 +266,34 @@ html, body {
   height: 100%;
   display: block;
   pointer-events: none;
+}
+
+/* Reference image (js/canvas/reference.js): a holder in canvas pixels,
+   scaled to the wrapper by JS, under every layer. It clips, so the
+   image only shows on the page. The image's own transform (a matrix
+   in canvas px) is set in JS; its origin must stay at 0 0. */
+.pp-reference {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pp-reference__image {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* Adjust mode: a ring round the page says touches move the image,
+   not draw. */
+.pp-canvas.is-adjusting {
+  outline: 3px solid var(--pp-accent);
+  outline-offset: 2px;
 }
 
 /* Color swatch + picker (js/ui/ui.js, js/ui/color-picker.js) */

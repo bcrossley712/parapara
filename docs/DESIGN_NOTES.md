@@ -13,7 +13,8 @@ Sections: [Process lessons](#process-lessons) ·
 [Stack](#stack) · [Drawing engine](#drawing-engine) ·
 [Gestures](#gestures) · [Layers and undo](#layers-and-undo) ·
 [Storage](#storage) · [PWA, layout and updates](#pwa-layout-and-updates) ·
-[Testing and CI](#testing-and-ci) · [Planned features](#planned-features)
+[Testing and CI](#testing-and-ci) · [Planned features](#planned-features) ·
+[Step 3 decisions](#step-3-decisions)
 
 ---
 
@@ -428,19 +429,16 @@ Sections: [Process lessons](#process-lessons) ·
 - **Imported reference image** per frame: stored once, referenced by
   frames with a small transform record (x, y, scale, rotation,
   opacity). Onion skin shows the composite (image + strokes).
-- **Mirroring** (step 3) means three different features. Ask her
-  which one she wants before building:
+- **Mirroring** means three different features. She chose flip
+  drawing and symmetry ([step 3 decisions](#step-3-decisions)). Flip
+  view is not planned:
   - **Flip view:** a temporary horizontal mirror for checking
     proportions (Procreate, Sketchbook). View-only, never saved, resets
-    with the view. Coupled to the viewport transform and the
-    `toCanvasPoint` math, the same lesson as rotation.
-  - **Flip drawing:** mirrors the active layer's pixels on this frame,
-    undoable as a `'pixels'` entry. Belongs with a transform tool and
-    shares step 3's per-frame transform handles. Not a frame action:
-    flipping every layer at once is unusual.
-  - **Symmetry:** strokes mirror live across an axis (Sketchbook,
-    Procreate). Lives in the brush/stamp code, so it pairs better with
-    the brush-variety work if that's what she means.
+    with the view. If it's ever added, it's coupled to the viewport
+    transform and the `toCanvasPoint` math, the same lesson as
+    rotation.
+  - **Flip drawing:** mirrors the active layer's pixels on this frame.
+  - **Symmetry:** strokes mirror live across an axis.
 - **Audio:** one project-wide clip, modeled as `audioClips: []` so a
   second clip later isn't a restructure. Non-destructive trim
   (`trimStart`/`trimEnd` in seconds); Web Audio plays just that slice.
@@ -458,3 +456,130 @@ Sections: [Process lessons](#process-lessons) ·
 - **Default fps 12 ("on twos")** matches Flipaclip/Rough Animator.
   **Canvas 1920×1080 landscape**, stored per project so changing it is
   config, not a rebuild.
+
+## Step 3 decisions
+
+**Reference image vs. an image layer.** Sketchbook and Procreate turn
+an imported photo into a normal layer: you place it, it's baked, and
+you draw or erase on it. Flipaclip does much the same. She wants
+something to *trace over*, so it's a separate, non-destructive
+reference under the layers, closer to Rough Animator. This is a
+deliberate departure from most of her apps. It also doesn't use one
+of the 8 layer slots, and its transform stays editable. She has to
+try it before we know it feels right. If it doesn't, the fix is
+additive: a "Make into layer" action that draws the transformed image
+into a new layer. That way nothing gets rewritten. Keep the reference
+logic in one module so the code that reads it (`readVisible`,
+thumbnail, onion skin in step 4, export in step 6) calls one function
+each. That keeps any later change local.
+
+**Photo picker exception.** iPadOS only exposes Photos through
+`<input type="file">`. The "no native pickers" rule is about browser
+chrome that looks out of place, like `confirm()` or the color input.
+The system photo sheet is what every iPad app uses, so it's allowed.
+
+**Image controls live in the frame menu, not the layers panel.** The
+image belongs to a frame, and the layers panel was already filling up.
+A pinned "Reference" row at the bottom of the layers list was
+considered and dropped. None of her apps has a strong convention
+for per-frame references: Procreate and Sketchbook insert photos from
+a top-level menu as layers, and Flipaclip imports into a layer. So the
+frame menu follows our own design rather than departing from hers.
+"Hide images" sits there too, worded so it's clear it covers every
+frame.
+
+**Adjust mode gestures.** Two fingers normally pan, zoom and rotate the
+view. In adjust mode they always transform the image instead, as
+Procreate's transform does. Two-finger double-tap still resets the
+view, so she can always get her bearings back. The alternative was
+two fingers *on* the image transform it and *off* it move the view.
+It was rejected for now, because a photo often fills the whole canvas,
+so the split would rarely help. Revisit if she misses panning while
+adjusting.
+
+**Import size, format and opacity.** Her iPad always runs near full,
+so imported images are compressed hard, like the photo-saving apps
+that shrink pictures:
+- **1× cap:** the long side is at most the canvas's (1920 px). 2× was
+  the first plan. On iPad photos (4:3) it barely shrank a 12 MP photo
+  (to 11 MP, about 44 MB decoded), and storage was the bigger worry
+  anyway. At 1× a photo is about 3 MP and about 11 MB decoded. Cost:
+  enlarging past the canvas size softens, which matters little for a
+  traced reference at 50%.
+- **JPEG 0.7, PNG only if really transparent:** measured on one of
+  her screenshots (the worst case for JPEG: flat color, hard edges),
+  resized to 1920×1440:
+  - PNG: 342 KB
+  - JPEG 0.8: 113 KB
+  - JPEG 0.7: 95 KB
+  - JPEG 0.6: 83 KB
+
+  A fill on the background differed from the PNG's by 0.7%, 0.8% and
+  1.0% of pixels respectively, all along line edges. At 3× zoom, 0.6
+  started to look blotchy at edges and 0.7 didn't. Below 0.7 the
+  savings are tiny and the edges she traces get worse. Quality only
+  changes storage, never memory (decoded size depends on pixel
+  dimensions). Most PNGs (screenshots) have an alpha channel and use
+  none of it, so transparency is checked on the pixels, not the file
+  type.
+- **50% opacity on import,** because the point is tracing. Procreate
+  starts at 100% because its photos are artwork.
+
+Her drawings (layer bitmaps) stay lossless PNG; JPEG would blur lines
+a little more on every save.
+
+**Layer menu (3c).** Flip would have pushed the layers panel footer to
+six actions, and merge down later to seven. Her apps put layer
+actions in a per-layer menu (Sketchbook, Flipaclip, and Procreate's
+tap-the-active-layer popover). The frame strip already works this way
+(tap the current tile), so the layer row does too. The footer keeps
+only the opacity slider, since a slider doesn't belong in a menu.
+
+**Per frame, with "use on all frames".** The schema already stores
+the image per frame (rotoscoping needs each frame to have its own).
+She also wants a background that spans the animation. "Use on all
+frames" references the same blob from every frame, so it's stored
+once. Each frame keeps its own transform, so nudging one frame later
+doesn't move the rest; she can apply to all again if she wants them
+matched. A new frame inherits the image only when every frame already
+shares it, meaning it's acting as a background. A rotoscope sequence
+doesn't carry a stale image onto new frames. No flag in the schema is
+needed to tell these apart.
+
+**Flip drawing lives in the layers panel.** It acts on the active
+layer, so it sits with the other layer actions (Clear, Copy). A
+top-bar button was suggested and rejected: it would separate a layer
+function from its siblings. Note that Procreate's "flip canvas"
+mirrors every layer. Ours is the active layer only, on this frame. If
+she ever expects the whole frame to flip, revisit.
+
+**Symmetry axis is fixed.** Sketchbook and Procreate let you drag the
+axis. She doesn't want anything on the canvas that competes with
+drawing; Sketchbook's on-canvas radial menu put her off. So the axis
+sits at canvas center, the guide line is display-only, and the toggle
+is on the rail. A movable axis would need a touch near the guide to
+become a drag instead of a stroke. That's a new input rule, so don't
+add it unless she asks.
+
+**Splitting 3a–3d.** The scope grew, so each piece gets confirmed on
+the iPad before the next. 3a comes first because it tests the riskiest
+assumption (tracing a reference feels right). 3c is small. 3d touches
+the stamp and dirty-rect code, where a mistake breaks undo.
+
+**Adjustable shortcut bar (deferred to after step 6).** The idea is to
+let her put the actions she uses most in a bar, like Clip Studio's
+command bar. It takes:
+1. One registry of actions (id, label, icon, run, enabled, active)
+   that every existing button calls. Today buttons are wired one at a
+   time in `ui.js`, the layers panel and the frame menu, so this
+   refactor is most of the work.
+2. Shortcut slots that are a *second* way to reach an action, not a
+   new home for it.
+3. A custom edit sheet to add, remove and reorder; reordering may
+   share code with step 4's frame-strip reordering.
+4. App-wide saving that drops unknown ids.
+5. Core controls stay fixed (Gallery, tools, color, Layers).
+
+It waits until after step 6 for two reasons: she can't know what she
+reaches for until the app is complete, and the action list keeps
+growing until then. Doing the refactor later is mechanical, not risky.

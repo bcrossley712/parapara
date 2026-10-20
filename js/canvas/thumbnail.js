@@ -5,17 +5,24 @@
 // canvas, scaled down to a small PNG. Works from the saved layer
 // bitmaps (not the live canvases), so it can draw any project, open or
 // not. Knows nothing about storage: the caller passes `read`.
+// The frame's reference image (3a) is drawn first, under the layers,
+// unless images are hidden — the thumbnail shows what she sees.
+
+import { drawReference } from './reference.js';
+import { sanitizePlacement } from './transform.js';
 
 // Small enough to keep storage and decoding cheap, big enough to look
 // sharp on a gallery card at 2x.
 export const THUMBNAIL_WIDTH = 480;
 
 // layers: the project's layer list (index 0 = bottom).
-// frame: the frame record to draw (its bitmapRefs).
+// frame: the frame record to draw (its bitmapRefs and image).
 // canvasSize: { width, height } of the project canvas, for the aspect.
-// read(bitmapRef): Promise<Blob | null> — null means a blank layer.
+// read(ref): Promise<Blob | null> — null means a blank layer (or a
+//   missing image, which is skipped).
+// referenceHidden: the project's Hide images setting.
 // Returns a PNG Blob.
-export async function renderThumbnail({ layers, frame, canvasSize, read }) {
+export async function renderThumbnail({ layers, frame, canvasSize, read, referenceHidden = false }) {
   const width = THUMBNAIL_WIDTH;
   const height = Math.max(1, Math.round(width * (canvasSize.height / canvasSize.width)));
   const canvas = document.createElement('canvas');
@@ -25,6 +32,16 @@ export async function renderThumbnail({ layers, frame, canvasSize, read }) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
   ctx.imageSmoothingQuality = 'high';
+
+  if (frame.image?.blobRef && !referenceHidden) {
+    const blob = await read(frame.image.blobRef);
+    if (blob) {
+      const image = await createImageBitmap(blob);
+      const placement = sanitizePlacement(frame.image, image.width, image.height, canvasSize.width, canvasSize.height);
+      drawReference(ctx, image, placement, { unit: width / canvasSize.width });
+      image.close?.();
+    }
+  }
 
   // One layer decoded at a time, closed straight after drawing, so a
   // full-size bitmap per layer is never held at once.

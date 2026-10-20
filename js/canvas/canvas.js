@@ -18,6 +18,10 @@
 // layer (so a color layer fills up to line art on another layer) but
 // writes only the active one. Smudge reads and writes the active layer.
 //
+// The reference image (step 3a) sits under the layers in its own
+// element (reference.js). In adjust mode, touches move it instead of
+// drawing (see "adjust mode" below); main.js decides what it shows.
+//
 // It doesn't know about storage: main.js hands it decoded images via
 // loadFrame(), and saves via onChange() + exportPNG(layerId) (see the
 // API at the bottom).
@@ -53,6 +57,8 @@ import {
   THREE_FINGER_JOIN_MAX_MOVEMENT_PX,
 } from './gestures.js';
 import { rectAroundPoint, unionRect, clampRect } from './region.js';
+import { createReferenceView } from './reference.js';
+import { dragPlacement, pinchPlacement } from './transform.js';
 
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
@@ -150,6 +156,11 @@ export function initCanvas(container, options = {}) {
   // is what transforms now, so it's pinned here.
   stack.style.transformOrigin = '0 0';
   container.appendChild(stack);
+
+  // The reference image (step 3a): under every layer, its own element
+  // (reference.js). main.js tells it what to show; adjust mode (below)
+  // moves it.
+  const reference = createReferenceView(stack, width, height);
 
   // Layer surfaces, by layer id: { canvas, ctx, visible, opacity }.
   // `order` is bottom-to-top, matching the DOM order inside the stack.
@@ -386,6 +397,7 @@ export function initCanvas(container, options = {}) {
     const fit = Math.min(container.clientWidth / width, container.clientHeight / height);
     stack.style.width = `${width * fit}px`;
     stack.style.height = `${height * fit}px`;
+    reference.setDisplayWidth(width * fit);
   }
 
   function captureNaturalRect() {
@@ -614,20 +626,23 @@ export function initCanvas(container, options = {}) {
   // another layer and the eyedropper picks what's on screen. Hidden
   // layers don't count. Returns ImageData for `rect` (default: the
   // whole canvas), unpremultiplied, transparent where nothing's drawn.
-  // Step 3's reference image gets added here, once, for both tools;
-  // step 4's onion skin must NOT be (ghost frames aren't her drawing).
-  // When the active layer is the only visible one at full opacity,
+  // The reference image (3a) is included, under the layers, when it's
+  // showing — she traces and fills up to it, and picks its colors.
+  // Step 4's onion skin must NOT be (ghost frames aren't her drawing).
+  // When the active layer is the only thing visible, at full opacity,
   // that's just its own pixels — no composite needed.
   function readVisible(rect = { x: 0, y: 0, w: width, h: height }) {
     const { x, y, w, h } = rect;
     const visible = order.map((id) => surfaces.get(id)).filter((s) => s.visible);
-    if (visible.length === 1 && visible[0].ctx === ctx && visible[0].opacity === 1) {
+    const withReference = reference.isShowing();
+    if (!withReference && visible.length === 1 && visible[0].ctx === ctx && visible[0].opacity === 1) {
       return ctx.getImageData(x, y, w, h);
     }
     const temp = document.createElement('canvas');
     temp.width = w;
     temp.height = h;
     const tctx = temp.getContext('2d');
+    if (withReference) reference.drawInto(tctx, x, y);
     for (const surface of visible) {
       tctx.globalAlpha = surface.opacity;
       tctx.drawImage(surface.canvas, x, y, w, h, 0, 0, w, h);
@@ -851,7 +866,8 @@ export function initCanvas(container, options = {}) {
   }
 
   function isBusy() {
-    return activePointerId !== null || pendingTouch !== null || gesture !== null;
+    return activePointerId !== null || pendingTouch !== null || gesture !== null
+      || adjustPointers.size > 0;
   }
 
   function hasPaint(data) {
@@ -859,8 +875,115 @@ export function initCanvas(container, options = {}) {
     return false;
   }
 
+  // --- adjust mode (step 3a): touches move the reference image ---
+  //
+  // While main.js has adjust mode on, no tool or view gesture runs: one
+  // pointer (finger, pen or mouse) drags the image, two fingers move,
+  // scale and turn it (pinchPlacement), a third is ignored. The view
+  // stays put — except a two-finger double-tap, which still resets it
+  // so she can always get her bearings back. Points are converted to
+  // canvas space (toCanvasPoint), so the view's zoom and rotation don't
+  // change how far the image moves under her finger. Every time a
+  // finger joins or lifts, the motion restarts from where the image is,
+  // so nothing jumps.
+  let adjusting = false;
+  // pointerId -> { canvas: point, local: point }
+  const adjustPointers = new Map();
+  // The motion in progress: { kind: 'drag' | 'pinch', start (placement),
+  //   from, a0, b0, ids, lastAngle, turned, startTime, movement }
+  let adjustMotion = null;
+
+  function restartAdjustMotion(now) {
+    const start = reference.placement();
+    const ids = [...adjustPointers.keys()];
+    if (!start || ids.length === 0) {
+      adjustMotion = null;
+      return;
+    }
+    if (ids.length === 1) {
+      adjustMotion = { kind: 'drag', start, from: adjustPointers.get(ids[0]).canvas, ids };
+      return;
+    }
+    const a0 = adjustPointers.get(ids[0]).canvas;
+    const b0 = adjustPointers.get(ids[1]).canvas;
+    adjustMotion = {
+      kind: 'pinch', start, a0, b0, ids,
+      lastAngle: angleBetween(a0, b0),
+      turned: 0,
+      startTime: now,
+      movement: 0,
+    };
+  }
+
+  function adjustDown(event) {
+    if (!reference.key() || adjustPointers.size >= 2) return;
+    container.setPointerCapture(event.pointerId);
+    adjustPointers.set(event.pointerId, { canvas: toCanvasPoint(event), local: toLocalPoint(event) });
+    restartAdjustMotion(event.timeStamp);
+  }
+
+  function adjustMove(event) {
+    const pointer = adjustPointers.get(event.pointerId);
+    if (!pointer || !adjustMotion) return;
+    const local = toLocalPoint(event);
+    pointer.canvas = toCanvasPoint(event);
+    const m = adjustMotion;
+    if (m.kind === 'drag') {
+      reference.setPlacement(dragPlacement(m.start, m.from, pointer.canvas));
+      return;
+    }
+    m.movement += distance(local, pointer.local);
+    pointer.local = local;
+    const a1 = adjustPointers.get(m.ids[0]).canvas;
+    const b1 = adjustPointers.get(m.ids[1]).canvas;
+    const angle = angleBetween(a1, b1);
+    m.turned += shortestAngleDelta(m.lastAngle, angle);
+    m.lastAngle = angle;
+    const image = reference.size();
+    const size = { imageW: image.width, imageH: image.height, canvasW: width, canvasH: height };
+    reference.setPlacement(pinchPlacement(m.start, { a0: m.a0, b0: m.b0, a1, b1, turned: m.turned }, size));
+  }
+
+  function adjustUp(event) {
+    if (!adjustPointers.has(event.pointerId)) return;
+    if (container.hasPointerCapture?.(event.pointerId)) container.releasePointerCapture(event.pointerId);
+    const m = adjustMotion;
+    adjustPointers.delete(event.pointerId);
+    if (event.type === 'pointercancel' && m) {
+      // The system took over: undo this motion, nothing more.
+      reference.setPlacement(m.start);
+    } else if (m?.kind === 'pinch') {
+      if (isQuickTap(event.timeStamp - m.startTime, m.movement)) {
+        // A two-finger tap shouldn't nudge the image; two in a row
+        // reset the view, as everywhere else.
+        reference.setPlacement(m.start);
+        if (isDoubleTap(lastTwoFingerTapTime, event.timeStamp)) {
+          lastTwoFingerTapTime = null;
+          resetViewport();
+        } else {
+          lastTwoFingerTapTime = event.timeStamp;
+        }
+      } else {
+        lastTwoFingerTapTime = null;
+      }
+    }
+    restartAdjustMotion(event.timeStamp);
+  }
+
+  function endAdjustTouches() {
+    for (const id of adjustPointers.keys()) {
+      if (container.hasPointerCapture?.(id)) container.releasePointerCapture(id);
+    }
+    adjustPointers.clear();
+    adjustMotion = null;
+  }
+
   function onPointerDown(event) {
     if (!ctx || inputBlocked) return; // no frame loaded yet, or busy
+    if (adjusting) {
+      adjustDown(event);
+      return;
+    }
     if (event.pointerType === 'touch') {
       if (gesture) {
         // A third finger landing right after a two-finger gesture
@@ -1005,6 +1128,10 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerMove(event) {
+    if (adjusting) {
+      adjustMove(event);
+      return;
+    }
     if (gesture && gesture.pointerIds.includes(event.pointerId)) {
       const local = toLocalPoint(event);
       const prev = gesture.points.get(event.pointerId);
@@ -1085,6 +1212,10 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerUp(event) {
+    if (adjusting) {
+      adjustUp(event);
+      return;
+    }
     if (gesture && gesture.pointerIds.includes(event.pointerId)) {
       // Ending either finger ends the gesture entirely — drawing
       // doesn't resume with whichever pointer is still down, to avoid
@@ -1183,6 +1314,7 @@ export function initCanvas(container, options = {}) {
   // honored.
   container.addEventListener('pointerleave', (event) => {
     const isTracked = event.pointerId === activePointerId
+      || adjustPointers.has(event.pointerId)
       || (pendingTouch && event.pointerId === pendingTouch.pointerId)
       || (gesture && gesture.pointerIds.includes(event.pointerId));
     if (isTracked && !container.hasPointerCapture?.(event.pointerId)) {
@@ -1432,6 +1564,7 @@ export function initCanvas(container, options = {}) {
         surface.canvas.height = 0;
       }
       surfaces.clear();
+      reference.destroy();
       order = [];
       canvas = null;
       ctx = null;
@@ -1459,6 +1592,54 @@ export function initCanvas(container, options = {}) {
     onBlocked(listener) {
       blockedListeners.add(listener);
       return () => blockedListeners.delete(listener);
+    },
+
+    // --- reference image (step 3a) ---
+    //
+    // main.js owns which image a frame has; the canvas only shows it.
+
+    // Shows `image` (decoded; drawImage-able) keyed by `key` (its
+    // blobRef) at `placement` ({ x, y, scale, rotation, opacity }), or
+    // nothing for a null key. A key that's already showing keeps its
+    // pixels — pass image null then to change only the placement.
+    setReference(key, image, placement) {
+      reference.set(key, image, placement);
+    },
+    // The key showing now (null if none) — main.js skips decoding when
+    // the next frame shares it.
+    getReferenceKey() {
+      return reference.key();
+    },
+    // Its placement now, including adjust-mode moves (null if none).
+    getReferencePlacement() {
+      return reference.placement();
+    },
+    getReferenceSize() {
+      return reference.size();
+    },
+    setReferencePlacement(placement) {
+      reference.setPlacement(placement);
+    },
+    // Hide images (project-wide): off screen and out of readVisible.
+    setReferenceHidden(hidden) {
+      reference.setHidden(hidden);
+    },
+
+    // Adjust mode on/off: touches move the reference instead of
+    // drawing or moving the view (see adjust mode above). Refused
+    // (false) while a stroke or gesture is in progress.
+    setAdjusting(next) {
+      const on = next === true;
+      if (on === adjusting) return true;
+      if (on && isBusy()) return false;
+      endAdjustTouches();
+      adjusting = on;
+      lastTwoFingerTapTime = null;
+      stack.classList.toggle('is-adjusting', on);
+      return true;
+    },
+    isAdjusting() {
+      return adjusting;
     },
 
     // Developer tool (memory stress test): fills a whole layer with

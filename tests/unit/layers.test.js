@@ -200,3 +200,18 @@ test('a copied layer\'s name stays within MAX_LAYER_NAME, however often it is co
   }
   assert.equal(L.copyLayerRecord(layer('a', 'Lines'), []).layer.name, 'Lines copy');
 });
+
+test('an image shared by several frames is copied once and stays shared (3a)', () => {
+  const project = sampleProject();
+  const frames = sampleFrames().map((f) => ({ ...f, image: { blobRef: 'img1', x: 1, y: 2, scale: 1, rotation: 0, opacity: 0.5 } }));
+  const ids = L.referencedBlobIds(project, frames);
+  assert.ok(ids.has('img1'), 'the sweep keeps a shared image');
+  const copy = L.copyProjectRecords(project, frames, { name: 'x' });
+  const imagePairs = copy.pairs.filter(([from]) => from === 'img1');
+  assert.equal(imagePairs.length, 1, 'stored once in the copy too');
+  const [, to] = imagePairs[0];
+  for (const f of copy.frames) {
+    assert.equal(f.image.blobRef, to);
+    assert.equal(f.image.opacity, 0.5, 'placement kept');
+  }
+});
