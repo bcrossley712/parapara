@@ -83,21 +83,17 @@ icon, manifest `name`/`short_name`, and repo copy.
 
 ## Current state
 
-- **Steps 1 and 2a–2d: done and confirmed on the iPad** — drawing
+- **Steps 1 and 2a–2e: done and confirmed on the iPad** — drawing
   engine, saving, undo/redo, shared layers + bare-bones frame strip,
-  project gallery. How each works is under Architecture; she mostly
-  undoes with the buttons, not gestures.
-- **2e (before step 3), in two passes:**
-  - **Pass 1 — copying: done and confirmed on the iPad.** How it works
-    is under Architecture (Copying).
-  - **Pass 2 — color: built and tested, not yet on the iPad.** How it
-    works is under Architecture (Colors). The picker layout is a first
-    try — adjust if she wants it different.
-- **Top-bar blur (iPadOS 26 scroll edge effect): second attempt built,
-  not yet confirmed on the iPad** (the first didn't fix it) — switch
-  screens a few times; the top bar should stay sharp. If not, next try
-  is nudging iPadOS to re-check after a switch ([details](docs/DESIGN_NOTES.md#pwa-layout-and-updates)).
-  Then step 3.
+  project gallery, and 2e's requests: copy frame/layer, duplicate
+  project, eyedropper, recent colors, palette, Clear layer, lock
+  blocking delete, and the iPadOS 26 top-bar blur fix. How each works
+  is under Architecture; she mostly undoes with the buttons, not
+  gestures. The color picker's layout is a first try — adjust if she
+  wants it different.
+- **Next: step 3** — image import + per-frame image transform +
+  mirroring. Start by asking her which mirroring she means, then scope
+  in detail.
 - **Build order after step 2:** 3 image import + per-frame image
   transform + **mirroring** (ask her which kind first — flip view,
   flip drawing, or symmetry; [details](docs/DESIGN_NOTES.md#planned-features)) · 4 playback, onion skin, full frame strip (reorder,
@@ -512,7 +508,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 **Run tests before handing off any change; add tests for new logic.**
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
-  `npm run test:e2e` (~30 s), or `npm test`.
+  `npm run test:e2e` (~1.3 min), or `npm test`.
 - **In a Claude sandbox:** Chromium is preinstalled — run
   `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
@@ -552,4 +548,5 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 - **Device-only (say so at handoff):** iOS storage eviction, stylus
   feel, iPadOS gesture conflicts, Safari-only rendering, iOS
   suspend/relaunch behavior, gallery touch scrolling, canvas memory
-  release between projects.
+  release between projects, the iPadOS 26 top-edge blur (desktop
+  Chromium never draws it), long-press feel.

@@ -50,6 +50,15 @@ Sections: [Process lessons](#process-lessons) ·
   settings panel's version line was made `nowrap` after a screenshot
   looked fine; the iPad's system font is wider, and it clipped.
   Layouts must tolerate wider text rather than be tuned to one render.
+- **Device-only visual bugs: get real screenshots, and the pattern,
+  before fixing (2e).** Camera photos of the top-bar blur were
+  unreadable — the exposure shifted between shots, so even identical
+  colors looked different. Screenshots (top button + Home) showed it
+  at once. The first fix was then built on a guess about the trigger
+  and failed; asking *when* it starts ("never at launch, after any
+  screen switch, either direction") is what pointed to the real cause.
+  Ask both questions before proposing a fix that only the iPad can
+  test — each wrong attempt costs a push and a test.
 - **Model choice:** step 2 (dense, interdependent state) moved to an
   Opus-class model. Early payoff: it found the stale service-worker
   pre-cache bug behind the viewport issue, and the shared-origin cache
@@ -322,17 +331,18 @@ Sections: [Process lessons](#process-lessons) ·
     leaving the editor (torn down before the gallery loaded) was the
     trigger. Fixed that gap and made `#app` fixed and dark anyway, but
     gallery → editor never had a gap and still blurred.
-  - **Attempt 2 (current):** every screen had its own fixed shell, and
-    a switch deletes it. The guess is that iPadOS latches onto the
-    first qualifying fixed box and doesn't find a replacement. Now
-    `#app` (created once in `index.html`) is the only fixed box and the
-    shells inside are absolute, so the box iPadOS found at launch lives
-    as long as the app.
-  - **If it still blurs:** make iPadOS re-check after each switch (e.g.
-    nudge the page a pixel and back). Also note the custom dialog's
-    backdrop is fixed, full-screen and semi-transparent — while a
-    dialog is open, the top edge doesn't qualify; suspect it if the
-    blur turns out to start after a dialog.
+  - **Attempt 2 — the fix, confirmed on the iPad:** every screen had
+    its own fixed shell, and a switch deletes it. iPadOS appears to
+    latch onto the first qualifying fixed box and not find a
+    replacement. Now `#app` (created once in `index.html`) is the only
+    fixed box and the shells inside are absolute, so the box iPadOS
+    found at launch lives as long as the app.
+  - **If it ever comes back:** first check nothing new replaced or
+    covered `#app` at the top edge. Then try making iPadOS re-check
+    after a switch (e.g. nudge the page a pixel and back). The custom
+    dialog's backdrop is fixed, full-screen and semi-transparent —
+    while a dialog is open the top edge doesn't qualify; suspect it if
+    the blur starts after a dialog.
   - Only the iPad shows the effect; the e2e test guards the conditions
     above. Sources:
     [discpress #24](https://github.com/PowerBeef/discpress/pull/24),
