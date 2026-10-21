@@ -103,84 +103,27 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Now: step 4** — playback, onion skin, full frame strip (reorder,
   delete, a picture thumbnail on each tile that keeps its number).
   This is when she first sees her animation move, so nothing new goes
-  ahead of it without a deliberate decision. **Split, memory first;
-  each part confirmed on the iPad before the next:**
-  - **4a: done and confirmed on the iPad.** **Next: 4b** — playback
-    + transport (play, skip, fps, loop toggle), from the decisions
-    below. Then **4c** onion skin, **4d** reorder + delete.
-  - **4a-i: measured on the iPad** (dev tests in the gear menu,
-    `timeline/dev-stress.js`; synthetic frames denser than real line
-    art, ~1.2 MB PNG at 1080p, so a conservative case). Results
-    ([details](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
-    160 full-size frames (1.27 GB) held even with 8 layers, never
-    failing — memory isn't the limit. Full-size decode 28 ms: 12/24
-    fps show every frame, 30 drops 2%, 60 collapses. Flattening costs
-    ~120 ms at 4 layers, ~200 ms at 8 (decode + encode).
-  - **4a-ii: built and confirmed.** `renderFrame`
-    (`canvas/render-frame.js`), the flattened-frame cache
-    (`timeline/frame-cache.js`) and tile pictures
-    (`canvas/frame-tiles.js`). Tiles take the canvas's shape (~85×48
-    for 16:9), the number moves to a corner badge, the current tile gets
-    an accent ring; before a frame's picture is ready it shows the
-    number alone. On the iPad: drawing feels unchanged while tiles
-    rebuild; tiles fill in at ~8–10 frames a second on open; she's
-    happy with how they look. Also fixed: undo/redo of a stroke on
-    frame 1 now redraws the gallery thumbnail. The 4a-i dev tests stay
-    in the gear menu (rerun after 4b with real drawings).
-  - **Decided:**
-    - **Cache:** each frame flattened at **full size** and encoded as
-      **PNG**, held in memory only, rebuilt in the background after a
-      project opens; playback decodes a small ring just ahead of the
-      playhead, so memory doesn't grow with length. Never every frame
-      decoded at once. Half size would play faster but looks soft at
-      her canvas's on-screen size (~1,900 device px wide).
-      **Revisit saving it to IndexedDB after 4b:** a full rebuild is
-      ~6–10 s for 48 frames, and every open pays it. Likely worth it
-      once her animations get long (a new derived blob kind: the sweep
-      and duplicate project must handle it, like the thumbnail).
-    - **One `renderFrame`** (generalized from `canvas/thumbnail.js`)
-      for the gallery thumbnail, tiles, cache, onion skin and step 6
-      export. **The cache holds layers only, transparent, no
-      reference image:** playback draws white, then the frame's
-      reference (decoded once per blob), then the cached layers — so
-      Hide images and image edits never invalidate it, and export's
-      "include images?" is a flag.
-    - **Invalidation:** each entry records a *layer signature*
-      (visible layers' ids + opacity, in order) and the frame's
-      *content version* (bumped by a commit, undo/redo, Clear or
-      copy on that frame). A signature change marks every entry stale
-      at O(1) — dragging opacity only bumps it. Rebuild runs in the
-      background ~300 ms after changes settle, nearest the current
-      frame first (the open frame, then its neighbors), one frame at
-      a time, only while she isn't mid-stroke or mid-change; a result
-      that went stale while building is thrown away. Stale tiles stay
-      until replaced (no blank flicker). The open frame flattens from
-      the live canvases, so unsaved strokes count. **Play before the
-      rebuild finishes** (4b): a short "Getting ready" progress, then
-      it plays — at ~5–8 frames/s a rebuild can't stay ahead of
-      playback, so no starting early.
-    - **Clock** (`timeline/clock.js`, built in 4a-i): one rAF loop
-      asks a clock for elapsed time; `frameAtTime` picks the frame;
-      late frames are dropped, never slowed. Step 5 swaps in the audio
-      clock (`AudioContext.currentTime` + output latency) without
-      touching the loop. **When decoding falls behind, skip ahead:**
-      drop late decodes, aim at where the playhead will be, keep the
-      last good frame up (4a-i's 60 fps run showed 2 of 240 frames by
-      chasing late ones). Flipaclip does the same with audio.
+  ahead of it without a deliberate decision. Each part is confirmed on
+  the iPad before the next.
+  - **4a: done and confirmed on the iPad** — memory measured, shared
+    frame flattening, the frame cache, tile pictures. How it works is
+    under Architecture → Frame cache and playback; the measurements
+    are in [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
+    In short: memory isn't the limit, and full size plays up to 30 fps.
+  - **Next: 4b** — playback + transport (play, skip, fps, loop
+    toggle). Then **4c** onion skin, **4d** reorder + delete.
+  - **Decided for 4b–4d:**
     - **Playback:** loops by default, with a toggle to turn it off.
       Drawing is blocked while playing; a tap on the canvas stops it.
-      Undo/redo stop playback first, then act. Onion skin is hidden
-      while playing (confirm with her).
-    - **FPS:** she picks it in the transport, **1–30** (Flipaclip's
-      maximum, and full size plays 30 on her iPad); default 12.
+      Undo/redo stop playback first, then act. If the cache isn't
+      fully rebuilt, show a short "Getting ready" progress, then play —
+      never start early (a rebuild can't outrun playback).
+    - **FPS:** she picks it in the transport, **1–30**; default 12.
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
       `'frame-delete'` / `'frame-move'` undo types); the last frame
       can't be deleted.
     - **Saved per project:** fps, loop, onion on/off and its settings.
-    - Tile thumbnails **include the reference image** (unless Hide
-      images is on) — that's how she sees which frames have one; no
-      separate marker. Onion skin stays out of `readVisible`.
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
       optional `frame.hold` (missing = 1) read only by `frameAtTime`.
@@ -192,14 +135,20 @@ icon, manifest `name`/`short_name`, and repo copy.
     how many onion frames before/after, tint colors (previous vs.
     next), opacity, whether ghosts include their frame's photo (lean
     no — a ghosted photo is busy; the original plan said yes), and
-    whether she expects onion hidden during playback. The toggle and
-    its settings: a badge on the canvas (the plan).
+    whether she expects onion hidden during playback (planned: hidden).
+    The toggle and its settings: a badge on the canvas (the plan).
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
   under Open items.
 
 **Open items**
+- **Save the frame cache to IndexedDB? Decide after 4b.** Every
+  project open rebuilds it (~6–10 s for 48 frames). Saving it would
+  make opens instant but costs storage on her near-full iPad (roughly
+  0.5–1 MB per frame for real line art) and adds a derived blob kind
+  that the sweep and duplicate project must handle, like the
+  thumbnail. A trade-off, not a free win.
 - **Merge down** — deferred on purpose (needs opacity-aware
   compositing and a two-layer undo entry). Revisit after step 4.
 - **Fill sample toggle** (current layer vs all visible, as Sketchbook
@@ -463,6 +412,31 @@ Short rules; reasoning in the linked sections.
     `readVisible`, the thumbnail, and later export; Hide images drops
     it from all of them. Whether onion-skin ghosts include their
     frame's image is a step 4 question (the original plan said yes).
+- **Frame cache and playback (4a)**
+  ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
+  - **One `renderFrame`** (`canvas/render-frame.js`) flattens a frame
+    for the gallery thumbnail, tiles, the cache, and later onion skin
+    and export. Nothing else composites frames.
+  - **The cache** (`timeline/frame-cache.js`): each frame flattened at
+    **full size, layers only (transparent), as PNG, in memory only**.
+    Paper and the reference image are added when shown, so Hide images
+    and image edits never invalidate it. **Tiles show the frame's photo**
+    (unless Hide images is on) — that's how she sees which frames have
+    one; there's no separate marker. Playback decodes a small ring
+    just ahead of the playhead — never every frame at once.
+  - **Freshness:** an entry is stale when the *layer signature*
+    (visible layers' ids + opacity, in order) or the frame's *content
+    version* (bumped by commit, undo/redo, Clear, copy) changes. A
+    signature change marks every frame stale at once, cheaply.
+  - **Rebuild** runs in the background ~300 ms after changes settle,
+    nearest the current frame first, one frame at a time, never
+    mid-stroke; a result that went stale while building is dropped.
+    Stale tiles stay up until replaced. Rebuilt on every project open.
+  - **Clock** (`timeline/clock.js`): one animation loop asks a clock for
+    elapsed time; `frameAtTime` picks the frame. Late frames are
+    skipped, never slowed — aim at where the playhead will be, keep the
+    last good frame up. Step 5 swaps in the audio clock without
+    touching the loop.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
