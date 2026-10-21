@@ -44,6 +44,8 @@ const APP_SHELL = [
   './js/storage/colors.js',
   './js/timeline/frames.js',
   './js/timeline/frame-strip.js',
+  './js/timeline/clock.js',
+  './js/timeline/dev-stress.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

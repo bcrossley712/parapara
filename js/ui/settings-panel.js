@@ -13,7 +13,9 @@
 //   and Fill all layers — adds layers up to the cap and paints each
 //   one, to stress-test canvas memory on the iPad (undoable; editor
 //   only, the gallery's gear menu leaves it out). Clear moved to the
-//   layers panel in 2e.
+//   layers panel in 2e. Step 4a-i adds two playback measurements
+//   (timeline/dev-stress.js): Playback speed test and Frame memory
+//   test, editor only like Fill all layers.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -25,6 +27,8 @@ export function createSettingsPanel(actions) {
     applyUpdate,       // () => Promise<void>, reloads the page
     freshReload,       // () => Promise<void>, reloads the page
     fillAllLayers,     // () => void, optional (editor only)
+    playbackSpeedTest, // () => void, optional (editor only)
+    frameMemoryTest,   // () => void, optional (editor only)
   } = actions;
 
   const panel = document.createElement('div');
@@ -64,8 +68,20 @@ export function createSettingsPanel(actions) {
   fillHint.className = 'pp-settings__hint';
   fillHint.textContent = 'Memory test: adds layers up to the limit and paints each. Undoable.';
 
+  const speedBtn = makeButton('Playback speed test');
+  const speedHint = document.createElement('div');
+  speedHint.className = 'pp-settings__hint';
+  speedHint.textContent = 'Times flattening, decoding and playback on test frames. About a minute. Nothing is saved.';
+
+  const memoryBtn = makeButton('Frame memory test');
+  const memoryHint = document.createElement('div');
+  memoryHint.className = 'pp-settings__hint';
+  memoryHint.textContent = 'Holds more and more frames until the iPad says no. May reload the app; your drawing is saved first.';
+
   panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint);
   if (fillAllLayers) panel.append(fillBtn, fillHint);
+  if (playbackSpeedTest) panel.append(speedBtn, speedHint);
+  if (frameMemoryTest) panel.append(memoryBtn, memoryHint);
 
   let open = false;
   let busy = false;
@@ -116,6 +132,16 @@ export function createSettingsPanel(actions) {
 
   fillBtn.addEventListener('click', () => {
     fillAllLayers();
+    setOpen(false);
+  });
+
+  speedBtn.addEventListener('click', () => {
+    playbackSpeedTest();
+    setOpen(false);
+  });
+
+  memoryBtn.addEventListener('click', () => {
+    frameMemoryTest();
     setOpen(false);
   });
 

@@ -288,6 +288,8 @@ export function initUI(container, options = {}) {
       applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
       freshReload: appActions.freshReload ?? (async () => window.location.reload()),
       fillAllLayers: appActions.fillAllLayers ?? (() => {}),
+      playbackSpeedTest: appActions.playbackSpeedTest ?? (() => {}),
+      frameMemoryTest: appActions.frameMemoryTest ?? (() => {}),
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },
     signal,

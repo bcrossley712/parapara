@@ -15,6 +15,8 @@
 import { initUI, showUpdatePrompt, showNotice, showBanner } from './ui/ui.js';
 import { createGallery } from './ui/gallery.js';
 import { showConfirm } from './ui/confirm-dialog.js';
+// Developer only (step 4a-i), removed with the gear menu's Developer section.
+import { runPlaybackSpeedTest, runFrameMemoryTest, reportInterruptedMemoryTest } from './timeline/dev-stress.js';
 import {
   initStorage,
   loadLastProject,
@@ -172,6 +174,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => flushAll());
 
 launch();
+reportInterruptedMemoryTest(); // developer only, step 4a-i
 
 async function launch() {
   try {
@@ -441,7 +444,12 @@ function mountEditor(session, { canSave }) {
       toolSettings = canvasApi.getSettings();
       if (canSave) settingsSaver.schedule();
     },
-    appActions: { ...appActions, fillAllLayers: () => devFillAllLayers() },
+    appActions: {
+      ...appActions,
+      fillAllLayers: () => devFillAllLayers(),
+      playbackSpeedTest: () => devPlaybackSpeedTest(),
+      frameMemoryTest: () => devFrameMemoryTest(),
+    },
     onGallery: canSave ? () => close() : null,
     onUndo: () => undo(),
     onRedo: () => redo(),
@@ -1291,6 +1299,22 @@ function mountEditor(session, { canSave }) {
       project.layers.forEach((layer, i) => {
         canvasApi.devFillLayer(layer.id, DEV_FILL_COLORS[i % DEV_FILL_COLORS.length]);
       });
+    });
+  }
+
+  // Developer playback measurements (step 4a-i). Synthetic frames in
+  // memory only; the editor is blocked until the report is closed.
+  function devPlaybackSpeedTest() {
+    if (!canAct()) return;
+    exclusive(() => runPlaybackSpeedTest({ canvasSize: project.canvas }));
+  }
+
+  // May get the page killed by iOS, so her work is saved first.
+  function devFrameMemoryTest() {
+    if (!canAct()) return;
+    exclusive(async () => {
+      if (canSave) await flush();
+      await runFrameMemoryTest({ canvasSize: project.canvas, layerCount: project.layers.length });
     });
   }
 

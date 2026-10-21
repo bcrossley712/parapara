@@ -100,39 +100,82 @@ icon, manifest `name`/`short_name`, and repo copy.
   layer"), and does starting at 50% bother her when it's a background
   (→ remember her last opacity, or a choice on import)? Neither blocks
   step 4.
-- **Next: step 4** — playback, onion skin, full frame strip (reorder,
+- **Now: step 4** — playback, onion skin, full frame strip (reorder,
   delete, a picture thumbnail on each tile that keeps its number).
   This is when she first sees her animation move, so nothing new goes
-  ahead of it without a deliberate decision. Each step is confirmed on
-  the iPad before the next starts.
-  - **Decided already:** tile thumbnails **include the reference
-    image** (unless Hide images is on) — that's how she sees which
-    frames have one; there's no separate marker. Delete goes in the
-    frame menu (tap the current tile). Default 12 fps,
-    stored per project. Onion skin must stay out of `readVisible`.
-    Playback/onion skin want a flattened-frame cache, not every
-    frame's layers loaded ([why](docs/DESIGN_NOTES.md#layers-and-undo)).
-  - **Confirm at the start** (scope, with a check against her apps —
-    Flipaclip and Rough Animator especially):
-    - Onion skin: how many frames before/after, tint colors (her
-      apps tint previous/next differently), opacity — and whether
-      ghosts include their frame's reference image (the original plan
-      said yes).
-    - Where the onion toggle and its settings live (the plan: a badge
-      on the canvas) and the fps control (transport, per the plan).
-    - Playback: loop by default? Is drawing blocked while playing,
-      and does tapping the canvas stop it?
-    - Reorder: long-press-and-drag on tiles (Flipaclip's way) vs.
-      move left/right in the frame menu. Delete: no confirm since
-      it's undoable (new `'frame-delete'` / `'frame-move'` undo
-      types); the last frame can't be deleted.
-    - **What saves** (ask what her apps remember): onion on/off and
-      its settings, fps, playback loop — per project or app-wide.
-    - **Coupled features to decide in or out:** copy/paste a layer's
-      drawing between frames (under Open items — the usual
-      animation-app way, and it belongs to the frame strip);
-      thumbnails' memory cost on long animations; what undo does
-      while playing.
+  ahead of it without a deliberate decision. **Split, memory first;
+  each part confirmed on the iPad before the next:**
+  - **4a-i: built, awaiting iPad numbers.** Two dev tests in the gear
+    menu (`timeline/dev-stress.js`): *Playback speed test* (flatten,
+    encode and decode timings; real playback at 12/24/30/60 fps,
+    full and half size, decoding 6 frames ahead, counting drops) and
+    *Frame memory test* (holds full-size frames until Safari refuses
+    or iOS kills the page; an interrupted run is reported at the next
+    launch). Synthetic frames are denser than real line art (~1.3 MB
+    PNG at 1080p), so they're a conservative case. Results pick the
+    cache's format and resolution for 4a-ii.
+  - **4a-ii:** `renderFrame`, the flattened-frame cache and its
+    invalidation, tile thumbnails. **4b:** playback + transport.
+    **4c:** onion skin. **4d:** reorder + delete.
+  - **Decided:**
+    - **Cache:** each frame flattened and *encoded*, held in memory
+      only, rebuilt in the background after a project opens; playback
+      decodes a small ring just ahead of the playhead, so memory
+      doesn't grow with length. Never every frame decoded at once
+      ([why](docs/DESIGN_NOTES.md#layers-and-undo)). **Revisit
+      saving it to IndexedDB** after 4b, once a long animation has
+      been opened on the iPad — if the background rebuild is slow
+      enough to notice, persist it (a new derived blob kind: the
+      sweep and duplicate project must handle it, like the thumbnail).
+    - **One `renderFrame`** (generalized from `canvas/thumbnail.js`)
+      for the gallery thumbnail, tiles, cache, onion skin and step 6
+      export. **The cache holds layers only, transparent, no
+      reference image:** playback draws white, then the frame's
+      reference (decoded once per blob), then the cached layers — so
+      Hide images and image edits never invalidate it, and export's
+      "include images?" is a flag.
+    - **Invalidation:** each entry records a *layer signature*
+      (visible layers' ids + opacity, in order) and the frame's
+      *content version* (bumped by a commit, undo/redo, Clear or
+      copy on that frame). A signature change marks every entry stale
+      at O(1) — dragging opacity only bumps it. Rebuild is lazy:
+      onion neighbors first (~300 ms after the slider settles), tiles
+      in idle time, the rest on play. Stale tiles stay until replaced
+      (no blank flicker). The open frame re-flattens from the live
+      canvases on commit.
+    - **Clock** (`timeline/clock.js`, built in 4a-i): one rAF loop
+      asks a clock for elapsed time; `frameAtTime` picks the frame;
+      late frames are dropped, never slowed. Step 5 swaps in the audio
+      clock (`AudioContext.currentTime` + output latency) without
+      touching the loop.
+    - **Playback:** loops by default, with a toggle to turn it off.
+      Drawing is blocked while playing; a tap on the canvas stops it.
+      Undo/redo stop playback first, then act. Onion skin is hidden
+      while playing (confirm with her).
+    - **FPS:** she picks it in the transport, 1–60 (her apps go well
+      past 24); default 12.
+    - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
+      **Delete** in the frame menu, no confirm (undoable; new
+      `'frame-delete'` / `'frame-move'` undo types); the last frame
+      can't be deleted.
+    - **Saved per project:** fps, loop, onion on/off and its settings.
+    - Tile thumbnails **include the reference image** (unless Hide
+      images is on), ~160 px wide — that's how she sees which frames
+      have one; no separate marker. Onion skin stays out of
+      `readVisible`.
+    - **Frame holds** (a drawing lasting several beats, Rough
+      Animator) are out unless she asks; adding them later is an
+      optional `frame.hold` (missing = 1) read only by `frameAtTime`.
+    - **Coupled features:** copy/paste a layer's drawing between
+      frames goes with 4d if she wants it. Showing the cached frame
+      instantly on a frame switch, and a scrubber, stay out unless she
+      misses them.
+  - **Ask her before 4c** (check against Flipaclip/Rough Animator):
+    how many onion frames before/after, tint colors (previous vs.
+    next), opacity, whether ghosts include their frame's photo (lean
+    no — a ghosted photo is busy; the original plan said yes), and
+    whether she expects onion hidden during playback. The toggle and
+    its settings: a badge on the canvas (the plan).
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -563,6 +606,10 @@ Each is here because breaking it caused (or would cause) a real bug.
                           reference image across frames (3b)
         frame-strip.js    frame strip + frame menu (UI only; intents
                           via callbacks)
+        clock.js          pure elapsed time → frame (beatAtTime,
+                          frameAtTime); playback's clock math (4a-i)
+        dev-stress.js     DEV ONLY: playback speed + frame memory tests
+                          (4a-i)
         timeline.js       placeholder: playback, onion skin (step 4)
       export/ audio/      placeholders for later steps
     icons/                app icon set
@@ -579,7 +626,9 @@ debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
 
 **Dev-only, remove before calling the app done:** the gear menu's
 Developer section (Fresh reload, and from 2c a fill-all-layers
-memory stress test).
+memory stress test; from 4a-i the Playback speed and Frame memory
+tests — `timeline/dev-stress.js`, its import and launch call in
+`main.js`, its `sw.js` entry and its `.pp-dev-report` CSS).
 
 ## Schema
 
@@ -589,7 +638,9 @@ bitmap. Planned fields are marked. Extend additively.
     project = {
       id, name, createdAt, updatedAt,
       canvas: { width: 1920, height: 1080 },
-      fps: 12,
+      fps: 12,                                // 4b: she picks 1–60 in the transport
+      loop: true,                             // planned (4b); missing = true
+      onionSkin: { ... },                     // planned (4c): on/off + settings, shape decided then
       layers: [                               // index 0 = bottom; shared by all frames
         { id, name, visible: true, opacity: 1, locked: false },
       ],
