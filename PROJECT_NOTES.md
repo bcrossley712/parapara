@@ -85,32 +85,54 @@ icon, manifest `name`/`short_name`, and repo copy.
 
 ## Current state
 
-- **Steps 1, 2a–2e and 3a: done and confirmed on the iPad** — drawing
-  engine, saving, undo/redo, shared layers + bare-bones frame strip,
-  project gallery, 2e's requests (copy frame/layer, duplicate project,
-  eyedropper, recent colors, palette, Clear layer, lock blocks delete),
-  and the reference image (3a). How each works is under Architecture;
-  she mostly undoes with the buttons, not gestures. The color picker's
-  layout is a first try — adjust if she wants it different.
-- **Step 3b (reference across frames): built and tested, not yet
-  confirmed on the iPad.** Use on all frames, new frames inheriting a
-  shared photo, Flip ↔ / ↕ (details under Architecture → Reference
-  image). Check on the iPad: the adjust bar's fit in landscape and how
-  flipping feels mid-adjust, plus 3a's leftovers — the top-bar
-  **Image** button, a HEIC photo from Photos, memory with a large
-  photo, stylus feel when adjusting, and the adjust outline's
-  thickness when zoomed in.
-- **Ask her after she tries 3b** ([why](docs/DESIGN_NOTES.md#reference-image)):
+- **Steps 1, 2a–2e, 3a and 3b: done and confirmed on the iPad** —
+  drawing engine, saving, undo/redo, shared layers + bare-bones frame
+  strip, project gallery, 2e's requests (copy frame/layer, duplicate
+  project, eyedropper, recent colors, palette, Clear layer, lock
+  blocks delete), the reference image (3a: Image button, HEIC from
+  Photos, large photos, adjusting by stylus all checked) and reference
+  across frames (3b: Use on all frames, new frames inheriting, Flip ↔ /
+  ↕). How each works is under Architecture; she mostly undoes with the
+  buttons, not gestures. The color picker's layout is a first try —
+  adjust if she wants it different.
+- **Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
   does she want to draw/erase on the photo itself (→ "Make into
   layer"), and does starting at 50% bother her when it's a background
-  (→ remember her last opacity, or a choice on import)?
+  (→ remember her last opacity, or a choice on import)? Neither blocks
+  step 4.
 - **Next: step 4** — playback, onion skin, full frame strip (reorder,
-  delete, a picture thumbnail on each tile that keeps its number; the
-  thumbnail **includes the reference image** unless Hide images is on,
-  which is how she sees which frames have one — there's no separate
-  marker). This is when she first sees her animation move, so nothing
-  new goes ahead of it without a deliberate decision. Each step is
-  confirmed on the iPad before the next starts.
+  delete, a picture thumbnail on each tile that keeps its number).
+  This is when she first sees her animation move, so nothing new goes
+  ahead of it without a deliberate decision. Each step is confirmed on
+  the iPad before the next starts.
+  - **Decided already:** tile thumbnails **include the reference
+    image** (unless Hide images is on) — that's how she sees which
+    frames have one; there's no separate marker. Delete goes in the
+    frame menu (tap the current tile). Default 12 fps,
+    stored per project. Onion skin must stay out of `readVisible`.
+    Playback/onion skin want a flattened-frame cache, not every
+    frame's layers loaded ([why](docs/DESIGN_NOTES.md#layers-and-undo)).
+  - **Confirm at the start** (scope, with a check against her apps —
+    Flipaclip and Rough Animator especially):
+    - Onion skin: how many frames before/after, tint colors (her
+      apps tint previous/next differently), opacity — and whether
+      ghosts include their frame's reference image (the original plan
+      said yes).
+    - Where the onion toggle and its settings live (the plan: a badge
+      on the canvas) and the fps control (transport, per the plan).
+    - Playback: loop by default? Is drawing blocked while playing,
+      and does tapping the canvas stop it?
+    - Reorder: long-press-and-drag on tiles (Flipaclip's way) vs.
+      move left/right in the frame menu. Delete: no confirm since
+      it's undoable (new `'frame-delete'` / `'frame-move'` undo
+      types); the last frame can't be deleted.
+    - **What saves** (ask what her apps remember): onion on/off and
+      its settings, fps, playback loop — per project or app-wide.
+    - **Coupled features to decide in or out:** copy/paste a layer's
+      drawing between frames (under Open items — the usual
+      animation-app way, and it belongs to the frame strip);
+      thumbnails' memory cost on long animations; what undo does
+      while playing.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -163,7 +185,7 @@ icon, manifest `name`/`short_name`, and repo copy.
   items stay fixed. Saved app-wide.
   ([details](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred))
 - **"Make into layer"** (bake the reference image into a new layer) —
-  only if she wants to draw/erase on the photo itself (ask after 3b).
+  only if she wants to draw/erase on the photo itself (see "Ask her").
   This is additive, not a rewrite.
 
 **Planned UI layout** (from wireframes): tool rail down the left;
@@ -464,6 +486,10 @@ Each is here because breaking it caused (or would cause) a real bug.
   iPadOS 26 blurs the top of the app until relaunch.
   ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
 - Text inputs ≥ 16px font.
+- **No arrow or symbol characters as icons in labels** (↔, ↕, ✓, ★ …)
+  — iOS may draw them as color emoji (↕ did, in 3b's flip button),
+  and desktop Chromium won't show it. Use inline SVG with
+  `currentColor`.
 - Layouts must tolerate wider text than desktop Chromium shows — no
   `nowrap` on content that could grow.
 - **Names she types wrap but clamp at two lines** (layer rows, gallery

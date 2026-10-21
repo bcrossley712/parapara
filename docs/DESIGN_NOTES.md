@@ -529,6 +529,11 @@ Sections: [Process lessons](#process-lessons) ·
     silently reset her placement. It flips as seen on screen, even
     when the image is rotated: mirroring across a canvas axis equals
     mirroring across the image's own axis with the rotation negated.
+  - **Flip arrows are SVG.** The first build used ↔ / ↕ as text. On
+    the iPad, iOS drew ↕ as a blue emoji next to a plain ↔. Desktop
+    Chromium showed both as text, so tests never caught it. Now both
+    are one SVG arrow, the vertical one rotated (rule in
+    PROJECT_NOTES "Layout").
   - **No frame-strip marker.** The wireframe had one, but her apps
     don't badge frames. In Flipaclip and Procreate's Animation Assist
     the photo is part of the frame, so the thumbnail shows it. Step 4's

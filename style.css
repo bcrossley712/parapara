@@ -224,6 +224,20 @@ html, body {
   text-align: center;
 }
 
+/* Text plus an SVG icon (the flip arrows), kept on one line when it
+   fits and centered together; wraps rather than overflow. */
+.pp-reference-bar__btn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pp-reference-bar__arrow {
+  flex-shrink: 0;
+}
+
 .pp-reference-bar__delete {
   margin-top: auto;
   color: #ff8a7a;

@@ -39,10 +39,13 @@ export function createReferenceBar(callbacks) {
     callbacks.onOpacityInput(value);
   });
 
-  const flipH = button('Flip ↔', () => callbacks.onFlip('horizontal'));
+  // The arrows are SVG, not ↔/↕ text: iOS draws ↕ as a blue emoji.
+  const flipH = button('Flip', () => callbacks.onFlip('horizontal'));
   flipH.setAttribute('aria-label', 'Flip horizontally');
-  const flipV = button('Flip ↕', () => callbacks.onFlip('vertical'));
+  flipH.insertAdjacentHTML('beforeend', flipArrow(0));
+  const flipV = button('Flip', () => callbacks.onFlip('vertical'));
   flipV.setAttribute('aria-label', 'Flip vertically');
+  flipV.insertAdjacentHTML('beforeend', flipArrow(90));
 
   const replaceBtn = button('Replace', () => callbacks.onReplace());
   const deleteBtn = button('Delete', () => callbacks.onDelete());
@@ -57,7 +60,7 @@ export function createReferenceBar(callbacks) {
   function button(label, onClick) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'pp-tool-btn';
+    btn.className = 'pp-tool-btn pp-reference-bar__btn';
     btn.textContent = label;
     btn.addEventListener('click', onClick);
     return btn;
@@ -74,4 +77,16 @@ export function createReferenceBar(callbacks) {
       showOpacity(value);
     },
   };
+}
+
+// A double-headed arrow (left↔right), turned `degrees` for the
+// vertical one, so both are the same drawing.
+function flipArrow(degrees) {
+  return `
+<svg class="pp-reference-bar__arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+  <g transform="rotate(${degrees} 8 8)" fill="none" stroke="currentColor" stroke-width="1.8"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 8h12M5 5 2 8l3 3M11 5l3 3-3 3"/>
+  </g>
+</svg>`;
 }
