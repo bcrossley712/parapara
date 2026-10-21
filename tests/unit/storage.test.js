@@ -32,6 +32,7 @@ test('createProject makes a project with one frame and one blank layer', async (
   assert.equal(project.name, 'Untitled');
   assert.deepEqual(project.canvas, { width: 1920, height: 1080 });
   assert.equal(project.fps, 12);
+  assert.equal(project.loop, true);
   assert.deepEqual(project.audioClips, []);
 
   assert.equal(frames.length, 1);

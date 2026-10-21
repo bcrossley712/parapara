@@ -237,6 +237,8 @@ export function initCanvas(container, options = {}) {
       // append() moves an existing child, so this also re-orders.
       stack.appendChild(surface.canvas);
     }
+    // The playback picture (4b) stays above every layer.
+    if (playbackCanvas) stack.appendChild(playbackCanvas);
 
     if (activeLayerId === null) {
       const top = order[order.length - 1];
@@ -259,6 +261,41 @@ export function initCanvas(container, options = {}) {
   // While true (main.js sets it during async layer/frame work), new
   // touches are ignored entirely.
   let inputBlocked = false;
+
+  // --- playback (4b) ---
+  //
+  // While the animation plays (or gets ready to), a touch on the canvas
+  // area stops it and does nothing else: no stroke, fill, pick or
+  // gesture. That touch — and any finger that joins it — stays
+  // swallowed until every finger is up, even though playback has
+  // stopped by then, so the tap that stops it never starts drawing.
+  let playbackInput = false;
+  const swallowed = new Set(); // pointer ids
+  const playbackTapListeners = new Set();
+  // The playing picture: one full-size canvas above the layers, inside
+  // the wrapper so it gets the same view transform. Only exists while
+  // shown (it's ~8 MB at 1920×1080).
+  let playbackCanvas = null;
+
+  function swallow(event) {
+    swallowed.add(event.pointerId);
+    try {
+      container.setPointerCapture(event.pointerId);
+    } catch {
+      // not capturable (already gone) — pointerleave covers it
+    }
+    if (playbackInput) {
+      for (const listener of playbackTapListeners) listener();
+    }
+  }
+
+  function freePlaybackCanvas() {
+    if (!playbackCanvas) return;
+    playbackCanvas.remove();
+    playbackCanvas.width = 0;
+    playbackCanvas.height = 0;
+    playbackCanvas = null;
+  }
 
   // Set at the start of a stroke on a layer that can't be painted: the
   // stroke still runs (so a second finger can still turn it into a
@@ -979,6 +1016,16 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerDown(event) {
+    if (playbackInput || swallowed.size > 0) {
+      // A primary pointer means no other finger is down, so anything
+      // still listed lost its pointerup somewhere: start fresh.
+      if (!playbackInput && event.isPrimary) {
+        swallowed.clear();
+      } else {
+        swallow(event);
+        return;
+      }
+    }
     if (!ctx || inputBlocked) return; // no frame loaded yet, or busy
     if (adjusting) {
       adjustDown(event);
@@ -1128,6 +1175,7 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerMove(event) {
+    if (swallowed.has(event.pointerId)) return;
     if (adjusting) {
       adjustMove(event);
       return;
@@ -1212,6 +1260,11 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerUp(event) {
+    if (swallowed.has(event.pointerId)) {
+      swallowed.delete(event.pointerId);
+      if (container.hasPointerCapture?.(event.pointerId)) container.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (adjusting) {
       adjustUp(event);
       return;
@@ -1314,6 +1367,7 @@ export function initCanvas(container, options = {}) {
   // honored.
   container.addEventListener('pointerleave', (event) => {
     const isTracked = event.pointerId === activePointerId
+      || swallowed.has(event.pointerId)
       || adjustPointers.has(event.pointerId)
       || (pendingTouch && event.pointerId === pendingTouch.pointerId)
       || (gesture && gesture.pointerIds.includes(event.pointerId));
@@ -1580,11 +1634,47 @@ export function initCanvas(container, options = {}) {
         c.width = 0;
         c.height = 0;
       }
+      freePlaybackCanvas();
+      playbackTapListeners.clear();
       changeListeners.clear();
       gestureListeners.clear();
       eyedropperListeners.clear();
       blockedListeners.clear();
       stack.remove();
+    },
+
+    // --- playback (4b) ---
+
+    // While true, a touch on the canvas area stops playback (onPlaybackTap)
+    // instead of drawing; see `swallow` above.
+    setPlaybackInput(on) {
+      playbackInput = on === true;
+    },
+
+    // Calls listener() when a touch lands while playback input is on.
+    // Returns an unsubscribe function.
+    onPlaybackTap(listener) {
+      playbackTapListeners.add(listener);
+      return () => playbackTapListeners.delete(listener);
+    },
+
+    // The playback picture's 2D context (full canvas size), shown above
+    // the layers; created if needed. Never part of readVisible: it's
+    // not her drawing.
+    getPlaybackContext() {
+      if (!playbackCanvas) {
+        playbackCanvas = document.createElement('canvas');
+        playbackCanvas.width = width;
+        playbackCanvas.height = height;
+        playbackCanvas.className = 'pp-layer pp-playback';
+        stack.appendChild(playbackCanvas);
+      }
+      return playbackCanvas.getContext('2d');
+    },
+
+    // Takes the playback picture away and frees its memory.
+    hidePlayback() {
+      freePlaybackCanvas();
     },
 
     // Ignores new touches while true — main.js sets it around async

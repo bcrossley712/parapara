@@ -110,27 +110,24 @@ icon, manifest `name`/`short_name`, and repo copy.
     under Architecture → Frame cache and playback; the measurements
     are in [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
     In short: memory isn't the limit, and full size plays up to 30 fps.
-  - **Next: 4b** — playback + transport (play, skip, fps, loop
-    toggle). Then **4c** onion skin, **4d** reorder + delete.
-  - **Decided for 4b–4d:**
-    - **Playback:** loops by default, with a toggle to turn it off.
-      Drawing is blocked while playing; a tap on the canvas stops it.
-      Undo/redo stop playback first, then act. If the cache isn't
-      fully rebuilt, show a short "Getting ready" progress, then play —
-      never start early (a rebuild can't outrun playback).
-    - **FPS:** she picks it in the transport, **1–30**; default 12.
+  - **4b: built, not yet confirmed on the iPad** — playback +
+    transport. How it works is under Architecture → Playback. Next:
+    **4c** onion skin, **4d** reorder + delete.
+  - **Decided for 4c–4d** (4b's decisions are now in Architecture):
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
       `'frame-delete'` / `'frame-move'` undo types); the last frame
       can't be deleted.
-    - **Saved per project:** fps, loop, onion on/off and its settings.
+    - **Saved per project:** onion on/off and its settings (fps and
+      loop already are, 4b).
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
-      optional `frame.hold` (missing = 1) read only by `frameAtTime`.
+      optional `frame.hold` (missing = 1) read only by `frameAtBeat`.
     - **Coupled features:** copy/paste a layer's drawing between
-      frames goes with 4d if she wants it. Showing the cached frame
-      instantly on a frame switch, and a scrubber, stay out unless she
-      misses them.
+      frames goes with 4d if she wants it. Out unless she misses them:
+      showing the cached frame instantly on a frame switch, a scrubber,
+      ping-pong loop, a play range (in/out points), a clean fullscreen
+      preview, a frame counter, zooming while playing.
   - **Ask her before 4c** (check against Flipaclip/Rough Animator):
     how many onion frames before/after, tint colors (previous vs.
     next), opacity, whether ghosts include their frame's photo (lean
@@ -207,14 +204,15 @@ icon, manifest `name`/`short_name`, and repo copy.
   This is additive, not a rewrite.
 
 **Planned UI layout** (from wireframes): tool rail down the left;
-transport (skip / play / skip + fps) between canvas and timeline;
+transport (prev / play / next / loop / fps) at the **left end of the
+frame strip's row** (4b — the wireframe had it in its own row above
+the strip; moved to save the canvas ~48 px, Flipaclip-style);
 horizontally scrolling frame strip with a dashed "add frame" tile
 (the wireframe's image marker was dropped in 3b — step 4's thumbnails
 show the photo instead); onion-skin toggle as a
 badge on the canvas; Share as a first-class top-bar icon. Layers panel
 on the right, over the canvas (doesn't shrink it), opened from a
-top-bar button. Until step 4 the frame strip shows numbered tiles only,
-with room left above it for the transport.
+top-bar button.
 
 ## Architecture
 
@@ -437,6 +435,45 @@ Short rules; reasoning in the linked sections.
     skipped, never slowed — aim at where the playhead will be, keep the
     last good frame up. Step 5 swaps in the audio clock without
     touching the loop.
+- **Playback (4b)** ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
+  - **Transport** (`timeline/transport.js`, UI only): previous frame,
+    play/pause, next frame, loop toggle, fps button → small panel
+    (− / + and presets 6, 8, 12, 15, 24, 30). **fps 1–30, default 12;
+    loop on by default.** Both saved on the project, take effect at
+    once even mid-play, and **aren't undoable** (settings).
+  - **Play** starts on the frame she's on (from frame 1 if loop is off
+    and she's on the last frame); one frame → banner "Add another
+    frame to play." If any frame still needs flattening it shows
+    "Getting ready… n of N" over the canvas (the cache is `rush()`ed)
+    and never starts early. A frame whose flatten *failed* doesn't
+    hold it up (`pendingCount` skips it); it plays its last picture,
+    or blank paper.
+  - **The loop** (`timeline/playback.js`, pure): frame from elapsed
+    time (`frameAtBeat` with a start index), a ring of 6 decoded
+    frames ahead, late frames skipped. fps/loop changes re-anchor on
+    the frame showing (no jump).
+  - **The picture:** one full-size canvas (`.pp-playback`) inside the
+    wrapper above the layers, so it plays at her current
+    zoom/pan/rotation; it only exists while playing.
+    `canvas/playback-frames.js` decodes each frame (the cache's PNG +
+    its photo unless Hide images; frames sharing a photo share one
+    decoded copy) and draws paper → photo → layers via
+    `drawFlattened`.
+  - **Stopping lands her on the frame that was showing** (a normal
+    frame load); the playing picture stays up until it's on screen.
+    Loop off → stops on the last frame. The strip's highlight follows
+    the frame showing and scrolls to it.
+  - **While playing she can't draw:** a touch on the canvas area stops
+    it and is swallowed — that touch and any finger that joins it,
+    until every finger is up — so the stop tap never draws, and no
+    zoom either. **Anything that changes the project stops playback,
+    lands, then acts** (`afterPlayback` in `main.js`: undo/redo,
+    frame and layer actions, Image menu actions, Gallery). A tile tap
+    stops and lands on *that* tile (no menu); prev/next stop and step
+    from the frame showing. Tool, color, size, fps and loop don't
+    stop it. **The Image button only stops it** (the photo picker
+    can't wait for the landing — iOS). Hiding the app stops it
+    (`flush`).
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
@@ -470,8 +507,16 @@ Each is here because breaking it caused (or would cause) a real bug.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
   sampler** for fill and the eyedropper. The reference image (3a) is
   in it, under the layers, when showing (its single-layer fast path
-  is skipped then). Step 4's onion skin must stay out (ghost frames
-  aren't her drawing).
+  is skipped then). Step 4's onion skin and the playback picture must
+  stay out (they aren't her drawing).
+- **The playback picture (`.pp-playback`) stays the wrapper's last
+  child** — `applyLayers` re-appends it after the layers.
+- **The playback swallow runs before the `inputBlocked` check** in
+  `onPointerDown`, and swallowed pointers are handled first in move
+  and up. Otherwise a stop that lands on the same frame (no frame
+  load, so no input block) lets the stop tap draw, and a finger
+  joining it would start a stroke. A primary pointer with nothing
+  playing clears stale entries.
 - **The reference holder (`.pp-reference`) stays the wrapper's first
   child** (`prepend`; `applyLayers` appends layers after it), so it's
   under every layer. It and its image keep `transform-origin: 0 0`,
@@ -588,6 +633,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           skin, export); drawFlattened, loadReference
         frame-tiles.js    frame strip pictures: cached layers over
                           paper + the frame's photo (4a-ii)
+        playback-frames.js  playback's decode (cached layers + photo,
+                          shared by blobRef) and draw (4b)
         thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
                           (reference image first, unless hidden)
         reference.js      reference image: on-screen view, drawReference,
@@ -625,12 +672,16 @@ Each is here because breaking it caused (or would cause) a real bug.
         frame-strip.js    frame strip + frame menu (UI only; intents
                           via callbacks)
         clock.js          pure elapsed time → frame (beatAtTime,
-                          frameAtTime); playback's clock math (4a-i)
+                          frameAtBeat, frameAtTime); fps rules
+                          (sanitizeFps, MIN/MAX/DEFAULT_FPS, presets)
         frame-cache.js    pure flattened-frame cache bookkeeping:
                           layerSignature, freshness, rebuild order (4a-ii)
         dev-stress.js     DEV ONLY: playback speed + frame memory tests
                           (4a-i)
-        timeline.js       placeholder: playback, onion skin (step 4)
+        playback.js       pure playback loop: getting ready, decode ring,
+                          skip late frames, fps/loop re-anchor (4b)
+        transport.js      transport row + fps panel + "Getting ready"
+                          label (UI only) (4b)
       export/ audio/      placeholders for later steps
     icons/                app icon set
     tests/unit/, tests/e2e/      see Testing
@@ -658,8 +709,8 @@ bitmap. Planned fields are marked. Extend additively.
     project = {
       id, name, createdAt, updatedAt,
       canvas: { width: 1920, height: 1080 },
-      fps: 12,                                // 4b: she picks 1–30 in the transport
-      loop: true,                             // planned (4b); missing = true
+      fps: 12,                                // 1–30, picked in the transport (4b); sanitizeFps on open
+      loop: true,                             // 4b; missing = true
       onionSkin: { ... },                     // planned (4c): on/off + settings, shape decided then
       layers: [                               // index 0 = bottom; shared by all frames
         { id, name, visible: true, opacity: 1, locked: false },
@@ -702,7 +753,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 **Run tests before handing off any change; add tests for new logic.**
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
-  `npm run test:e2e` (~1.5 min), or `npm test`.
+  `npm run test:e2e` (~2.2 min), or `npm test`.
 - **In a Claude sandbox:** Chromium is preinstalled — run
   `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
@@ -733,7 +784,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
   - Each test gets its own browser context (own IndexedDB), so tests
-    must not depend on order or on each other. ~1.5 min after 3a.
+    must not depend on order or on each other. ~2.2 min after 4b.
   - **Images in e2e:** make the test image in the page (a canvas →
     PNG buffer) and feed it through `page.waitForEvent('filechooser')`
     so the real picker path runs (`reference.spec.js`).
@@ -748,4 +799,6 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   release between projects, the iPadOS 26 top-edge blur (desktop
   Chromium never draws it), long-press feel, the photo picker (Photos
   vs Files, HEIC arriving as JPEG), memory with large imported photos,
-  adjusting and flipping an image by finger and stylus.
+  adjusting and flipping an image by finger and stylus, playback
+  smoothness at 24–30 fps with real line art, the stop tap with her
+  stylus, the moment of frame loading after a stop.

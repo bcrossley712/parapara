@@ -12,7 +12,13 @@
 // canvas/frame-tiles.js, handed in with setThumbnail) with its number
 // in a corner badge; until a frame's picture is ready, the number alone.
 // Tiles take the canvas's shape (setAspect). Reorder and delete come
-// with 4d, and the transport sits above this strip with 4b.
+// with 4d. The transport (4b, transport.js) sits at the strip's left
+// end; ui.js puts it there.
+//
+// While the animation plays, the highlight follows the frame showing
+// (setPlayhead) and the strip scrolls to keep it in view, as in
+// Flipaclip; any tile tap then just asks for that frame (onSelect) —
+// main.js stops playback and lands there — never the menu.
 //
 // Pure UI: main.js passes state in through render() and gets intents
 // back through the callbacks.
@@ -51,6 +57,8 @@ export function createFrameStrip(callbacks, { signal } = {}) {
 
   let lastCurrent = null;
   let lastBusy = false;
+  let lastState = null;  // the last render()'s state
+  let playhead = null;   // the frame playing, or null
 
   // Picture canvases by frame id (owned by frame-tiles.js). Kept here
   // across render(), which rebuilds the tile buttons.
@@ -98,8 +106,22 @@ export function createFrameStrip(callbacks, { signal } = {}) {
   }, { signal, capture: true });
   list.addEventListener('scroll', () => closeMenu(), { passive: true });
 
+  // Scrolls only the list itself — scrollIntoView could also nudge
+  // overflow-hidden ancestors, i.e. the fixed app shell.
+  function keepInView(tile) {
+    if (!tile) return;
+    const left = tile.offsetLeft; // list is position: relative
+    const right = left + tile.offsetWidth;
+    if (left < list.scrollLeft) list.scrollLeft = left;
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+  }
+
   // state: { frameIds (timeline order), currentId, busy }
-  function render({ frameIds, currentId, busy = false }) {
+  function render(state) {
+    lastState = state;
+    const { frameIds, busy = false } = state;
+    // While playing, the highlight is the frame showing.
+    const currentId = playhead ?? state.currentId;
     closeMenu();
     lastBusy = busy;
     const tiles = frameIds.map((id, i) => {
@@ -123,7 +145,7 @@ export function createFrameStrip(callbacks, { signal } = {}) {
       if (isCurrent) tile.setAttribute('aria-current', 'true');
       tile.disabled = busy && !isCurrent;
       tile.addEventListener('click', () => {
-        if (id !== currentId) callbacks.onSelect(id);
+        if (playhead !== null || id !== currentId) callbacks.onSelect(id);
         else if (menu) closeMenu();
         else openMenu(tile);
       });
@@ -134,18 +156,31 @@ export function createFrameStrip(callbacks, { signal } = {}) {
 
     // Keep the current frame in view when it changes (e.g. after adding
     // one at the end of a long strip, or an undo jumping frames).
-    // Scrolls only the list itself — scrollIntoView could also nudge
-    // overflow-hidden ancestors, i.e. the fixed app shell.
     if (currentId !== lastCurrent) {
       lastCurrent = currentId;
-      const tile = list.querySelector('.is-current');
-      if (tile) {
-        const left = tile.offsetLeft; // list is position: relative
-        const right = left + tile.offsetWidth;
-        if (left < list.scrollLeft) list.scrollLeft = left;
-        else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
-      }
+      keepInView(list.querySelector('.is-current'));
     }
+  }
+
+  // The frame playing (4b), or null when playback stops. Moves the
+  // highlight without rebuilding the tiles — it runs every beat.
+  function setPlayhead(frameId) {
+    if (frameId === playhead) return;
+    if (frameId === null) {
+      playhead = null;
+      if (lastState) render(lastState);
+      return;
+    }
+    if (playhead === null) closeMenu();
+    playhead = frameId;
+    for (const tile of list.children) {
+      const on = tile.dataset.frameId === frameId;
+      tile.classList.toggle('is-current', on);
+      if (on) tile.setAttribute('aria-current', 'true');
+      else tile.removeAttribute('aria-current');
+      if (on) keepInView(tile);
+    }
+    lastCurrent = frameId;
   }
 
   // A frame's picture (a canvas), or null to go back to the number.
@@ -172,7 +207,7 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     return size;
   }
 
-  return { element: strip, render, closeMenu, setThumbnail, setAspect };
+  return { element: strip, render, closeMenu, setThumbnail, setAspect, setPlayhead };
 }
 
 const PLUS_ICON = `

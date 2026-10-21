@@ -16,6 +16,9 @@
 // branch in openDatabase(). Never edit an existing branch in place, or
 // existing installs will skip it.
 
+// The default fps lives with the rest of the fps rules (pure).
+import { DEFAULT_FPS } from '../timeline/clock.js';
+
 const DB_NAME = 'parapara';
 const DB_VERSION = 2;
 
@@ -30,7 +33,6 @@ const META_UI_STATE = 'uiState';
 const META_RECENT_COLORS = 'recentColors';
 
 const DEFAULT_CANVAS = { width: 1920, height: 1080 };
-const DEFAULT_FPS = 12;
 const DEFAULT_PROJECT_NAME = 'Untitled';
 const PROJECT_NAME_PREFIX = 'Animation';
 const DEFAULT_LAYER_NAME = 'Layer 1';
@@ -108,7 +110,8 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     createdAt: now,
     updatedAt: now,
     canvas: { ...DEFAULT_CANVAS },
-    fps: DEFAULT_FPS,
+    fps: DEFAULT_FPS,              // 1–30, picked in the transport (4b)
+    loop: true,                    // playback loops (4b); missing = true
     layers: [layer],               // index 0 = bottom
     activeLayerId: layer.id,
     frames: [],

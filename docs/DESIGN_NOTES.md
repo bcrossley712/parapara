@@ -598,6 +598,19 @@ Sections: [Process lessons](#process-lessons) ·
   image,** so Hide images and image edits never invalidate it, and
   export's "include images?" becomes a flag. Tiles add the reference
   back when they're composed (from a small copy of the photo).
+- **4b's choices.** Plays in place at her current view (as Flipaclip
+  does), on its own canvas above the layers, so stopping doesn't need
+  to redraw anything until the landed frame is loaded. Stop lands on
+  the frame showing (Flipaclip) rather than snapping back. Prev/next
+  over first/last, because animators flip one frame at a time. The
+  transport moved into the strip's row to keep canvas height.
+  "Stop, then act" was extended from undo to everything that changes
+  the project, rather than greying controls out while playing.
+- **The stop tap is swallowed until every finger is up** (her ask:
+  a tap must never start the tool). Found while testing: when the
+  stop lands on the frame already loaded, no frame load blocks input,
+  so the swallow must run before anything else in `onPointerDown`,
+  and a finger joining the stopping touch is swallowed too.
 - **One `renderFrame`** (`canvas/render-frame.js`) does the
   compositing rule — visible layers bottom-up at their opacity, over
   an optional background and reference — for the gallery thumbnail,

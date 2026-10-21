@@ -237,3 +237,31 @@ test('destroy stops work and disposes everything, including a late result', asyn
   assert.deepEqual(disposed, ['one', 'two']);
   assert.equal(calls.length, 2);
 });
+
+test('rush builds right away instead of waiting out the settle time (4b)', async () => {
+  const { cache, timers, calls } = setup();
+  cache.setFrames(['f1', 'f2'], 'f1');
+  cache.touch('f1');
+  await timers.advance(10);
+  assert.equal(calls.length, 0, 'still settling');
+  cache.rush();
+  await timers.advance(0);
+  assert.equal(calls.length, 1, 'built without waiting');
+  calls[0].resolve('v1');
+  await timers.advance(16);
+  assert.equal(calls.length, 2, 'the rest follow at the usual pace');
+});
+
+test('pendingCount leaves out failed frames, so playback never waits on one forever', async () => {
+  const { cache, timers, calls } = setup();
+  cache.setFrames(['f1', 'f2'], 'f1');
+  assert.equal(cache.pendingCount, 2);
+  await timers.advance(300);
+  calls[0].reject(new Error('decode failed'));
+  await timers.advance(16);
+  assert.equal(cache.pendingCount, 1, 'the failed frame is not waiting');
+  assert.equal(cache.staleCount, 2, 'but it is still stale');
+  calls[1].resolve('v2');
+  await timers.advance(16);
+  assert.equal(cache.pendingCount, 0);
+});

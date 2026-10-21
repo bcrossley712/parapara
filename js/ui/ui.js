@@ -8,11 +8,9 @@
 // native confirm()/alert()/date-input/color chrome, per the working
 // agreement.
 //
-// Bare-bones so far: enough of the rail (draw/erase/fill/smudge,
-// brush size, color) to drive canvas.js for the drawing-engine
-// testing pass. Transport, timeline, and the rest of the
-// tool rail (mic/pan) land with their respective build
-// steps. Color picker itself lives in color-picker.js.
+// The rail so far: draw/erase/fill/smudge, brush size, color; the rest
+// (mic/pan) lands with its build step. The color picker lives in
+// color-picker.js, the frame strip and transport in timeline/.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
@@ -20,6 +18,7 @@ import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 import { createFrameStrip } from '../timeline/frame-strip.js';
+import { createTransport } from '../timeline/transport.js';
 import { createReferenceBar } from './reference-bar.js';
 import { createImageMenu } from './image-menu.js';
 
@@ -38,6 +37,8 @@ import { createImageMenu } from './image-menu.js';
 // options.frames: callbacks for the frame strip ({ onSelect, onAdd,
 //   onDuplicate },
 //   see timeline/frame-strip.js).
+// options.transport: playback intents ({ onPlay, onPrev, onNext,
+//   onLoop, onFps }, see timeline/transport.js).
 // options.colors: palette intents from the color picker
 //   ({ onPaletteAdd(hex), onPaletteReplace(index, hex),
 //   onPaletteRemove(index) } — hex is the current color).
@@ -50,7 +51,8 @@ import { createImageMenu } from './image-menu.js';
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
 //
-// Returns { canvas, layers (the panel), frames (the strip), images
+// Returns { canvas, layers (the panel), frames (the strip), transport
+// (render(state)), images
 // (the top bar's Image menu: render(state)),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
@@ -66,6 +68,7 @@ export function initUI(container, options = {}) {
     layers: layersCallbacks = {},
     layersPanelOpen = false,
     frames: framesCallbacks = {},
+    transport: transportCallbacks = {},
     colors: colorCallbacks = {},
     reference: referenceCallbacks = {},
     images: imagesCallbacks = {},
@@ -127,11 +130,17 @@ export function initUI(container, options = {}) {
   });
   layersBtn.setAttribute('aria-pressed', 'false');
 
-  // Canvas area above, frame strip below (the transport will sit
-  // between them with step 4). The rail runs the full height beside.
+  // Canvas area above, frame strip below with the transport at its
+  // left end (4b). The rail runs the full height beside.
   const frameStrip = createFrameStrip({
     onSelect: () => {}, onAdd: () => {}, onDuplicate: () => {}, ...framesCallbacks,
   }, { signal });
+  const transport = createTransport({
+    onPlay: () => {}, onPrev: () => {}, onNext: () => {}, onLoop: () => {}, onFps: () => {},
+    ...transportCallbacks,
+  }, { signal });
+  frameStrip.element.prepend(transport.element);
+  canvasArea.appendChild(transport.statusElement);
   const stage = document.createElement('div');
   stage.className = 'pp-stage';
   stage.append(canvasArea, frameStrip.element);
@@ -423,6 +432,7 @@ export function initUI(container, options = {}) {
     canvas: canvasApi,
     layers: layersPanel,
     frames: frameStrip,
+    transport,
     images: imageMenu,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),

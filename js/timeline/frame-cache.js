@@ -206,9 +206,25 @@ export function createFrameCache({
 
     isFresh,
 
-    // How many listed frames aren't fresh yet (4b's "Getting ready").
+    // How many listed frames aren't fresh yet.
     get staleCount() {
       return order.filter((id) => !isFresh(id)).length;
+    },
+
+    // How many listed frames are still waiting to be built — playback's
+    // "Getting ready" (4b) waits for this to reach 0. A frame whose
+    // build failed isn't waiting (it won't be retried until it
+    // changes), so one bad frame can't hold playback up forever.
+    get pendingCount() {
+      return order.filter(needsBuild).length;
+    },
+
+    // Build now, without waiting for changes to settle — she pressed
+    // play and is waiting on it.
+    rush() {
+      if (destroyed) return;
+      settleUntil = 0;
+      if (!running) schedule(0);
     },
 
     destroy() {

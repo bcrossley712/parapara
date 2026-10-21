@@ -91,6 +91,9 @@ import { renderThumbnail } from './canvas/thumbnail.js';
 import { renderFrame, makeCanvas, freeCanvas, encodePNG } from './canvas/render-frame.js';
 import { createFrameTiles } from './canvas/frame-tiles.js';
 import { createFrameCache, layerSignature } from './timeline/frame-cache.js';
+import { createPlayback } from './timeline/playback.js';
+import { sanitizeFps } from './timeline/clock.js';
+import { createPlaybackFrames } from './canvas/playback-frames.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -431,6 +434,10 @@ function mountEditor(session, { canSave }) {
   const project = session.project;
   // Older projects have no palette; a bad saved one is cleaned up.
   project.palette = sanitizeColorList(project.palette, MAX_PALETTE);
+  // Playback settings (4b): fps 1–30; older projects have no loop
+  // (missing = on).
+  project.fps = sanitizeFps(project.fps);
+  project.loop = project.loop !== false;
 
   // Created below if saving works; otherwise changes simply aren't
   // saved. Undo works either way — it's in memory only.
@@ -449,26 +456,31 @@ function mountEditor(session, { canSave }) {
     },
     appActions: {
       ...appActions,
-      fillAllLayers: () => devFillAllLayers(),
-      playbackSpeedTest: () => devPlaybackSpeedTest(),
-      frameMemoryTest: () => devFrameMemoryTest(),
+      fillAllLayers: afterPlayback(() => devFillAllLayers()),
+      playbackSpeedTest: afterPlayback(() => devPlaybackSpeedTest()),
+      frameMemoryTest: afterPlayback(() => devFrameMemoryTest()),
     },
-    onGallery: canSave ? () => close() : null,
-    onUndo: () => undo(),
-    onRedo: () => redo(),
+    // Anything that changes the project stops playback first and runs
+    // once she's on the frame that was showing (afterPlayback, 4b).
+    onGallery: canSave ? afterPlayback(() => close()) : null,
+    onUndo: afterPlayback(() => undo()),
+    onRedo: afterPlayback(() => redo()),
     layersPanelOpen: uiState.layersPanelOpen === true,
     layers: {
-      onSelect: (id) => selectLayer(id),
-      onAdd: () => addLayer(),
-      onDelete: (id) => deleteLayer(id),
-      onDuplicate: (id) => duplicateLayer(id),
-      onClear: (id) => clearLayer(id),
-      onRename: (id, name) => renameLayer(id, name),
-      onToggleVisible: (id) => toggleLayerProp(id, 'visible'),
-      onToggleLock: (id) => toggleLayerProp(id, 'locked'),
-      onMove: (id, toIndex) => moveLayerTo(id, toIndex),
-      onOpacityInput: (id, opacity) => canvasApi.setLayerProps(id, { opacity }),
-      onOpacityCommit: (id, before, after) => commitOpacity(id, before, after),
+      onSelect: afterPlayback((id) => selectLayer(id)),
+      onAdd: afterPlayback(() => addLayer()),
+      onDelete: afterPlayback((id) => deleteLayer(id)),
+      onDuplicate: afterPlayback((id) => duplicateLayer(id)),
+      onClear: afterPlayback((id) => clearLayer(id)),
+      onRename: afterPlayback((id, name) => renameLayer(id, name)),
+      onToggleVisible: afterPlayback((id) => toggleLayerProp(id, 'visible')),
+      onToggleLock: afterPlayback((id) => toggleLayerProp(id, 'locked')),
+      onMove: afterPlayback((id, toIndex) => moveLayerTo(id, toIndex)),
+      onOpacityInput: (id, opacity) => {
+        stopPlayback();
+        canvasApi.setLayerProps(id, { opacity });
+      },
+      onOpacityCommit: afterPlayback((id, before, after) => commitOpacity(id, before, after)),
       onOpenChange: (open) => setUiState({ layersPanelOpen: open }),
     },
     colors: {
@@ -478,13 +490,28 @@ function mountEditor(session, { canSave }) {
     },
     frames: {
       onSelect: (id) => selectFrame(id),
-      onAdd: () => addFrame(),
-      onDuplicate: () => duplicateFrame(),
+      onAdd: afterPlayback(() => addFrame()),
+      onDuplicate: afterPlayback(() => duplicateFrame()),
+    },
+    transport: {
+      onPlay: () => togglePlay(),
+      onPrev: () => stepFrame(-1),
+      onNext: () => stepFrame(1),
+      onLoop: () => setLoop(!project.loop),
+      onFps: (fps) => setFps(fps),
     },
     images: {
-      onImage: () => addOrAdjustImage(),
-      onUseOnAllFrames: () => useImageOnAllFrames(),
-      onToggleImages: () => toggleImages(),
+      // The photo picker must open inside the tap (iOS), so it can't
+      // wait for playback to stop: this tap only stops it.
+      onImage: () => {
+        if (playback.active || landing) {
+          stopPlayback();
+          return;
+        }
+        addOrAdjustImage();
+      },
+      onUseOnAllFrames: afterPlayback(() => useImageOnAllFrames()),
+      onToggleImages: afterPlayback(() => toggleImages()),
     },
     reference: {
       onOpacityInput: (opacity) => {
@@ -612,6 +639,157 @@ function mountEditor(session, { canSave }) {
     }
   }
 
+  // --- playback (4b) ---
+  //
+  // Play shows "Getting ready" until every frame is flattened (the
+  // cache is hurried along), then plays from the frame she's on, at
+  // the project's fps, looping unless she turned loop off. The picture
+  // is drawn on its own canvas above the layers (canvas.js), from the
+  // cache's PNGs plus each frame's photo (playback-frames.js);
+  // timeline/playback.js runs the loop.
+  //
+  // While it plays she can't draw: a tap on the canvas stops it and is
+  // swallowed whole. Anything that changes the project stops it first
+  // and then acts (afterPlayback); tool, color, fps and loop picks
+  // don't stop it. Stopping lands her on the frame that was showing —
+  // a normal frame load — with the playing picture kept up until that
+  // frame is on screen.
+  const playbackFrames = createPlaybackFrames({
+    canvasSize: project.canvas,
+    readLayers: (id) => (frameCache.get(id) ?? frameCache.latest(id))?.blob ?? null,
+    readPhoto: (ref) => readBitmap(ref),
+  });
+  let playStatus = { state: 'idle', ready: 0, total: 0 };
+  // The move to the frame playback stopped on, while it runs.
+  let landing = null;
+
+  const playback = createPlayback({
+    decode: (id) => {
+      const frame = session.frames.find((f) => f.id === id);
+      return frame ? playbackFrames.decode(frame, { hidden: project.referenceHidden === true }) : null;
+    },
+    release: (value) => playbackFrames.release(value),
+    show: (id, value) => {
+      playbackFrames.draw(canvasApi.getPlaybackContext(), value);
+      strip.setPlayhead(id);
+    },
+    pending: () => frameCache.pendingCount,
+    prepare: () => frameCache.rush(),
+    onChange: (status) => {
+      playStatus = status;
+      canvasApi.setPlaybackInput(status.state !== 'idle');
+      renderTransport();
+    },
+    onEnd: (id) => landOn(id),
+  });
+
+  canvasApi.onPlaybackTap(() => stopPlayback());
+
+  function renderTransport() {
+    const index = project.frames.indexOf(session.frame.id);
+    ui.transport.render({
+      playback: playStatus.state,
+      ready: playStatus.ready,
+      total: playStatus.total,
+      fps: project.fps,
+      loop: project.loop,
+      canPrev: index > 0,
+      canNext: index < project.frames.length - 1,
+      busy: busy || Boolean(landing),
+    });
+  }
+
+  function togglePlay() {
+    if (playback.active) {
+      stopPlayback();
+      return;
+    }
+    if (landing || !canAct() || adjust) return;
+    if (project.frames.length < 2) {
+      showBanner('Add another frame to play.');
+      return;
+    }
+    const index = project.frames.indexOf(session.frame.id);
+    // Without loop, playing from the last frame starts over.
+    const startIndex = !project.loop && index === project.frames.length - 1 ? 0 : index;
+    playback.start({ ids: project.frames, startIndex, fps: project.fps, loop: project.loop });
+  }
+
+  // Stops playback (if it's on) and lands on `target` — by default the
+  // frame that was showing; stopped while getting ready, she stays
+  // where she was. Returns a promise for the landing.
+  function stopPlayback(target) {
+    if (!playback.active) return landing ?? Promise.resolve();
+    const showing = playback.stop();
+    return landOn(target !== undefined ? target : showing);
+  }
+
+  function landOn(frameId) {
+    const done = () => {
+      strip.setPlayhead(null);
+      canvasApi.hidePlayback();
+    };
+    if (!frameId || frameId === session.frame.id || !project.frames.includes(frameId)) {
+      done();
+      return Promise.resolve();
+    }
+    const move = exclusive(() => showFrame(frameId)).finally(() => {
+      done();
+      if (landing === move) landing = null;
+      renderTransport();
+    });
+    landing = move;
+    renderTransport();
+    return move;
+  }
+
+  // Wraps an action so it stops playback first and runs once she's
+  // landed (4b's "undo stops playback, then acts", for everything that
+  // changes the project).
+  function afterPlayback(action) {
+    return (...args) => {
+      if (playback.active) stopPlayback();
+      if (landing) landing.then(() => action(...args));
+      else action(...args);
+    };
+  }
+
+  // Previous/next frame. While playing: stop and step from the frame
+  // showing. No wrap-around.
+  function stepFrame(delta) {
+    const from = playback.active ? (playback.frameId ?? session.frame.id) : session.frame.id;
+    const index = project.frames.indexOf(from) + delta;
+    const target = project.frames[Math.max(0, Math.min(project.frames.length - 1, index))];
+    if (playback.active) {
+      stopPlayback(target);
+      return;
+    }
+    if (landing) {
+      landing.then(() => stepFrame(delta));
+      return;
+    }
+    if (index < 0 || index >= project.frames.length) return;
+    selectFrame(target);
+  }
+
+  // fps and loop are saved with the project and take effect at once,
+  // even mid-play. Settings, not edits: not undoable.
+  function setFps(fps) {
+    const next = sanitizeFps(fps);
+    if (next === project.fps) return;
+    project.fps = next;
+    playback.setFps(next);
+    scheduleProjectSave();
+    renderTransport();
+  }
+
+  function setLoop(loop) {
+    project.loop = loop;
+    playback.setLoop(loop);
+    scheduleProjectSave();
+    renderTransport();
+  }
+
   // --- async work guard ---
   //
   // Adding, removing or bringing back a layer or frame, and moving to
@@ -629,6 +807,7 @@ function mountEditor(session, { canSave }) {
       busy,
     });
     strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
+    renderTransport();
     ui.images.render({
       current: Boolean(session.frame.image?.blobRef),
       any: session.frames.some((f) => f.image?.blobRef),
@@ -963,7 +1142,16 @@ function mountEditor(session, { canSave }) {
 
   // --- frame strip actions ---
 
+  // While playing, any tile stops playback and lands there (4b).
   function selectFrame(id) {
+    if (playback.active) {
+      stopPlayback(id);
+      return;
+    }
+    if (landing) {
+      landing.then(() => selectFrame(id));
+      return;
+    }
     if (!canAct() || id === session.frame.id) return;
     exclusive(() => showFrame(id));
   }
@@ -1434,6 +1622,7 @@ function mountEditor(session, { canSave }) {
   // changed. Thumbnail failures are only logged.
   async function flush() {
     finishAdjust();
+    stopPlayback();
     await Promise.all([autosaver.flush(), projectSaver.flush(), frameSaves]);
     await updateThumbnail();
   }
@@ -1490,6 +1679,8 @@ function mountEditor(session, { canSave }) {
     // before the gallery goes.
     const cards = await loadGalleryCards();
     flushEditor = null;
+    playback.destroy();
+    playbackFrames.destroy();
     frameCache.destroy();
     frameTiles.destroy();
     ui.destroy();

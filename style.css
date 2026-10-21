@@ -246,6 +246,7 @@ html, body {
 /* The whole drawing area takes touch input (canvas.js listens here,
    not on the page), so gestures work with fingers off the page. */
 .pp-canvas-area {
+  position: relative; /* anchors the "Getting ready" label (4b) */
   flex: 1;
   min-height: 0; /* shrink for the frame strip; canvas.js re-fits */
   touch-action: none;
@@ -1047,6 +1048,162 @@ html, body {
 .pp-frame-strip__add:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Transport (js/timeline/transport.js, 4b): at the strip's left end.
+   Previous / play / next / loop / fps. */
+.pp-transport {
+  position: relative; /* the fps panel is placed from here */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-right: 8px;
+  border-right: 1px solid var(--pp-ink-light);
+}
+
+.pp-transport__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.pp-transport__btn:active:not(:disabled) {
+  background: var(--pp-ink-light);
+}
+
+.pp-transport__btn.is-active {
+  color: var(--pp-accent);
+}
+
+/* Play stands out: it's the button she came for. */
+.pp-transport__play {
+  background: var(--pp-ink-light);
+}
+
+.pp-transport__play.is-active {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+.pp-transport__fps {
+  min-width: 64px;
+  border: 1px solid var(--pp-ink-light);
+}
+
+.pp-transport__fps.is-active {
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+}
+
+.pp-transport__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pp-fps-panel {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 14px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 220px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: var(--pp-bg);
+}
+
+.pp-fps-panel__title {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.pp-fps-panel__step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pp-fps-panel__value {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-fps-panel__btn,
+.pp-fps-panel__preset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.pp-fps-panel__btn {
+  width: 52px;
+}
+
+.pp-fps-panel__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pp-fps-panel__presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.pp-fps-panel__preset.is-active {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+
+/* "Getting ready" over the canvas while frames are flattened before
+   playback starts. Touches pass through to the canvas area (a tap
+   there cancels). */
+.pp-playback-status {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 5;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+}
+
+.pp-playback-status[hidden] {
+  display: none;
 }
 
 /* Gallery screen (js/ui/gallery.js). Same dark top bar as the editor
