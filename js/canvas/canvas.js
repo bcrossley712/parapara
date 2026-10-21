@@ -262,6 +262,13 @@ export function initCanvas(container, options = {}) {
   // touches are ignored entirely.
   let inputBlocked = false;
 
+  // DEV ONLY (activity log, after 4b): things that change pixels
+  // without an undo step, reported for main.js to log.
+  const debugListeners = new Set();
+  function emitDebug(event, details) {
+    for (const listener of debugListeners) listener(event, details);
+  }
+
   // --- playback (4b) ---
   //
   // While the animation plays (or gets ready to), a touch on the canvas
@@ -340,6 +347,7 @@ export function initCanvas(container, options = {}) {
     const rect = clampRect(dirty, width, height);
     dirty = null;
     if (!rect) return;
+    emitDebug('revert', { layer: activeLayerId, rect: `${rect.x},${rect.y} ${rect.w}x${rect.h}` });
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
@@ -1636,6 +1644,7 @@ export function initCanvas(container, options = {}) {
       }
       freePlaybackCanvas();
       playbackTapListeners.clear();
+      debugListeners.clear();
       changeListeners.clear();
       gestureListeners.clear();
       eyedropperListeners.clear();
@@ -1670,6 +1679,12 @@ export function initCanvas(container, options = {}) {
         stack.appendChild(playbackCanvas);
       }
       return playbackCanvas.getContext('2d');
+    },
+
+    // DEV ONLY: listener(event, details) for the activity log.
+    onDebug(listener) {
+      debugListeners.add(listener);
+      return () => debugListeners.delete(listener);
     },
 
     // Takes the playback picture away and frees its memory.

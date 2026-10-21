@@ -299,6 +299,7 @@ export function initUI(container, options = {}) {
       fillAllLayers: appActions.fillAllLayers ?? (() => {}),
       playbackSpeedTest: appActions.playbackSpeedTest ?? (() => {}),
       frameMemoryTest: appActions.frameMemoryTest ?? (() => {}),
+      showActivityLog: appActions.showActivityLog, // dev only (after 4b)
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },
     signal,

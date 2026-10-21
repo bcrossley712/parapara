@@ -66,6 +66,7 @@ export function createGallery(container, { callbacks, appActions = {} }) {
       checkForUpdate: appActions.checkForUpdate ?? unavailable,
       applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
       freshReload: appActions.freshReload ?? (async () => window.location.reload()),
+      showActivityLog: appActions.showActivityLog, // dev only (after 4b)
     },
     placement: 'below',
     onOpen: () => closeMenu(),

@@ -113,6 +113,18 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **4b: built, not yet confirmed on the iPad** — playback +
     transport. How it works is under Architecture → Playback. Next:
     **4c** onion skin, **4d** reorder + delete.
+  - **Open bug (found trying 4b, cause unknown):** on the iPad, two
+    frames of a many-stroke drawing went blank — no restart, and undo
+    brought back only fragments (so the layer was replaced with blank
+    *without* an undo step; likely blank saved over them, or their
+    pixels saved under another frame). A randomized e2e hunt (touch
+    strokes, gestures, add/duplicate/switch frames, undo/redo, every
+    way of stopping playback; 16 seeds × 70 steps) never lost a
+    stroke. Not covered there: iPad memory pressure, eraser/fill/
+    smudge, several layers, photos, switching apps. **Before 4c/4d:
+    get the activity log** (gear → Developer → Activity log) from the
+    next time it happens. Hardening done meanwhile: autosave settles
+    which frame it saves to before any await (see Don't break these).
   - **Decided for 4c–4d** (4b's decisions are now in Architecture):
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
@@ -502,6 +514,10 @@ Each is here because breaking it caused (or would cause) a real bug.
 - **The open frame flattens from its live canvases, synchronously**
   (`layerSource` in `renderFrame`); others from storage. An await in
   the live path would let a stroke land halfway through.
+- **Autosave exports every unsaved layer in the same tick and saves
+  each to the ref of the frame it was exported from** (`session.frame`
+  captured before any await). Reading the ref after awaiting the
+  encode could put one frame's pixels under another frame's ref.
 - **`canvasApi.getLayerImage` is read-only** — drawing into it skips
   undo and saving.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
@@ -652,6 +668,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           sweep), copy record builders
         colors.js         pure recents/palette list ops, MAX_RECENTS,
                           MAX_PALETTE, saved-list validation
+        dev-log.js        DEV ONLY: activity log, 300 lines in
+                          localStorage
       ui/
         ui.js             editor: top bar (Gallery, undo/redo, Image, Layers),
                           tool rail, toasts/banners, DOM glue, destroy
@@ -664,6 +682,7 @@ Each is here because breaking it caused (or would cause) a real bug.
                           (UI only)
         color-picker.js   custom HSV picker + eyedropper button,
                           recents row, palette grid (UI only)
+        dev-log-view.js   DEV ONLY: the activity log dialog (Copy, Clear)
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
@@ -699,7 +718,13 @@ debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
 Developer section (Fresh reload, and from 2c a fill-all-layers
 memory stress test; from 4a-i the Playback speed and Frame memory
 tests — `timeline/dev-stress.js`, its import and launch call in
-`main.js`, its `sw.js` entry and its `.pp-dev-report` CSS).
+`main.js`, its `sw.js` entry and its `.pp-dev-report` CSS); after 4b,
+the **Activity log** — `storage/dev-log.js`, `ui/dev-log-view.js`,
+their `sw.js` entries, `tests/unit/dev-log.test.js`,
+`tests/e2e/dev-log.spec.js`, the `devLog.add` calls and the
+`showNotice` wrapper in `main.js`, `canvasApi.onDebug`, and the
+`.pp-dev-log` CSS. It keeps 300 lines in localStorage
+(`parapara-dev-log`).
 
 ## Schema
 

@@ -12,11 +12,14 @@
 // the last project (uiState.screen + lastProjectId), as Procreate and
 // Sketchbook do.
 
-import { initUI, showUpdatePrompt, showNotice, showBanner } from './ui/ui.js';
+import { initUI, showUpdatePrompt, showNotice as showNoticeToast, showBanner } from './ui/ui.js';
 import { createGallery } from './ui/gallery.js';
 import { showConfirm } from './ui/confirm-dialog.js';
 // Developer only (step 4a-i), removed with the gear menu's Developer section.
 import { runPlaybackSpeedTest, runFrameMemoryTest, reportInterruptedMemoryTest } from './timeline/dev-stress.js';
+// Developer only (after 4b): the activity log, removed with the Developer section.
+import { devLog } from './storage/dev-log.js';
+import { showDevLog } from './ui/dev-log-view.js';
 import {
   initStorage,
   loadLastProject,
@@ -168,13 +171,21 @@ const appActions = {
   checkForUpdate: () => updater.checkForUpdate(),
   applyUpdate: () => updater.applyUpdate(),
   freshReload: () => updater.freshReload(),
+  showActivityLog: () => showDevLog({ read: () => devLog.read(), clear: () => devLog.clear() }),
 };
+
+// Problems she has to OK go in the activity log too (dev only).
+function showNotice(message) {
+  devLog.add('notice', message);
+  showNoticeToast(message);
+}
 
 // iPadOS can close a backgrounded web app without warning, so save
 // the moment it's hidden rather than waiting out the debounce.
 // visibilitychange is the reliable signal on iOS; pagehide is a
 // backup for an actual unload.
 document.addEventListener('visibilitychange', () => {
+  devLog.add('app', document.visibilityState);
   if (document.visibilityState === 'hidden') flushAll();
 });
 window.addEventListener('pagehide', () => flushAll());
@@ -183,6 +194,8 @@ launch();
 reportInterruptedMemoryTest(); // developer only, step 4a-i
 
 async function launch() {
+  devLog.add('launch');
+  appActions.getVersionLabel().then((v) => devLog.add('version', v), () => {});
   try {
     await initStorage();
     storageWorks = true;
@@ -439,6 +452,15 @@ function mountEditor(session, { canSave }) {
   project.fps = sanitizeFps(project.fps);
   project.loop = project.loop !== false;
 
+  // Activity log (dev only): a frame as "f3#1a2b" (its position, then
+  // the end of its id, which never changes), a layer or blob id short.
+  const tag = (frameId) => `f${project.frames.indexOf(frameId) + 1}#${String(frameId).slice(-4)}`;
+  const short = (id) => String(id).slice(-4);
+  devLog.add('open', {
+    project: short(project.id), frames: project.frames.length, layers: project.layers.length,
+    at: tag(session.frame.id), canSave,
+  });
+
   // Created below if saving works; otherwise changes simply aren't
   // saved. Undo works either way — it's in memory only.
   let autosaver = null;
@@ -605,7 +627,10 @@ function mountEditor(session, { canSave }) {
       && document.visibilityState === 'visible',
     onUpdate: (id, value) => frameTiles.setLayers(id, value.tile),
     dispose: (value) => freeCanvas(value.tile),
-    onError: (err, id) => console.warn(`Parapara! could not flatten frame ${id}:`, err),
+    onError: (err, id) => {
+      devLog.add('flatten-failed', { frame: tag(id), error: String(err?.message ?? err) });
+      console.warn(`Parapara! could not flatten frame ${id}:`, err);
+    },
   });
 
   // One frame's cache value: { blob (full-size PNG of its layers), tile
@@ -680,10 +705,16 @@ function mountEditor(session, { canSave }) {
       canvasApi.setPlaybackInput(status.state !== 'idle');
       renderTransport();
     },
-    onEnd: (id) => landOn(id),
+    onEnd: (id) => {
+      devLog.add('end', { at: tag(id) });
+      landOn(id);
+    },
   });
 
-  canvasApi.onPlaybackTap(() => stopPlayback());
+  canvasApi.onPlaybackTap(() => {
+    if (playback.active) devLog.add('tap-stop');
+    stopPlayback();
+  });
 
   function renderTransport() {
     const index = project.frames.indexOf(session.frame.id);
@@ -712,6 +743,7 @@ function mountEditor(session, { canSave }) {
     const index = project.frames.indexOf(session.frame.id);
     // Without loop, playing from the last frame starts over.
     const startIndex = !project.loop && index === project.frames.length - 1 ? 0 : index;
+    devLog.add('play', { from: tag(project.frames[startIndex]), fps: project.fps, loop: project.loop });
     playback.start({ ids: project.frames, startIndex, fps: project.fps, loop: project.loop });
   }
 
@@ -721,6 +753,7 @@ function mountEditor(session, { canSave }) {
   function stopPlayback(target) {
     if (!playback.active) return landing ?? Promise.resolve();
     const showing = playback.stop();
+    devLog.add('stop', { showing: showing ? tag(showing) : null, target: target ? tag(target) : null });
     return landOn(target !== undefined ? target : showing);
   }
 
@@ -733,6 +766,7 @@ function mountEditor(session, { canSave }) {
       done();
       return Promise.resolve();
     }
+    devLog.add('land', { from: tag(session.frame.id), to: tag(frameId), busy });
     const move = exclusive(() => showFrame(frameId)).finally(() => {
       done();
       if (landing === move) landing = null;
@@ -882,7 +916,9 @@ function mountEditor(session, { canSave }) {
   async function leaveFrame() {
     if (canSave) await autosaver.flush();
     for (const layerId of unsavedLayers) {
-      heldBitmaps.set(session.frame.bitmapRefs[layerId], await canvasApi.exportPNG(layerId));
+      const blob = await canvasApi.exportPNG(layerId);
+      heldBitmaps.set(session.frame.bitmapRefs[layerId], blob);
+      devLog.add('held', { frame: tag(session.frame.id), layer: short(layerId), bytes: blob.size });
     }
     unsavedLayers.clear();
   }
@@ -894,7 +930,13 @@ function mountEditor(session, { canSave }) {
     if (!next) throw new Error(`No frame ${frameId}`);
     await leaveFrame();
     if (ensureBitmapRefs(next, project.layers) && canSave) await saveFrame(next);
-    const images = await decodeFrameImages(project.layers, next, readBitmap);
+    const loadedBytes = [];
+    const images = await decodeFrameImages(project.layers, next, async (ref) => {
+      const blob = await readBitmap(ref);
+      loadedBytes.push(blob ? blob.size : 0);
+      return blob;
+    });
+    devLog.add('show', { from: tag(session.frame.id), to: tag(frameId), bytes: loadedBytes.join('/') });
     const reference = await decodeReference(next, readBitmap, canvasApi.getReferenceKey());
 
     session.frame = next;
@@ -920,6 +962,7 @@ function mountEditor(session, { canSave }) {
     const { frame } = record;
     ensureBitmapRefs(frame, project.layers);
     project.frames = insertFrameId(project.frames, frame.id, record.index);
+    devLog.add('frame-in', { frame: tag(frame.id) });
     const byId = new Map([...session.frames, frame].map((f) => [f.id, f]));
     session.frames = project.frames.map((id) => byId.get(id));
     await persistStructure();
@@ -933,6 +976,7 @@ function mountEditor(session, { canSave }) {
     const id = record.frame.id;
     const { frameIds, index } = removeFrameId(project.frames, id);
     if (index < 0) throw new Error(`No frame ${id} to remove`);
+    devLog.add('frame-out', { frame: tag(id) });
     if (session.frame.id === id) await showFrame(frameAfterRemoval(frameIds, index));
     record.frame = session.frames.find((f) => f.id === id);
     record.index = index;
@@ -984,6 +1028,7 @@ function mountEditor(session, { canSave }) {
 
     const { layers, layer, index } = removeLayer(project.layers, layerId);
     if (!layer) throw new Error(`No layer ${layerId} to remove`);
+    devLog.add('layer-out', { layer: short(layerId), keptInMemory: Boolean(blob) });
     const { frames, refs } = detachLayerRefs(session.frames, layerId);
     unsavedLayers.delete(layerId);
 
@@ -1003,6 +1048,7 @@ function mountEditor(session, { canSave }) {
   async function attach(record) {
     const { layer, index, refs } = record;
     const frames = attachLayerRefs(session.frames, layer.id, refs);
+    devLog.add('layer-in', { layer: short(layer.id) });
     let blob = record.blob;
     if (!blob && refs[session.frame.id]) blob = await readBitmap(refs[session.frame.id]);
     const image = blob ? await createImageBitmap(blob) : null;
@@ -1063,6 +1109,12 @@ function mountEditor(session, { canSave }) {
   // under exclusive(); the entry moves stacks right away.
   function applyEntry(entry, direction) {
     const undoing = direction === 'undo';
+    devLog.add(direction, {
+      type: entry.type,
+      frame: entry.frameId ? tag(entry.frameId) : entry.record?.frame ? tag(entry.record.frame.id) : null,
+      layer: entry.layerId ? short(entry.layerId) : entry.record?.layer ? short(entry.record.layer.id) : null,
+      at: tag(session.frame.id),
+    });
     switch (entry.type) {
       case 'pixels':
         if (entry.frameId !== session.frame.id) {
@@ -1119,6 +1171,7 @@ function mountEditor(session, { canSave }) {
   }
 
   canvasApi.onChange(({ rect, before, layerId, tool }) => {
+    devLog.add('stroke', { tool, frame: tag(session.frame.id), layer: short(layerId), rect: `${rect.w}x${rect.h}` });
     if (tool === 'draw' || tool === 'fill') noteColorUsed(canvasApi.getSettings().color);
     history.push({
       type: 'pixels',
@@ -1132,7 +1185,12 @@ function mountEditor(session, { canSave }) {
     panel.refreshThumbnail(layerId);
   });
 
-  canvasApi.onGesture((name) => (name === 'undo' ? undo() : redo()));
+  canvasApi.onGesture((name) => {
+    devLog.add('gesture', name);
+    if (name === 'undo') undo();
+    else redo();
+  });
+  canvasApi.onDebug((event, details) => devLog.add(event, { frame: tag(session.frame.id), ...details }));
 
   canvasApi.onBlocked((reason) => {
     showBanner(reason === 'locked'
@@ -1208,6 +1266,7 @@ function mountEditor(session, { canSave }) {
       }
     }
     if (canSave) await copyBlobs(project.id, stored);
+    devLog.add('copy', { pairs: pairs.length, stored: stored.length, held: pairs.length - stored.length });
   }
 
   // --- reference image (step 3a) ---
@@ -1316,6 +1375,7 @@ function mountEditor(session, { canSave }) {
     const frame = session.frames.find((f) => f.id === frameId);
     if (!frame) return;
     frame.image = after;
+    devLog.add('image', { frame: tag(frameId), photo: after ? short(after.blobRef) : null });
     saveFrameRecord(frame);
     history.push({ type: 'image', frameId, before, after, bytes: 0 });
     refreshPanel();
@@ -1495,6 +1555,7 @@ function mountEditor(session, { canSave }) {
       showBanner('This layer is hidden. Show it in Layers to clear it.');
       return;
     }
+    devLog.add('clear', { frame: tag(session.frame.id), layer: short(id) });
     canvasApi.clear();
   }
 
@@ -1525,6 +1586,7 @@ function mountEditor(session, { canSave }) {
       canvasApi.setLayerProps(id, { opacity: before });
       return;
     }
+    devLog.add('layer-prop', { layer: short(id), opacity: after });
     applyLayerChanges(id, { opacity: after });
     history.push({
       type: 'layer-props', layerId: id, before: { opacity: before }, after: { opacity: after }, bytes: 0,
@@ -1535,7 +1597,10 @@ function mountEditor(session, { canSave }) {
   function toggleLayerProp(id, prop) {
     if (busy) return;
     const layer = project.layers.find((l) => l.id === id);
-    if (layer) applyLayerChanges(id, { [prop]: !layer[prop] });
+    if (layer) {
+      devLog.add('layer-prop', { layer: short(id), [prop]: !layer[prop] });
+      applyLayerChanges(id, { [prop]: !layer[prop] });
+    }
   }
 
   function renameLayer(id, name) {
@@ -1590,12 +1655,26 @@ function mountEditor(session, { canSave }) {
     save: async () => {
       const layerIds = [...unsavedLayers];
       unsavedLayers.clear();
+      // Which frame these pixels belong to is settled *before* any
+      // await: every layer is exported in this same tick (toBlob copies
+      // the pixels when it's called), and each goes to the ref of the
+      // frame it was exported from — never to whatever frame is open by
+      // the time the encode finishes.
+      const frame = session.frame;
+      const exports = layerIds.map((layerId) => {
+        const encoding = canvasApi.exportPNG(layerId);
+        encoding.catch(() => {}); // a failure is handled where it's awaited
+        return { layerId, ref: frame.bitmapRefs[layerId], blob: encoding };
+      });
       try {
-        for (const layerId of layerIds) {
-          const blob = await canvasApi.exportPNG(layerId);
-          await saveLayerBitmap(project.id, session.frame.bitmapRefs[layerId], blob);
+        for (const { layerId, ref, blob: encoding } of exports) {
+          const blob = await encoding;
+          await saveLayerBitmap(project.id, ref, blob);
+          devLog.add('save', { frame: tag(frame.id), layer: short(layerId), bytes: blob.size });
         }
+        if (session.frame !== frame) devLog.add('save-note', 'frame changed during save');
       } catch (err) {
+        devLog.add('save-failed', { frame: tag(frame.id), error: String(err?.message ?? err) });
         // Re-saving one that did land is harmless; losing one isn't.
         for (const layerId of layerIds) unsavedLayers.add(layerId);
         throw err;
@@ -1621,6 +1700,7 @@ function mountEditor(session, { canSave }) {
   // Saves everything now, then redraws the thumbnail if frame 1
   // changed. Thumbnail failures are only logged.
   async function flush() {
+    devLog.add('flush', { at: tag(session.frame.id), unsaved: unsavedLayers.size, held: heldBitmaps.size });
     finishAdjust();
     stopPlayback();
     await Promise.all([autosaver.flush(), projectSaver.flush(), frameSaves]);
@@ -1649,6 +1729,7 @@ function mountEditor(session, { canSave }) {
   async function close() {
     if (closing || !canAct()) return;
     closing = true;
+    devLog.add('close', { at: tag(session.frame.id) });
     busy = true;
     canvasApi.setInputBlocked(true);
     refreshPanel();

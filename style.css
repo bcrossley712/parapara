@@ -1581,6 +1581,23 @@ html, body {
   padding-left: 12px;
 }
 
+.pp-dev-log__text {
+  max-height: 360px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  touch-action: pan-x pan-y;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .pp-dev-report__section {
   padding-top: 10px !important;
   font-size: 12px;

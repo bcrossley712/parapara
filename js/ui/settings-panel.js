@@ -15,7 +15,9 @@
 //   only, the gallery's gear menu leaves it out). Clear moved to the
 //   layers panel in 2e. Step 4a-i adds two playback measurements
 //   (timeline/dev-stress.js): Playback speed test and Frame memory
-//   test, editor only like Fill all layers.
+//   test, editor only like Fill all layers. After 4b, Activity log
+//   (storage/dev-log.js): the last few hundred things that happened,
+//   to copy out when a drawing goes missing. Both screens.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -29,6 +31,7 @@ export function createSettingsPanel(actions) {
     fillAllLayers,     // () => void, optional (editor only)
     playbackSpeedTest, // () => void, optional (editor only)
     frameMemoryTest,   // () => void, optional (editor only)
+    showActivityLog,   // () => void, optional
   } = actions;
 
   const panel = document.createElement('div');
@@ -78,7 +81,13 @@ export function createSettingsPanel(actions) {
   memoryHint.className = 'pp-settings__hint';
   memoryHint.textContent = 'Holds more and more frames until the iPad says no. May reload the app; your drawing is saved first.';
 
+  const logBtn = makeButton('Activity log');
+  const logHint = document.createElement('div');
+  logHint.className = 'pp-settings__hint';
+  logHint.textContent = 'What happened recently, to copy and send if a drawing goes missing.';
+
   panel.append(title, versionRow, checkBtn, status, devLabel, freshBtn, freshHint);
+  if (showActivityLog) panel.append(logBtn, logHint);
   if (fillAllLayers) panel.append(fillBtn, fillHint);
   if (playbackSpeedTest) panel.append(speedBtn, speedHint);
   if (frameMemoryTest) panel.append(memoryBtn, memoryHint);
@@ -138,6 +147,11 @@ export function createSettingsPanel(actions) {
   speedBtn.addEventListener('click', () => {
     playbackSpeedTest();
     setOpen(false);
+  });
+
+  logBtn.addEventListener('click', () => {
+    setOpen(false);
+    showActivityLog();
   });
 
   memoryBtn.addEventListener('click', () => {
