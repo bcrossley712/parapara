@@ -3,11 +3,13 @@
 // Pure math for the reference image's placement (step 3a). No DOM, so
 // it's unit-tested directly.
 //
-// A placement is { x, y, scale, rotation, opacity }, all in canvas
-// pixels: (x, y) is where the image's center sits, `scale` is canvas
-// px per image px, `rotation` is radians clockwise. This is the
-// schema's frame.image minus blobRef. Drawing it is
-//   translate(x, y) · rotate(rotation) · scale(scale) · translate(-w/2, -h/2)
+// A placement is { x, y, scale, rotation, opacity, flipX, flipY }, all
+// in canvas pixels: (x, y) is where the image's center sits, `scale`
+// is canvas px per image px (always positive), `rotation` is radians
+// clockwise, and flipX/flipY (3b; missing = false) mirror the image
+// across its own vertical/horizontal axis. This is the schema's
+// frame.image minus blobRef. Drawing it is
+//   translate(x, y) · rotate(rotation) · scale(±scale, ±scale) · translate(-w/2, -h/2)
 // for an image of w × h pixels (see reference.js).
 //
 // Adjust mode feeds pointer positions here already converted to canvas
@@ -36,6 +38,23 @@ export function fitPlacement(imageW, imageH, canvasW, canvasH) {
     scale: Math.min(canvasW / imageW, canvasH / imageH),
     rotation: 0,
     opacity: DEFAULT_IMAGE_OPACITY,
+    flipX: false,
+    flipY: false,
+  };
+}
+
+// Flip as she sees it on screen: 'horizontal' mirrors left↔right,
+// 'vertical' top↔bottom, about the image's center, whatever its
+// rotation. Mirroring across a canvas axis is the same as mirroring
+// across the image's own axis with the rotation negated (M·R(θ) =
+// R(−θ)·M), so only the flag and the angle change; x, y and scale
+// stay put. Flipping twice gives back the same look.
+export function flipPlacement(placement, direction) {
+  const key = direction === 'vertical' ? 'flipY' : 'flipX';
+  return {
+    ...placement,
+    rotation: placement.rotation === 0 ? 0 : -placement.rotation,
+    [key]: placement[key] !== true,
   };
 }
 
@@ -86,14 +105,20 @@ export function pinchPlacement(start, { a0, b0, a1, b1, turned }, size) {
 // (for drawing just a region of the canvas).
 export function placementMatrix(placement, imageW, imageH, { unit = 1, originX = 0, originY = 0 } = {}) {
   const s = placement.scale * unit;
-  const cos = Math.cos(placement.rotation) * s;
-  const sin = Math.sin(placement.rotation) * s;
+  const sx = placement.flipX === true ? -s : s;
+  const sy = placement.flipY === true ? -s : s;
+  const cos = Math.cos(placement.rotation);
+  const sin = Math.sin(placement.rotation);
   const tx = (placement.x - originX) * unit;
   const ty = (placement.y - originY) * unit;
-  // translate(tx, ty) · rotate · scale(s) · translate(-w/2, -h/2)
+  // translate(tx, ty) · rotate · scale(sx, sy) · translate(-w/2, -h/2)
+  const a = cos * sx;
+  const b = sin * sx;
+  const c = -sin * sy;
+  const d = cos * sy;
   const hw = imageW / 2;
   const hh = imageH / 2;
-  return [cos, sin, -sin, cos, tx - cos * hw + sin * hh, ty - sin * hw - cos * hh];
+  return [a, b, c, d, tx - a * hw - c * hh, ty - b * hw - d * hh];
 }
 
 // True when two placements would look the same — Done on an untouched
@@ -101,7 +126,9 @@ export function placementMatrix(placement, imageW, imageH, { unit = 1, originX =
 export function samePlacement(p, q) {
   if (!p || !q) return p === q;
   return p.x === q.x && p.y === q.y && p.scale === q.scale
-    && p.rotation === q.rotation && p.opacity === q.opacity;
+    && p.rotation === q.rotation && p.opacity === q.opacity
+    && (p.flipX === true) === (q.flipX === true)
+    && (p.flipY === true) === (q.flipY === true);
 }
 
 // A saved placement with anything missing or broken replaced, so a
@@ -116,5 +143,7 @@ export function sanitizePlacement(raw, imageW, imageH, canvasW, canvasH) {
     scale: scale > 0 ? clampImageScale(scale, { imageW, imageH, canvasW, canvasH }) : fit.scale,
     rotation: num(raw?.rotation, 0),
     opacity: Math.min(1, Math.max(0, num(raw?.opacity, DEFAULT_IMAGE_OPACITY))),
+    flipX: raw?.flipX === true,
+    flipY: raw?.flipY === true,
   };
 }

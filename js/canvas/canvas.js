@@ -1599,7 +1599,8 @@ export function initCanvas(container, options = {}) {
     // main.js owns which image a frame has; the canvas only shows it.
 
     // Shows `image` (decoded; drawImage-able) keyed by `key` (its
-    // blobRef) at `placement` ({ x, y, scale, rotation, opacity }), or
+    // blobRef) at `placement` ({ x, y, scale, rotation, opacity,
+    // flipX, flipY }), or
     // nothing for a null key. A key that's already showing keeps its
     // pixels — pass image null then to change only the placement.
     setReference(key, image, placement) {
@@ -1617,8 +1618,11 @@ export function initCanvas(container, options = {}) {
     getReferenceSize() {
       return reference.size();
     },
+    // A finger still on the image carries on from the new placement
+    // (a flip mid-drag isn't undone by the next move).
     setReferencePlacement(placement) {
       reference.setPlacement(placement);
+      if (adjusting && adjustPointers.size > 0) restartAdjustMotion(performance.now());
     },
     // Hide images (project-wide): off screen and out of readVisible.
     setReferenceHidden(hidden) {

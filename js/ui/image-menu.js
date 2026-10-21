@@ -2,8 +2,9 @@
 //
 // The top bar's Image button and its menu (3a): the one home for the
 // reference image. Add image (Adjust image once this frame has one),
-// and Hide/Show images for the whole project; 3b adds Use on all frames
-// and Flip photo here. The button shows state at a glance: a dot when
+// Use on all frames (3b; when this frame has one and there are other
+// frames), and Hide/Show images for the whole project. Flip lives in
+// the adjust bar, since it's part of placing. The button shows state at a glance: a dot when
 // this frame has an image, a slashed picture when images are hidden.
 //
 // Pure UI: main.js passes state in through render() and gets intents
@@ -12,7 +13,7 @@
 
 // callbacks: onImage() (add or adjust — must open the picker
 //   synchronously, iOS only allows it inside the tap),
-//   onToggleImages()
+//   onUseOnAllFrames(), onToggleImages()
 // options.container: the element the menu is positioned in.
 // options.signal: aborts the tap-outside listener when the editor is
 //   torn down.
@@ -27,7 +28,7 @@ export function createImageMenu(callbacks, { container, signal } = {}) {
   dot.className = 'pp-image-btn__dot';
   button.append(icon, dot);
 
-  let state = { current: false, any: false, hidden: false, busy: false };
+  let state = { current: false, any: false, frameCount: 1, hidden: false, busy: false };
   let menu = null;
 
   function closeMenu() {
@@ -42,6 +43,9 @@ export function createImageMenu(callbacks, { container, signal } = {}) {
     menu.className = 'pp-image-menu';
     menu.setAttribute('role', 'menu');
     menu.append(item(state.current ? 'Adjust image' : 'Add image', () => callbacks.onImage()));
+    if (state.current && state.frameCount > 1) {
+      menu.append(item('Use on all frames', () => callbacks.onUseOnAllFrames()));
+    }
     if (state.any) {
       menu.append(item(state.hidden ? 'Show images' : 'Hide images', () => callbacks.onToggleImages()));
     }
@@ -80,7 +84,7 @@ export function createImageMenu(callbacks, { container, signal } = {}) {
   }, { signal, capture: true });
 
   // state: { current (this frame has an image), any (some frame has
-  //   one), hidden (Hide images is on), busy }
+  //   one), frameCount, hidden (Hide images is on), busy }
   function render(next) {
     state = { ...state, ...next };
     if (menu) closeMenu();

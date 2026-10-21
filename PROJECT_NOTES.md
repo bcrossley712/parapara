@@ -92,27 +92,25 @@ icon, manifest `name`/`short_name`, and repo copy.
   and the reference image (3a). How each works is under Architecture;
   she mostly undoes with the buttons, not gestures. The color picker's
   layout is a first try — adjust if she wants it different.
-- **3a, still to check on the iPad** (in passing during 3b): the
-  top-bar **Image** button (moved there after her first trial; e2e
-  only so far), a HEIC photo from Photos, memory with a large photo,
-  stylus feel when adjusting, and the adjust outline's thickness when
-  zoomed in.
-- **Next: step 3b, then step 4.** Each step is confirmed on the iPad
-  before the next starts.
-  - **3b Reference across frames** ([why](docs/DESIGN_NOTES.md#reference-image)):
-    "Use on all frames" copies this frame's image and transform to
-    every frame as one undo entry; each frame keeps its own transform
-    afterward. A new frame inherits the image only if every existing
-    frame shares the same one. Also a flip-photo button (negative
-    scale) and the frame-strip marker. **Confirm at the start:** where
-    "Use on all frames" and "Flip photo" go (leaning: Image menu for
-    the first, adjust bar for Flip, since flipping is part of placing),
-    and whether the storage warning (~80% of quota) comes in now — her
-    iPad runs near full.
-  - **Then step 4** — playback, onion skin, full frame strip (reorder,
-    delete, a picture thumbnail on each tile that keeps its number).
-    This is when she first sees her animation move, so nothing new
-    goes ahead of it without a deliberate decision.
+- **Step 3b (reference across frames): built and tested, not yet
+  confirmed on the iPad.** Use on all frames, new frames inheriting a
+  shared photo, Flip ↔ / ↕ (details under Architecture → Reference
+  image). Check on the iPad: the adjust bar's fit in landscape and how
+  flipping feels mid-adjust, plus 3a's leftovers — the top-bar
+  **Image** button, a HEIC photo from Photos, memory with a large
+  photo, stylus feel when adjusting, and the adjust outline's
+  thickness when zoomed in.
+- **Ask her after she tries 3b** ([why](docs/DESIGN_NOTES.md#reference-image)):
+  does she want to draw/erase on the photo itself (→ "Make into
+  layer"), and does starting at 50% bother her when it's a background
+  (→ remember her last opacity, or a choice on import)?
+- **Next: step 4** — playback, onion skin, full frame strip (reorder,
+  delete, a picture thumbnail on each tile that keeps its number; the
+  thumbnail **includes the reference image** unless Hide images is on,
+  which is how she sees which frames have one — there's no separate
+  marker). This is when she first sees her animation move, so nothing
+  new goes ahead of it without a deliberate decision. Each step is
+  confirmed on the iPad before the next starts.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -143,6 +141,12 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
 - **Export format** (container/codec) — decide at step 6.
+- **Step 6: does the reference image go into the export?** A tracing
+  photo usually shouldn't, a background should. Today Hide images
+  decides both what she sees and what exports; consider an "include
+  images" choice when exporting.
+- **Storage warning** (~80% of quota) — deferred to step 6, when
+  export gives it a remedy to point at.
 - **Copy / paste a layer's drawing between frames** (copy this
   layer on this frame, paste into the same layer on another) — the
   usual animation-app way; goes with step 4's frame strip, or step 3's
@@ -159,13 +163,14 @@ icon, manifest `name`/`short_name`, and repo copy.
   items stay fixed. Saved app-wide.
   ([details](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred))
 - **"Make into layer"** (bake the reference image into a new layer) —
-  only if tracing a reference doesn't feel right to her. This is
-  additive, not a rewrite.
+  only if she wants to draw/erase on the photo itself (ask after 3b).
+  This is additive, not a rewrite.
 
 **Planned UI layout** (from wireframes): tool rail down the left;
 transport (skip / play / skip + fps) between canvas and timeline;
-horizontally scrolling frame strip with a dashed "add frame" tile and
-a marker on frames with an imported image; onion-skin toggle as a
+horizontally scrolling frame strip with a dashed "add frame" tile
+(the wireframe's image marker was dropped in 3b — step 4's thumbnails
+show the photo instead); onion-skin toggle as a
 badge on the canvas; Share as a first-class top-bar icon. Layers panel
 on the right, over the canvas (doesn't shrink it), opened from a
 top-bar button. Until step 4 the frame strip shows numbered tiles only,
@@ -244,7 +249,9 @@ Short rules; reasoning in the linked sections.
     resyncs it. The same copy reverts a touch that became a gesture.
   - Layer structure changes are undoable on the same stack (new entry
     `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
-    frame, and `'image'` (3a). **Visibility, lock and Hide images are
+    frame, `'image'` (3a), and `'image-all'` (3b, Use on all frames:
+    keeps each changed frame's old image; undo jumps to the frame it
+    was applied from). **Visibility, lock and Hide images are
     not undoable** (view state, as in Photoshop). Rename isn't either. An entry for another frame moves
     to that frame first. Undoing an add frame takes the frame out (its
     record is deleted, its pixels stay in storage for redo).
@@ -328,10 +335,30 @@ Short rules; reasoning in the linked sections.
     share one blob. Placement math is pure (`canvas/transform.js`);
     display and import live in `canvas/reference.js`.
   - Controls: the top-bar **Image** button (`ui/image-menu.js`) —
-    Add/Adjust image, and project-wide **Hide images**
-    (`referenceHidden`, view state, not undoable). Adjust mode swaps
-    the rail for a bar (opacity, Replace, Delete, Done); in it two
-    fingers transform the image, not the view; undo/redo are off.
+    Add/Adjust image, **Use on all frames** (3b; shown when this frame
+    has one and there are other frames), and project-wide **Hide
+    images** (`referenceHidden`, view state, not undoable). Adjust
+    mode swaps the rail for a bar (opacity, Flip ↔, Flip ↕, Replace,
+    Delete, Done); in it two fingers transform the image, not the
+    view; undo/redo are off. No frame-strip marker.
+  - **Flip (3b):** `flipX`/`flipY` booleans (missing = false), never a
+    negative scale (`sanitizePlacement` would reset it to a fresh
+    fit). Flips as seen on screen, whatever the rotation
+    (`flipPlacement`: toggles the flag, negates rotation). Part of the
+    adjust session's one undo step. Everything draws through
+    `placementMatrix`, so view, `readVisible`, thumbnail, and later
+    onion skin/export all get it.
+  - **Use on all frames (3b):** copies this frame's image record
+    (photo + placement + flips) onto every frame as one `'image-all'`
+    entry; frames keep their own placement afterward. A custom confirm
+    only when another frame has a *different* photo (blank frames and
+    a re-placed copy of the same photo don't ask). Banner says how
+    many frames. Rules are pure in `timeline/frames.js`
+    (`imageForAllFrames`).
+  - **New frames inherit (3b):** add frame copies the current frame's
+    image when every frame has the same photo — including a project
+    with one frame — else starts blank (`inheritedImage`). No schema
+    flag. Copy frame already shares the image.
   - One adjust session = one `'image'` undo entry (small records;
     blobs stay in storage for the sweep). Leaving the app commits too.
     **The commit queues its frame save on `frameSaves`; `flush()` and
@@ -349,7 +376,7 @@ Short rules; reasoning in the linked sections.
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
-  ~80% quota.
+  ~80% quota (with step 6).
 
 ## Don't break these
 
@@ -506,7 +533,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
-        frames.js         pure frame-order ops (insert/remove/neighbor)
+        frames.js         pure frame-order ops (insert/remove/neighbor);
+                          reference image across frames (3b)
         frame-strip.js    frame strip + frame menu (UI only; intents
                           via callbacks)
         timeline.js       placeholder: playback, onion skin (step 4)
@@ -552,7 +580,8 @@ bitmap. Planned fields are marked. Extend additively.
     frame = {
       id, projectId,
       bitmapRefs: { [layerId]: bitmapRef },   // one per project layer
-      image: { blobRef, x, y, scale, rotation, opacity } | null   // 3a; 3b may add a flip field
+      image: { blobRef, x, y, scale, rotation, opacity, flipX, flipY } | null
+                                              // 3a; flipX/flipY 3b, missing = false
       // frames can share one image blob (copy frame, 3b's "all frames")
     }
 
@@ -622,4 +651,4 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   release between projects, the iPadOS 26 top-edge blur (desktop
   Chromium never draws it), long-press feel, the photo picker (Photos
   vs Files, HEIC arriving as JPEG), memory with large imported photos,
-  adjusting an image by finger and stylus.
+  adjusting and flipping an image by finger and stylus.

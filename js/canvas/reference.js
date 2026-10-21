@@ -10,7 +10,7 @@
 //   - prepareImport: turns a picked file into the stored image
 //     (downscaled, re-encoded) and its starting placement.
 // Placement math lives in transform.js. Knows nothing about storage
-// or the schema beyond { x, y, scale, rotation, opacity }.
+// or the schema beyond { x, y, scale, rotation, opacity, flipX, flipY }.
 
 import { placementMatrix, fitPlacement } from './transform.js';
 

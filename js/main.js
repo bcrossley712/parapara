@@ -71,6 +71,8 @@ import {
   insertFrameId,
   removeFrameId,
   frameAfterRemoval,
+  imageForAllFrames,
+  inheritedImage,
 } from './timeline/frames.js';
 import {
   MAX_RECENTS,
@@ -85,7 +87,7 @@ import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { renderThumbnail } from './canvas/thumbnail.js';
 import { prepareImport } from './canvas/reference.js';
-import { sanitizePlacement, samePlacement } from './canvas/transform.js';
+import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
 
 // Colors for the developer "Fill all layers" memory test.
@@ -470,12 +472,17 @@ function mountEditor(session, { canSave }) {
     },
     images: {
       onImage: () => addOrAdjustImage(),
+      onUseOnAllFrames: () => useImageOnAllFrames(),
       onToggleImages: () => toggleImages(),
     },
     reference: {
       onOpacityInput: (opacity) => {
         const placement = canvasApi.getReferencePlacement();
         if (placement) canvasApi.setReferencePlacement({ ...placement, opacity });
+      },
+      onFlip: (direction) => {
+        const placement = canvasApi.getReferencePlacement();
+        if (placement) canvasApi.setReferencePlacement(flipPlacement(placement, direction));
       },
       onReplace: () => pickImage(),
       onDelete: () => deleteImage(),
@@ -552,6 +559,7 @@ function mountEditor(session, { canSave }) {
     ui.images.render({
       current: Boolean(session.frame.image?.blobRef),
       any: session.frames.some((f) => f.image?.blobRef),
+      frameCount: session.frames.length,
       hidden: project.referenceHidden === true,
       busy,
     });
@@ -692,6 +700,9 @@ function mountEditor(session, { canSave }) {
   //   'frame-add'     { record }  record = { frame, index }
   //   'image'         { frameId, before, after }  (3a) frame.image
   //                   records (null = none); blobs stay in storage
+  //   'image-all'     { frameId, before, after }  (3b) Use on all
+  //                   frames: before = { [frameId]: image } for each
+  //                   frame it changed, after = the image they got
   // Adding and deleting are the same two operations run in opposite
   // directions: detach (pixels stay in storage under the frames' old
   // refs, which the record keeps) and attach (put the layer and refs
@@ -828,6 +839,9 @@ function mountEditor(session, { canSave }) {
       case 'image':
         exclusive(() => setFrameImage(entry.frameId, undoing ? entry.before : entry.after));
         return entry;
+      case 'image-all':
+        exclusive(() => applyImageAll(entry, undoing));
+        return entry;
       default:
         throw new Error(`Unknown history entry type ${entry.type}`);
     }
@@ -874,15 +888,17 @@ function mountEditor(session, { canSave }) {
   }
 
   // A blank frame right after the current one, with a slot for every
-  // layer; she's moved onto it. Undoable (stands in for delete until
+  // layer; she's moved onto it. It keeps the reference image when
+  // every frame shares one (inheritedImage). Undoable (stands in for delete until
   // the full strip in step 4).
   function addFrame() {
     if (!canAct()) return;
     exclusive(async () => {
-      const record = {
-        frame: createFrame(project.id, project.layers),
-        index: insertIndexAfter(project.frames, session.frame.id),
-      };
+      const frame = createFrame(project.id, project.layers);
+      // A photo every frame shares is a background: the new frame gets
+      // it too, placed as on the frame she's adding after (3b).
+      frame.image = inheritedImage(session.frames, session.frame);
+      const record = { frame, index: insertIndexAfter(project.frames, session.frame.id) };
       await insertFrame(record);
       history.push({ type: 'frame-add', record, bytes: 0 });
     });
@@ -1065,6 +1081,62 @@ function mountEditor(session, { canSave }) {
     const placement = sanitizePlacement(image, size.width, size.height, project.canvas.width, project.canvas.height);
     canvasApi.setReference(image.blobRef, decoded.bitmap, placement);
     decoded.bitmap?.close?.();
+  }
+
+  // Use on all frames (3b, Image menu): this frame's image — photo and
+  // placement — onto every frame, as one undo step. Each frame then
+  // keeps its own copy of the placement, so nudging one later doesn't
+  // move the rest. The photo is stored once and shared. If another
+  // frame has a different photo, she confirms first: undo can bring it
+  // back, but only until she closes the project.
+  async function useImageOnAllFrames() {
+    if (!canAct() || adjust) return;
+    const frameId = session.frame.id;
+    const plan = () => imageForAllFrames(session.frames, frameId, sameImage);
+    let found = plan();
+    if (!found || canvasApi.getReferenceKey() !== found.image.blobRef) return;
+    if (Object.keys(found.before).length === 0) {
+      showBanner('Every frame already has this image.');
+      return;
+    }
+    if (found.replacesOther) {
+      const yes = await showConfirm({
+        title: 'Replace the other photos?',
+        message: 'Some frames have a different photo. They will all get this one instead.',
+        confirmLabel: 'Replace',
+        cancelLabel: 'Cancel',
+      });
+      // Things may have moved on while the dialog was up.
+      if (!yes || !canAct() || adjust || session.frame.id !== frameId) return;
+      found = plan();
+      if (!found || Object.keys(found.before).length === 0) return;
+    }
+    const entry = { type: 'image-all', frameId, before: found.before, after: { ...found.image }, bytes: 0 };
+    exclusive(async () => {
+      history.push(entry);
+      await applyImageAll(entry, false);
+      showBanner(`Image placed on all ${session.frames.length} frames.`);
+    });
+  }
+
+  // Applies an 'image-all' entry (undoing: each frame gets its old
+  // image back). The open frame is the one it was applied from, whose
+  // image never changes, so nothing on screen needs redrawing. Call
+  // inside exclusive().
+  async function applyImageAll(entry, undoing) {
+    await showFrame(entry.frameId);
+    for (const frame of session.frames) {
+      if (!(frame.id in entry.before)) continue;
+      frame.image = undoing ? entry.before[frame.id] : { ...entry.after };
+    }
+    thumbnailStale = true;
+    if (!canSave) return;
+    try {
+      await saveProjectAndFrames(project, session.frames);
+    } catch (err) {
+      console.error('Parapara! saving frames failed:', err);
+      showNotice("Your image change couldn't be saved. The iPad may be out of space.");
+    }
   }
 
   function toggleImages() {

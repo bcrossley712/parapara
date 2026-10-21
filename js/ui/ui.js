@@ -42,9 +42,9 @@ import { createImageMenu } from './image-menu.js';
 //   ({ onPaletteAdd(hex), onPaletteReplace(index, hex),
 //   onPaletteRemove(index) } — hex is the current color).
 // options.images: the top bar's Image menu intents ({ onImage,
-//   onToggleImages }, see image-menu.js).
+//   onUseOnAllFrames, onToggleImages }, see image-menu.js).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
-//   onReplace, onDelete, onDone }, see reference-bar.js). onDone also
+//   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
 //   fires when she taps any other control while adjusting.
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
@@ -97,7 +97,7 @@ export function initUI(container, options = {}) {
   });
   // Image (3a): the reference image's one home, beside Layers.
   const imageMenu = createImageMenu({
-    onImage: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
+    onImage: () => {}, onUseOnAllFrames: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
   }, { container: shell, signal });
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
   topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn);
@@ -360,7 +360,8 @@ export function initUI(container, options = {}) {
   }
 
   const referenceBar = createReferenceBar({
-    onOpacityInput: () => {}, onReplace: () => {}, onDelete: () => {}, onDone: () => {},
+    onOpacityInput: () => {}, onFlip: () => {}, onReplace: () => {}, onDelete: () => {},
+    onDone: () => {},
     ...referenceCallbacks,
   });
   let adjustingOn = false;

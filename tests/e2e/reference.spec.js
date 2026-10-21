@@ -3,7 +3,8 @@
 // opacity, Delete, Replace, Done, and tapping another control to
 // commit), undo/redo, Hide images, fill and the eyedropper seeing it,
 // the gallery thumbnail, and copy frame / duplicate project sharing
-// or copying it.
+// or copying it. Step 3b: Flip ↔ / ↕, Use on all frames (confirm,
+// undo) and a new frame inheriting a shared image.
 //
 // Run: npm run test:e2e
 //
@@ -259,16 +260,16 @@ test('tapping another control while adjusting commits, and that control still wo
   await openApp(page);
   await addImage(page);
   await drag(page, { x: 800, y: 500 }, { x: 900, y: 500 });
-  // Add frame: commits the image on frame 1, then adds frame 2.
+  // Add frame: commits the image on frame 1, then adds frame 2 — which
+  // inherits it (3b: every frame shared it), placed as committed.
   await addFrameBtn(page).click();
   await expect(bar(page)).toHaveCount(0);
   await expect(tiles(page)).toHaveCount(2);
   await settled(page);
-  await expect(refImage(page)).toHaveCount(0); // frame 2 has none
+  await expect(refImage(page)).toHaveCount(1);
+  await expect.poll(async () => (await readDb(page, 'frames')).filter((f) => f.image).length).toBe(2);
   const frames = await readDb(page, 'frames');
-  const withImage = frames.filter((f) => f.image);
-  expect(withImage).toHaveLength(1);
-  expect(Math.abs(withImage[0].image.x - 1060)).toBeLessThan(3);
+  for (const f of frames) expect(Math.abs(f.image.x - 1060)).toBeLessThan(3);
 });
 
 test('fill stops at the photo and the eyedropper picks it; Hide images takes it out of both and is remembered', async ({ page }) => {
@@ -459,4 +460,188 @@ test('a big photo is shrunk to the canvas size and saved as JPEG; only a transpa
   await importFile(page, await madeImage(page, 400, 300, true));
   stored = await storedImage(page);
   expect(stored).toMatchObject({ type: 'image/png', width: 400, height: 300 });
+});
+
+// --- step 3b: flip, use on all frames, new frames inheriting ---
+
+const dialog = (page) => page.locator('.pp-dialog');
+
+async function adjust(page) {
+  await openImageMenu(page);
+  await page.getByRole('menuitem', { name: 'Adjust image' }).click();
+  await expect(bar(page)).toBeVisible();
+}
+
+async function goToFrame(page, n) {
+  await settled(page);
+  await tiles(page).nth(n - 1).click();
+  await expect(tiles(page).nth(n - 1)).toHaveClass(/is-current/);
+  await settled(page);
+}
+
+async function useOnAllFrames(page) {
+  await openImageMenu(page);
+  await page.getByRole('menuitem', { name: 'Use on all frames' }).click();
+}
+
+// Every frame's saved image blobRef, in timeline order (null = none).
+async function savedRefs(page) {
+  const project = (await readDb(page, 'projects'))[0];
+  const frames = await readDb(page, 'frames');
+  const byId = new Map(frames.map((f) => [f.id, f]));
+  return project.frames.map((id) => byId.get(id)?.image?.blobRef ?? null);
+}
+
+test('Flip ↔ mirrors the photo as she sees it, Flip ↕ too; one undo step, kept on reload', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  await done(page);
+  // Red on the left (50% over white).
+  expectNear(await pick(page, 480, 540), '#ff7f7f');
+
+  await adjust(page);
+  await bar(page).getByRole('button', { name: 'Flip horizontally' }).click();
+  await bar(page).getByRole('button', { name: 'Flip vertically' }).click();
+  await done(page);
+  await waitForSavedImage(page, (img) => img?.flipX === true && img?.flipY === true);
+  // Blue's on the left now; fill and the eyedropper see it the same way.
+  expectNear(await pick(page, 480, 540), '#7f7fff');
+
+  // Both flips were one adjust session: one undo (and redo).
+  await undoBtn(page).click();
+  await waitForSavedImage(page, (img) => img?.flipX === false && img?.flipY === false);
+  await redoBtn(page).click();
+  await waitForSavedImage(page, (img) => img?.flipX === true && img?.flipY === true);
+
+  // Kept on reload (undo history isn't).
+  await reloadApp(page);
+  expectNear(await pick(page, 480, 540), '#7f7fff');
+});
+
+test('flipping twice and Done is not an undo step', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  await done(page);
+  await adjust(page);
+  const flip = bar(page).getByRole('button', { name: 'Flip horizontally' });
+  await flip.click();
+  await flip.click();
+  await done(page);
+  // The only undo step is the import; undoing it removes the image.
+  await undoBtn(page).click();
+  await expect(refImage(page)).toHaveCount(0);
+  await expect(undoBtn(page)).toBeDisabled();
+});
+
+test('Use on all frames copies the photo and its placement onto blank frames, as one undo step', async ({ page }) => {
+  await openApp(page);
+  // One frame: the item isn't offered.
+  await addImage(page);
+  await done(page);
+  await openImageMenu(page);
+  await expect(page.getByRole('menuitem', { name: 'Use on all frames' })).toHaveCount(0);
+  await imageBtn(page).click(); // close
+  await undoBtn(page).click(); // back to no image
+  await expect(refImage(page)).toHaveCount(0);
+
+  // Frames 1–2 blank; then a photo on frame 3, moved.
+  await addFrameBtn(page).click();
+  await addFrameBtn(page).click();
+  await expect(tiles(page)).toHaveCount(3);
+  await addImage(page);
+  await drag(page, { x: 800, y: 500 }, { x: 900, y: 500 });
+  await done(page);
+  const source = await savedFrame(page);
+
+  await useOnAllFrames(page);
+  // Blank frames: no confirm.
+  await expect(page.locator('#pp-banner')).toHaveText('Image placed on all 3 frames.');
+  await expect(dialog(page)).toHaveCount(0);
+  await expect.poll(() => savedRefs(page)).toEqual([source.image.blobRef, source.image.blobRef, source.image.blobRef]);
+
+  await goToFrame(page, 1);
+  await expect(refImage(page)).toHaveCount(1);
+  const first = await savedFrame(page);
+  expect(Math.abs(first.image.x - 1060)).toBeLessThan(3);
+
+  // Each frame keeps its own placement afterward.
+  await adjust(page);
+  await drag(page, { x: 800, y: 500 }, { x: 800, y: 600 });
+  await done(page);
+  await waitForSavedImage(page, (img) => Math.abs(img.y - 640) < 3);
+  const all = await readDb(page, 'frames');
+  expect(all.filter((f) => Math.abs(f.image.y - 540) < 3)).toHaveLength(2);
+
+  // Undo the nudge, then Use on all frames: back on frame 3, frames 1–2 blank.
+  await undoBtn(page).click();
+  await waitForSavedImage(page, (img) => Math.abs(img.y - 540) < 3);
+  await undoBtn(page).click();
+  await expect(tiles(page).nth(2)).toHaveClass(/is-current/);
+  await expect.poll(() => savedRefs(page)).toEqual([null, null, source.image.blobRef]);
+  await redoBtn(page).click();
+  await expect.poll(() => savedRefs(page)).toEqual([source.image.blobRef, source.image.blobRef, source.image.blobRef]);
+});
+
+test('Use on all frames asks before replacing a different photo; Cancel changes nothing', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  await done(page);
+  const a = (await savedFrame(page)).image.blobRef;
+  // Frame 2 inherits it; give it a different photo.
+  await addFrameBtn(page).click();
+  await expect(tiles(page)).toHaveCount(2);
+  await settled(page);
+  await adjust(page);
+  const chooser = page.waitForEvent('filechooser');
+  await bar(page).getByRole('button', { name: 'Replace' }).click();
+  await (await chooser).setFiles(await testImage(page));
+  await expect(bar(page)).toContainText('Opacity 50%');
+  await done(page);
+  await waitForSavedImage(page, (img) => img.blobRef !== a);
+  const b = (await savedFrame(page)).image.blobRef;
+
+  await useOnAllFrames(page);
+  await expect(dialog(page)).toBeVisible();
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(await savedRefs(page)).toEqual([a, b]);
+  // Cancel made no undo step: undo still reverts the Replace.
+  await useOnAllFrames(page);
+  await dialog(page).getByRole('button', { name: 'Replace' }).click();
+  await expect.poll(() => savedRefs(page)).toEqual([b, b]);
+  await undoBtn(page).click();
+  await expect.poll(() => savedRefs(page)).toEqual([a, b]);
+});
+
+test('a new frame inherits a photo every frame shares, but not one from a rotoscope sequence', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  await done(page);
+  const a = (await savedFrame(page)).image.blobRef;
+  await addFrameBtn(page).click();
+  await expect(tiles(page)).toHaveCount(2);
+  await expect.poll(() => savedRefs(page)).toEqual([a, a]);
+  // Undo the add frame, redo: it comes back with the image.
+  await settled(page);
+  await undoBtn(page).click();
+  await expect(tiles(page)).toHaveCount(1);
+  await settled(page);
+  await redoBtn(page).click();
+  await expect(tiles(page)).toHaveCount(2);
+  await expect.poll(() => savedRefs(page)).toEqual([a, a]);
+
+  // Frame 2 gets its own photo: frames now differ, so frame 3 starts blank.
+  await settled(page);
+  await adjust(page);
+  const chooser = page.waitForEvent('filechooser');
+  await bar(page).getByRole('button', { name: 'Replace' }).click();
+  await (await chooser).setFiles(await testImage(page));
+  await expect(bar(page)).toContainText('Opacity 50%');
+  await done(page);
+  await waitForSavedImage(page, (img) => img.blobRef !== a);
+  await addFrameBtn(page).click();
+  await expect(tiles(page)).toHaveCount(3);
+  await settled(page);
+  await expect(refImage(page)).toHaveCount(0);
+  expect((await savedRefs(page))[2]).toBeNull();
 });

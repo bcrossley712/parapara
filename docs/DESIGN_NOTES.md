@@ -508,6 +508,52 @@ Sections: [Process lessons](#process-lessons) ·
   shares it, meaning it's acting as a background. A rotoscope sequence
   doesn't carry a stale image onto new frames. No flag in the schema is
   needed to tell these apart.
+- **3b decisions.**
+  - **Confirm before replacing a different photo.** Use on all frames
+    is undoable, so by the layer-delete rule it wouldn't ask. But undo
+    history is dropped when she closes the project, and a rotoscope
+    sequence is a lot of placing to lose. So it asks only when another
+    frame has a *different* photo. Filling blank frames, or re-placing
+    the same photo, doesn't ask.
+  - **One frame counts as "every frame shares it."** Importing a
+    background on frame 1 and then adding frames is likely her most
+    common start, so frame 2 gets the photo. The cost is that a
+    rotoscope's frame 2 starts with frame 1's photo until she taps
+    Replace. Once frames have different photos, new frames start
+    blank. The rule reads the frames, not a remembered "she chose all
+    frames" flag, so there's no schema field to keep in sync.
+  - **Flip ↔ and Flip ↕, both.** Procreate's and Sketchbook's
+    transforms offer both, and matching her apps wins. Stored as
+    booleans, not the negative scale first planned, because a negative
+    scale fails `sanitizePlacement`'s `scale > 0` check and would
+    silently reset her placement. It flips as seen on screen, even
+    when the image is rotated: mirroring across a canvas axis equals
+    mirroring across the image's own axis with the rotation negated.
+  - **No frame-strip marker.** The wireframe had one, but her apps
+    don't badge frames. In Flipaclip and Procreate's Animation Assist
+    the photo is part of the frame, so the thumbnail shows it. Step 4's
+    thumbnails include the reference image, which does the same job;
+    until then the Image button's dot covers the frame she's on.
+  - **Storage warning deferred to step 6.** 3b adds almost no storage
+    (shared blobs). A warning should come with a remedy, and "export /
+    back up" arrives at step 6. Save failures already raise a notice.
+    It's also unclear off-device how well `storage.estimate()` tracks
+    a nearly full iPad.
+- **Reference vs. image-as-layer, revisited (3b).** If photos are mostly
+  backgrounds, should they be layer pixels, as in her apps? Not for
+  now:
+  - The reference already acts as a background. It's in the
+    thumbnail and the export (unless hidden) and can go to 100%.
+  - Layers store pixels per frame, so a baked background across 24
+    frames would be 24 lossless copies. The reference keeps one
+    shared JPEG, which matters on her nearly full iPad.
+  - Switching would rewrite 3a. "Make into layer" covers drawing on
+    the photo additively.
+
+  The real fork is export: a tracing photo usually shouldn't be in the
+  video, but a background should (step 6). Ask her after 3b whether she
+  wants to draw on the photo and whether 50% bothers her for
+  backgrounds.
 
 ## Planned features
 

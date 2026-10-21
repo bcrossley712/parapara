@@ -1,8 +1,9 @@
 // js/ui/reference-bar.js
 //
 // The adjust-mode bar (step 3a): stands in for the tool rail while she
-// places a frame's reference image. Opacity slider, Replace, Delete
-// and Done. While it's up, touches on the canvas move the image (see
+// places a frame's reference image. Opacity slider, Flip ↔ / Flip ↕
+// (3b — both, as Procreate's and Sketchbook's transforms have),
+// Replace, Delete and Done. While it's up, touches on the canvas move the image (see
 // canvas.js adjust mode); tapping any other control commits, the same
 // as Done (ui.js handles that).
 //
@@ -11,7 +12,8 @@
 
 // callbacks: onOpacityInput(value 0-1) (live, while dragging),
 //   onReplace() (must open the picker synchronously — iOS only allows
-//   it inside the tap), onDelete(), onDone()
+//   it inside the tap), onFlip('horizontal' | 'vertical'), onDelete(),
+//   onDone()
 export function createReferenceBar(callbacks) {
   const bar = document.createElement('div');
   bar.className = 'pp-reference-bar';
@@ -37,6 +39,11 @@ export function createReferenceBar(callbacks) {
     callbacks.onOpacityInput(value);
   });
 
+  const flipH = button('Flip ↔', () => callbacks.onFlip('horizontal'));
+  flipH.setAttribute('aria-label', 'Flip horizontally');
+  const flipV = button('Flip ↕', () => callbacks.onFlip('vertical'));
+  flipV.setAttribute('aria-label', 'Flip vertically');
+
   const replaceBtn = button('Replace', () => callbacks.onReplace());
   const deleteBtn = button('Delete', () => callbacks.onDelete());
   deleteBtn.classList.add('pp-reference-bar__delete');
@@ -45,7 +52,7 @@ export function createReferenceBar(callbacks) {
 
   // Done first, where Draw sits on the rail; Delete at the bottom,
   // away from it.
-  bar.append(title, doneBtn, opacityLabel, replaceBtn, deleteBtn);
+  bar.append(title, doneBtn, opacityLabel, flipH, flipV, replaceBtn, deleteBtn);
 
   function button(label, onClick) {
     const btn = document.createElement('button');
