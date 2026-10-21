@@ -1206,6 +1206,158 @@ html, body {
   display: none;
 }
 
+/* Onion skin (4c). The ghosts' canvas (js/canvas/onion-view.js): over
+   the reference image, under every layer; its opacity is set in JS. */
+.pp-onion {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* The badge (js/ui/onion-badge.js): bottom-left of the canvas area,
+   clear of the layers panel on the right. Its panel opens above it. */
+.pp-onion-badge {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.pp-onion-badge__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--pp-bg);
+  cursor: pointer;
+}
+
+.pp-onion-badge__btn:active {
+  background: var(--pp-ink-light);
+}
+
+.pp-onion-badge__toggle.is-active {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+.pp-onion-badge__btn.is-active:not(.pp-onion-badge__toggle) {
+  background: var(--pp-ink-light);
+}
+
+.pp-onion-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+}
+
+.pp-onion-panel__title {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.pp-onion-panel__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pp-onion-panel__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.pp-onion-panel__value {
+  min-width: 20px;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.pp-onion-panel__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  cursor: pointer;
+}
+
+.pp-onion-panel__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pp-onion-panel__opacity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 15px;
+}
+
+.pp-onion-panel__opacity input[type="range"] {
+  width: 100%;
+}
+
+.pp-onion-panel__tints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pp-onion-panel__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pp-onion-panel__swatch {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 3px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.pp-onion-panel__swatch.is-active {
+  border-color: var(--pp-bg);
+  box-shadow: 0 0 0 2px var(--pp-accent);
+}
+
 /* Gallery screen (js/ui/gallery.js). Same dark top bar as the editor
    (it sits under the status bar); a warm, light backdrop below so
    the white thumbnails read as paper. The grid scrolls on its own —

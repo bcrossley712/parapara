@@ -3,8 +3,8 @@
 // Owns: Pointer Events input, brush engine, stroke-layer compositing,
 // two-finger pan/zoom (gesture math lives in gestures.js; dispatch —
 // deciding whether a touch is a stroke or a gesture — lives here).
-// Onion-skin rendering of neighboring frames lands with timeline/
-// (step 4).
+// Onion skin (4c) only gets a canvas here (getOnionContext), between
+// the reference image and the layers; onion-view.js draws the ghosts.
 //
 // Layers (step 2c): one <canvas> per layer, stacked bottom-to-top
 // inside a wrapper element (.pp-canvas). The wrapper carries the
@@ -294,6 +294,21 @@ export function initCanvas(container, options = {}) {
     if (playbackInput) {
       for (const listener of playbackTapListeners) listener();
     }
+  }
+
+  // Onion skin (4c): neighboring frames' ghosts, drawn by
+  // onion-view.js on one full-size canvas right after the reference
+  // holder — over the photo, under every layer (applyLayers appends
+  // layers after it). Not a layer: never in readVisible, never
+  // touched by the tools. Only exists while ghosts show.
+  let onionCanvas = null;
+
+  function freeOnionCanvas() {
+    if (!onionCanvas) return;
+    onionCanvas.remove();
+    onionCanvas.width = 0;
+    onionCanvas.height = 0;
+    onionCanvas = null;
   }
 
   function freePlaybackCanvas() {
@@ -673,7 +688,7 @@ export function initCanvas(container, options = {}) {
   // whole canvas), unpremultiplied, transparent where nothing's drawn.
   // The reference image (3a) is included, under the layers, when it's
   // showing — she traces and fills up to it, and picks its colors.
-  // Step 4's onion skin must NOT be (ghost frames aren't her drawing).
+  // Onion skin (4c) must NOT be (ghost frames aren't her drawing).
   // When the active layer is the only thing visible, at full opacity,
   // that's just its own pixels — no composite needed.
   function readVisible(rect = { x: 0, y: 0, w: width, h: height }) {
@@ -1643,6 +1658,7 @@ export function initCanvas(container, options = {}) {
         c.height = 0;
       }
       freePlaybackCanvas();
+      freeOnionCanvas();
       playbackTapListeners.clear();
       debugListeners.clear();
       changeListeners.clear();
@@ -1679,6 +1695,27 @@ export function initCanvas(container, options = {}) {
         stack.appendChild(playbackCanvas);
       }
       return playbackCanvas.getContext('2d');
+    },
+
+    // --- onion skin (4c) ---
+
+    // The ghost canvas's 2D context (full canvas size), over the
+    // reference image and under every layer; created if needed. Never
+    // part of readVisible: ghosts aren't her drawing.
+    getOnionContext() {
+      if (!onionCanvas) {
+        onionCanvas = document.createElement('canvas');
+        onionCanvas.width = width;
+        onionCanvas.height = height;
+        onionCanvas.className = 'pp-onion';
+        reference.element.after(onionCanvas);
+      }
+      return onionCanvas.getContext('2d');
+    },
+
+    // Takes the ghosts away and frees their canvas.
+    hideOnion() {
+      freeOnionCanvas();
     },
 
     // DEV ONLY: listener(event, details) for the activity log.

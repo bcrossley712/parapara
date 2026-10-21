@@ -14,7 +14,9 @@ Sections: [Process lessons](#process-lessons) ·
 [Gestures](#gestures) · [Layers and undo](#layers-and-undo) ·
 [Storage](#storage) · [PWA, layout and updates](#pwa-layout-and-updates) ·
 [Testing and CI](#testing-and-ci) · [Gallery](#gallery) ·
-[Reference image](#reference-image) · [Planned features](#planned-features)
+[Reference image](#reference-image) ·
+[Playback and the frame cache](#playback-and-the-frame-cache) ·
+[Onion skin](#onion-skin) · [Planned features](#planned-features)
 
 ---
 
@@ -615,7 +617,34 @@ Sections: [Process lessons](#process-lessons) ·
   compositing rule — visible layers bottom-up at their opacity, over
   an optional background and reference — for the gallery thumbnail,
   the cache (from saved bitmaps, or the open frame's live canvases),
-  and later onion skin and export.
+  and export later; onion skin reads the cache it builds.
+
+## Onion skin
+
+- **Convention over asking.** She hadn't used onion skin before, so
+  4c follows the common animation-app look rather than her answers:
+  previous red, next green (traditional light-table colors, also the
+  usual app default — not checked against Flipaclip on her iPad),
+  one frame each way, fainter further out, off until she turns it on.
+- **From the cache, not storage.** Ghosts reuse the frame cache's
+  flattened PNGs (4a), so onion skin adds no new path to saved pixels
+  — which is also why it could go ahead while the blank-frames bug
+  was still open. The cost is a short lag: the frame she just left is
+  a ghost from its older cached picture until the rebuild lands.
+- **No photo in ghosts.** The original plan said ghosts include their
+  frame's photo; a tinted photo under every ghost is busy, and the
+  cache already leaves photos out, so it was dropped.
+- **Solid tint, not a faded copy.** `source-in` turns a ghost's lines
+  one color while keeping their soft edges; a plain faded copy is hard
+  to tell from her current drawing, which is the whole point.
+- **Opacity is CSS.** The whole ghost layer's opacity is the canvas's
+  style, so dragging the slider costs nothing; per-ghost fading is
+  baked in when drawn.
+- **The badge lives in the canvas area** (the plan's "badge on the
+  canvas"), bottom-left because the layers panel covers the right.
+  Being inside the area that hears strokes, it must stop its own
+  pointer events — found in testing: without that, the canvas took
+  the pointer on pointerdown and the buttons never got a click.
 
 ## Planned features
 

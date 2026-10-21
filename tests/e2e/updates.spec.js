@@ -27,8 +27,8 @@ async function openInstalledApp(page) {
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
 }
 
-const gear = (page) => page.getByRole('button', { name: 'Settings' });
-const panel = (page) => page.getByRole('dialog', { name: 'Settings' });
+const gear = (page) => page.getByRole('button', { name: 'Settings', exact: true });
+const panel = (page) => page.getByRole('dialog', { name: 'Settings', exact: true });
 const versionText = (page) => page.locator('.pp-settings__version');
 const statusText = (page) => page.locator('.pp-settings__status');
 

@@ -21,6 +21,7 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 import { createTransport } from '../timeline/transport.js';
 import { createReferenceBar } from './reference-bar.js';
 import { createImageMenu } from './image-menu.js';
+import { createOnionBadge } from './onion-badge.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -47,12 +48,14 @@ import { createImageMenu } from './image-menu.js';
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
 //   fires when she taps any other control while adjusting.
+// options.onion: the onion-skin badge's intents ({ onToggle,
+//   onChange(partial) }, see onion-badge.js).
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
 //
 // Returns { canvas, layers (the panel), frames (the strip), transport
-// (render(state)), images
+// (render(state)), onion (the badge: render(settings)), images
 // (the top bar's Image menu: render(state)),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
@@ -72,6 +75,7 @@ export function initUI(container, options = {}) {
     colors: colorCallbacks = {},
     reference: referenceCallbacks = {},
     images: imagesCallbacks = {},
+    onion: onionCallbacks = {},
     onGallery = null,
   } = options;
   container.innerHTML = '';
@@ -141,6 +145,11 @@ export function initUI(container, options = {}) {
   }, { signal });
   frameStrip.element.prepend(transport.element);
   canvasArea.appendChild(transport.statusElement);
+  // Onion skin's badge (4c): bottom-left of the canvas area.
+  const onionBadge = createOnionBadge({
+    onToggle: () => {}, onChange: () => {}, ...onionCallbacks,
+  }, { signal });
+  canvasArea.appendChild(onionBadge.element);
   const stage = document.createElement('div');
   stage.className = 'pp-stage';
   stage.append(canvasArea, frameStrip.element);
@@ -434,6 +443,7 @@ export function initUI(container, options = {}) {
     layers: layersPanel,
     frames: frameStrip,
     transport,
+    onion: onionBadge,
     images: imageMenu,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),

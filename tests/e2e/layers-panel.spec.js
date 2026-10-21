@@ -365,7 +365,7 @@ test('fill stops at lines on another layer, through the real panel', async ({ pa
 
 test('the developer fill tool reaches the layer cap and paints every layer', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Fill all layers' }).click();
   await expect(page.locator('.pp-layer')).toHaveCount(8);
   await expect.poll(async () => {

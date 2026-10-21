@@ -92,6 +92,10 @@ export function createReferenceView(stack, canvasW, canvasH) {
   }
 
   return {
+    // The holder (first in the wrapper). The onion skin's canvas (4c)
+    // goes right after it: over the photo, under every layer.
+    element: holder,
+
     // The wrapper's CSS width changed (canvas.js fitStack).
     setDisplayWidth(cssWidth) {
       holder.style.transform = `scale(${cssWidth / canvasW})`;

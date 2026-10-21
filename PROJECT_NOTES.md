@@ -110,9 +110,12 @@ icon, manifest `name`/`short_name`, and repo copy.
     under Architecture → Frame cache and playback; the measurements
     are in [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
     In short: memory isn't the limit, and full size plays up to 30 fps.
-  - **4b: built, not yet confirmed on the iPad** — playback +
-    transport. How it works is under Architecture → Playback. Next:
-    **4c** onion skin, **4d** reorder + delete.
+  - **4b: done and confirmed on the iPad** — playback + transport.
+    How it works is under Architecture → Playback.
+  - **4c: built, not yet confirmed on the iPad** — onion skin. How it
+    works is under Architecture → Onion skin. She's new to onion
+    skins, so its defaults follow convention (decided here, not asked).
+    Next: **4d** reorder + delete.
   - **Open bug (found trying 4b, cause unknown):** on the iPad, two
     frames of a many-stroke drawing went blank — no restart, and undo
     brought back only fragments (so the layer was replaced with blank
@@ -121,17 +124,17 @@ icon, manifest `name`/`short_name`, and repo copy.
     strokes, gestures, add/duplicate/switch frames, undo/redo, every
     way of stopping playback; 16 seeds × 70 steps) never lost a
     stroke. Not covered there: iPad memory pressure, eraser/fill/
-    smudge, several layers, photos, switching apps. **Before 4c/4d:
-    get the activity log** (gear → Developer → Activity log) from the
-    next time it happens. Hardening done meanwhile: autosave settles
-    which frame it saves to before any await (see Don't break these).
-  - **Decided for 4c–4d** (4b's decisions are now in Architecture):
+    smudge, several layers, photos, switching apps. **It hasn't
+    happened again** (no log yet); 4c went ahead because onion skin
+    only reads the frame cache and never touches saving. **Next time
+    it happens, get the activity log** (gear → Developer → Activity
+    log). Hardening done meanwhile: autosave settles which frame it
+    saves to before any await (see Don't break these).
+  - **Decided for 4d** (4b's and 4c's decisions are in Architecture):
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
       `'frame-delete'` / `'frame-move'` undo types); the last frame
       can't be deleted.
-    - **Saved per project:** onion on/off and its settings (fps and
-      loop already are, 4b).
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
       optional `frame.hold` (missing = 1) read only by `frameAtBeat`.
@@ -140,12 +143,11 @@ icon, manifest `name`/`short_name`, and repo copy.
       showing the cached frame instantly on a frame switch, a scrubber,
       ping-pong loop, a play range (in/out points), a clean fullscreen
       preview, a frame counter, zooming while playing.
-  - **Ask her before 4c** (check against Flipaclip/Rough Animator):
-    how many onion frames before/after, tint colors (previous vs.
-    next), opacity, whether ghosts include their frame's photo (lean
-    no — a ghosted photo is busy; the original plan said yes), and
-    whether she expects onion hidden during playback (planned: hidden).
-    The toggle and its settings: a badge on the canvas (the plan).
+  - **Ask her once she's used onion skin:** are red/green and 40%
+    right (check against Flipaclip on her iPad — the colors follow the
+    usual convention, not a look at her app), and does she want
+    wrap-around with loop, or ghosts of the active layer only (both
+    left out; see Onion skin)?
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -187,6 +189,15 @@ icon, manifest `name`/`short_name`, and repo copy.
     so a bigger range makes precise sizes harder to pick; bigger sizes
     need a different size control (or eraser presets) when this is
     built.
+- **Small screens (phones) aren't workable** — seen on his Android
+  phone, 4b build. The layout is sized for the iPad and nothing
+  scrolls or reflows. **Landscape:** the rail runs out of height, so
+  the size slider and gear are cut off. **Portrait:** the strip's row
+  runs out of width, so the frame tiles and Add frame are cut off,
+  and the canvas is a thin band. The onion badge (4c) will add to it.
+  Not her device, so not blocking; if friends will use it on phones,
+  plan a compact layout (a rail that scrolls or collapses, a strip
+  that scrolls with the transport, smaller controls) as its own step.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
 - **Export format** (container/codec) — decide at step 6.
@@ -222,7 +233,8 @@ the strip; moved to save the canvas ~48 px, Flipaclip-style);
 horizontally scrolling frame strip with a dashed "add frame" tile
 (the wireframe's image marker was dropped in 3b — step 4's thumbnails
 show the photo instead); onion-skin toggle as a
-badge on the canvas; Share as a first-class top-bar icon. Layers panel
+badge in the canvas area's bottom-left corner (4c); Share as a
+first-class top-bar icon. Layers panel
 on the right, over the canvas (doesn't shrink it), opened from a
 top-bar button.
 
@@ -420,8 +432,8 @@ Short rules; reasoning in the linked sections.
     wins over sharpness — her iPad runs near full.
   - Everything that shows "the frame" includes it via one path:
     `readVisible`, the thumbnail, and later export; Hide images drops
-    it from all of them. Whether onion-skin ghosts include their
-    frame's image is a step 4 question (the original plan said yes).
+    it from all of them. **Onion-skin ghosts never include it** (4c;
+    a ghosted photo is busy).
 - **Frame cache and playback (4a)**
   ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
   - **One `renderFrame`** (`canvas/render-frame.js`) flattens a frame
@@ -486,6 +498,35 @@ Short rules; reasoning in the linked sections.
     stop it. **The Image button only stops it** (the photo picker
     can't wait for the landing — iOS). Hiding the app stops it
     (`flush`).
+- **Onion skin (4c)** ([why](docs/DESIGN_NOTES.md#onion-skin)):
+  - **Ghosts** = neighboring frames' cached pictures (layers only — no
+    photo, hidden layers out, like the cache), each tinted one solid
+    color (`source-in`, keeps the line's softness), drawn on one
+    full-size canvas (`.pp-onion`) over the photo and under every
+    layer. Previous frames red, next green; the nearest at full
+    strength, further ones fainter (1, 0.55, 0.3). **No wrap-around**,
+    even with loop on. Rules pure in `timeline/onion.js`
+    (`ghostFrames`, `sanitizeOnion`); drawing in `canvas/onion-view.js`.
+  - **Defaults:** off on every project (new and older); 1 before, 1
+    after (0–3 each); opacity 40% (10–80%); tints from five choices
+    per side. **Saved per project (`project.onionSkin`), not
+    undoable** (settings, like fps). Bad fields fall back one by one.
+  - **The opacity slider is CSS** on the ghost canvas — it never
+    redraws. Redraws come from a frame switch, a ghost frame's cache
+    entry being replaced (`onUpdate`), or a count/tint change; the
+    same list twice is a no-op. A draw waits while she's mid-stroke.
+  - **A ghost frame not flattened yet is left out** until its picture
+    arrives; a stale one shows until rebuilt (so a frame she just left
+    shows its older picture for ~300 ms + build time).
+  - **Hidden while playing and while landing** (the canvas is freed);
+    back once she's on the landed frame.
+  - **The badge** (`ui/onion-badge.js`), bottom-left of the canvas
+    area: the onion button toggles; the sliders button opens the panel
+    (Frames before/after steppers, Opacity, Before/After color). A
+    setting, so it doesn't stop playback.
+  - **Left out unless she asks:** wrap-around with loop, ghosts of the
+    active layer only (Rough Animator offers it), keyframe-only onion,
+    per-frame ghost toggles.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
@@ -523,8 +564,16 @@ Each is here because breaking it caused (or would cause) a real bug.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
   sampler** for fill and the eyedropper. The reference image (3a) is
   in it, under the layers, when showing (its single-layer fast path
-  is skipped then). Step 4's onion skin and the playback picture must
-  stay out (they aren't her drawing).
+  is skipped then). The onion skin's ghosts and the playback picture
+  must stay out (they aren't her drawing).
+- **The ghost canvas (`.pp-onion`) sits right after the reference
+  holder and before every layer** (`reference.element.after(...)`;
+  `applyLayers` appends layers after it). It isn't a `.pp-layer` —
+  tests count those.
+- **The onion badge stops its own pointer events** (`onion-badge.js`).
+  It's inside the canvas area, whose pointerdown takes the pointer for
+  a stroke: without the stop, the badge's buttons never get a click
+  (and a tap during playback would stop it).
 - **The playback picture (`.pp-playback`) stays the wrapper's last
   child** — `applyLayers` re-appends it after the layers.
 - **The playback swallow runs before the `inputBlocked` check** in
@@ -651,6 +700,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           paper + the frame's photo (4a-ii)
         playback-frames.js  playback's decode (cached layers + photo,
                           shared by blobRef) and draw (4b)
+        onion-view.js     onion skin's ghosts: decode cached pictures,
+                          tint, draw onto the ghost canvas (4c)
         thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
                           (reference image first, unless hidden)
         reference.js      reference image: on-screen view, drawReference,
@@ -680,6 +731,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         reference-bar.js  adjust-image bar that replaces the rail (UI only)
         image-menu.js     top-bar Image button + menu, state dot/slash
                           (UI only)
+        onion-badge.js    onion skin's badge + settings panel (UI only)
+                          (4c)
         color-picker.js   custom HSV picker + eyedropper button,
                           recents row, palette grid (UI only)
         dev-log-view.js   DEV ONLY: the activity log dialog (Copy, Clear)
@@ -701,6 +754,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           skip late frames, fps/loop re-anchor (4b)
         transport.js      transport row + fps panel + "Getting ready"
                           label (UI only) (4b)
+        onion.js          pure onion-skin rules: settings defaults and
+                          clean-up, which frames are ghosts (4c)
       export/ audio/      placeholders for later steps
     icons/                app icon set
     tests/unit/, tests/e2e/      see Testing
@@ -736,7 +791,8 @@ bitmap. Planned fields are marked. Extend additively.
       canvas: { width: 1920, height: 1080 },
       fps: 12,                                // 1–30, picked in the transport (4b); sanitizeFps on open
       loop: true,                             // 4b; missing = true
-      onionSkin: { ... },                     // planned (4c): on/off + settings, shape decided then
+      onionSkin: { on, before, after, opacity, tintBefore, tintAfter },
+                                              // 4c; missing = off, 1, 1, 0.4, red, green (sanitizeOnion)
       layers: [                               // index 0 = bottom; shared by all frames
         { id, name, visible: true, opacity: 1, locked: false },
       ],
@@ -810,6 +866,8 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     through the Gallery button.
   - Each test gets its own browser context (own IndexedDB), so tests
     must not depend on order or on each other. ~2.2 min after 4b.
+  - **Find the gear button with `exact: true`** (`name: 'Settings'`)
+    — "Onion skin settings" matches a loose lookup too.
   - **Images in e2e:** make the test image in the page (a canvas →
     PNG buffer) and feed it through `page.waitForEvent('filechooser')`
     so the real picker path runs (`reference.spec.js`).
@@ -826,4 +884,6 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   vs Files, HEIC arriving as JPEG), memory with large imported photos,
   adjusting and flipping an image by finger and stylus, playback
   smoothness at 24–30 fps with real line art, the stop tap with her
-  stylus, the moment of frame loading after a stop.
+  stylus, the moment of frame loading after a stop, how the onion
+  ghosts read over her real line art, and how soon they appear after
+  a frame switch.

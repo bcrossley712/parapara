@@ -97,6 +97,8 @@ import { createFrameCache, layerSignature } from './timeline/frame-cache.js';
 import { createPlayback } from './timeline/playback.js';
 import { sanitizeFps } from './timeline/clock.js';
 import { createPlaybackFrames } from './canvas/playback-frames.js';
+import { createOnionView } from './canvas/onion-view.js';
+import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -451,6 +453,9 @@ function mountEditor(session, { canSave }) {
   // (missing = on).
   project.fps = sanitizeFps(project.fps);
   project.loop = project.loop !== false;
+  // Onion skin (4c): older projects have none (missing = off, the
+  // defaults); bad fields fall back one by one.
+  project.onionSkin = sanitizeOnion(project.onionSkin);
 
   // Activity log (dev only): a frame as "f3#1a2b" (its position, then
   // the end of its id, which never changes), a layer or blob id short.
@@ -521,6 +526,11 @@ function mountEditor(session, { canSave }) {
       onNext: () => stepFrame(1),
       onLoop: () => setLoop(!project.loop),
       onFps: (fps) => setFps(fps),
+    },
+    // A setting, like fps: doesn't stop playback.
+    onion: {
+      onToggle: () => setOnion({ on: !project.onionSkin.on }),
+      onChange: (changes) => setOnion(changes),
     },
     images: {
       // The photo picker must open inside the tap (iOS), so it can't
@@ -625,7 +635,10 @@ function mountEditor(session, { canSave }) {
     // busy) or adjusting a photo, nor while the app is in the background.
     canWork: () => !busy && !adjust && !canvasApi.isBusy()
       && document.visibilityState === 'visible',
-    onUpdate: (id, value) => frameTiles.setLayers(id, value.tile),
+    onUpdate: (id, value) => {
+      frameTiles.setLayers(id, value.tile);
+      updateOnion(); // a ghost frame's picture may be newer
+    },
     dispose: (value) => freeCanvas(value.tile),
     onError: (err, id) => {
       devLog.add('flatten-failed', { frame: tag(id), error: String(err?.message ?? err) });
@@ -704,6 +717,7 @@ function mountEditor(session, { canSave }) {
       playStatus = status;
       canvasApi.setPlaybackInput(status.state !== 'idle');
       renderTransport();
+      updateOnion();
     },
     onEnd: (id) => {
       devLog.add('end', { at: tag(id) });
@@ -771,6 +785,7 @@ function mountEditor(session, { canSave }) {
       done();
       if (landing === move) landing = null;
       renderTransport();
+      updateOnion();
     });
     landing = move;
     renderTransport();
@@ -824,6 +839,45 @@ function mountEditor(session, { canSave }) {
     renderTransport();
   }
 
+  // --- onion skin (4c) ---
+  //
+  // Ghosts of the frames around hers, from the frame cache's pictures
+  // (layers only — never a frame's photo), tinted by side and fainter
+  // further out (timeline/onion.js decides which; canvas/onion-view.js
+  // draws them under her layers). Hidden while playing and while
+  // landing. A ghost frame not flattened yet is left out until its
+  // picture arrives; a stale one shows until it's rebuilt. Settings
+  // are saved with the project, not undoable, and don't stop playback.
+  const onionView = createOnionView({
+    getContext: () => canvasApi.getOnionContext(),
+    hide: () => canvasApi.hideOnion(),
+    canDraw: () => !canvasApi.isBusy(),
+  });
+  onionView.setOpacity(project.onionSkin.opacity);
+  ui.onion.render(project.onionSkin);
+
+  function updateOnion() {
+    if (playback.active || landing) {
+      onionView.show(null);
+      return;
+    }
+    const ghosts = [];
+    for (const ghost of ghostFrames(project.frames, session.frame.id, project.onionSkin)) {
+      const blob = (frameCache.get(ghost.id) ?? frameCache.latest(ghost.id))?.blob;
+      if (blob) ghosts.push({ ...ghost, blob });
+    }
+    onionView.show(ghosts);
+  }
+
+  function setOnion(changes) {
+    const next = sanitizeOnion({ ...project.onionSkin, ...changes });
+    project.onionSkin = next;
+    onionView.setOpacity(next.opacity);
+    ui.onion.render(next);
+    scheduleProjectSave();
+    updateOnion();
+  }
+
   // --- async work guard ---
   //
   // Adding, removing or bringing back a layer or frame, and moving to
@@ -854,6 +908,7 @@ function mountEditor(session, { canSave }) {
     frameCache.setSignature(layerSignature(project.layers));
     frameCache.setFrames(project.frames, session.frame.id);
     frameTiles.sync(session.frames, { hidden: project.referenceHidden === true });
+    updateOnion();
   }
 
   function exclusive(task) {
@@ -1762,6 +1817,7 @@ function mountEditor(session, { canSave }) {
     flushEditor = null;
     playback.destroy();
     playbackFrames.destroy();
+    onionView.destroy();
     frameCache.destroy();
     frameTiles.destroy();
     ui.destroy();

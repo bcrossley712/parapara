@@ -16,7 +16,7 @@ async function stroke(page) {
 }
 
 async function openLog(page) {
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Activity log' }).click();
   return page.locator('.pp-dev-log__text');
 }

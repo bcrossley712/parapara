@@ -300,8 +300,8 @@ test("undoing a stroke on frame 1 after the thumbnail was drawn redraws it", asy
 test('the gallery has the gear menu, without the editor-only actions', async ({ page }) => {
   await page.goto('/index.html');
   await page.locator('.pp-gallery').waitFor();
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const panel = page.getByRole('dialog', { name: 'Settings' });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Check for updates' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Fill all layers' })).toHaveCount(0);
