@@ -105,7 +105,10 @@ icon, manifest `name`/`short_name`, and repo copy.
   This is when she first sees her animation move, so nothing new goes
   ahead of it without a deliberate decision. **Split, memory first;
   each part confirmed on the iPad before the next:**
-  - **4a-i: done, measured on the iPad** (dev tests in the gear menu,
+  - **4a: done and confirmed on the iPad.** **Next: 4b** — playback
+    + transport (play, skip, fps, loop toggle), from the decisions
+    below. Then **4c** onion skin, **4d** reorder + delete.
+  - **4a-i: measured on the iPad** (dev tests in the gear menu,
     `timeline/dev-stress.js`; synthetic frames denser than real line
     art, ~1.2 MB PNG at 1080p, so a conservative case). Results
     ([details](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
@@ -113,17 +116,17 @@ icon, manifest `name`/`short_name`, and repo copy.
     failing — memory isn't the limit. Full-size decode 28 ms: 12/24
     fps show every frame, 30 drops 2%, 60 collapses. Flattening costs
     ~120 ms at 4 layers, ~200 ms at 8 (decode + encode).
-  - **4a-ii: built, awaiting the iPad.** `renderFrame`
+  - **4a-ii: built and confirmed.** `renderFrame`
     (`canvas/render-frame.js`), the flattened-frame cache
     (`timeline/frame-cache.js`) and tile pictures
     (`canvas/frame-tiles.js`). Tiles take the canvas's shape (~85×48
     for 16:9), the number moves to a corner badge, the current tile gets
     an accent ring; before a frame's picture is ready it shows the
-    number alone. **Check on the iPad:** drawing feels unchanged while
-    tiles rebuild (a flatten + PNG encode runs after each pause in
-    drawing), and how long tiles take to fill in on open. **4b:**
-    playback + transport.
-    **4c:** onion skin. **4d:** reorder + delete.
+    number alone. On the iPad: drawing feels unchanged while tiles
+    rebuild; tiles fill in at ~8–10 frames a second on open; she's
+    happy with how they look. Also fixed: undo/redo of a stroke on
+    frame 1 now redraws the gallery thumbnail. The 4a-i dev tests stay
+    in the gear menu (rerun after 4b with real drawings).
   - **Decided:**
     - **Cache:** each frame flattened at **full size** and encoded as
       **PNG**, held in memory only, rebuilt in the background after a
@@ -218,6 +221,14 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Brush variety** (sizes, chisel tips, edge blending) — **build
     with symmetry**: both change `stamp()`, and a directional tip's
     mirrored stamp must mirror its angle too.
+  - **Erasers** (observed in 4a; she'll want them, not urgent): the
+    eraser is the pen's round hard tip with the same 6 px default and
+    1–60 range (its size is already remembered separately). She'll
+    want softer edges and different sizes — part of brush variety.
+    **Don't just widen the size slider:** the rail's slider is small,
+    so a bigger range makes precise sizes harder to pick; bigger sizes
+    need a different size control (or eraser presets) when this is
+    built.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
 - **Export format** (container/codec) — decide at step 6.
