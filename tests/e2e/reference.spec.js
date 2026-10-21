@@ -1,5 +1,5 @@
 // End-to-end tests for the reference image (step 3a): adding one from
-// the frame menu through the photo picker, adjust mode (drag, pinch,
+// the top bar's Image menu through the photo picker, adjust mode (drag, pinch,
 // opacity, Delete, Replace, Done, and tapping another control to
 // commit), undo/redo, Hide images, fill and the eyedropper seeing it,
 // the gallery thumbnail, and copy frame / duplicate project sharing
@@ -43,15 +43,23 @@ async function settled(page) {
   await expect(addFrameBtn(page)).toBeEnabled();
 }
 
+const imageBtn = (page) => page.locator('.pp-image-btn');
+
 async function openFrameMenu(page) {
   await settled(page);
   await page.locator('.pp-frame-strip__tile.is-current').click();
   await expect(page.locator('.pp-frame-menu')).toBeVisible();
 }
 
-// Frame menu → Add image → the picker → adjust mode on the new image.
+async function openImageMenu(page) {
+  await settled(page);
+  await imageBtn(page).click();
+  await expect(page.locator('.pp-image-menu')).toBeVisible();
+}
+
+// Image menu → Add image → the picker → adjust mode on the new image.
 async function addImage(page) {
-  await openFrameMenu(page);
+  await openImageMenu(page);
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: 'Add image' }).click();
   await (await chooser).setFiles(await testImage(page));
@@ -142,10 +150,16 @@ test('Add image opens the picker, places the photo at 50% in adjust mode, and Do
   const blob = await readDb(page, 'blobs', image.blobRef);
   expect(blob.type).toBe('image/jpeg'); // an opaque PNG is saved as JPEG
 
+  // The Image button wears a dot; the frame menu has no image items.
+  await expect(page.locator('.pp-image-btn__dot')).toBeVisible();
+  await openFrameMenu(page);
+  await expect(page.getByRole('menuitem', { name: /image/i })).toHaveCount(0);
+  await page.locator('.pp-frame-strip__tile.is-current').click(); // close
+
   // Survives a reload; the menu now says Adjust image.
   await reloadApp(page);
   await expect(refImage(page)).toHaveCount(1);
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await expect(page.getByRole('menuitem', { name: 'Adjust image' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Hide images' })).toBeVisible();
 });
@@ -168,7 +182,7 @@ test('dragging in adjust mode moves the image, not the drawing; undo puts it bac
   await done(page);
   const before = (await savedFrame(page)).image;
 
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Adjust image' }).click();
   await expect(bar(page)).toBeVisible();
   await drag(page, { x: 800, y: 500 }, { x: 1000, y: 400 });
@@ -218,7 +232,7 @@ test('opacity, Delete and Replace in the adjust bar', async ({ page }) => {
   const first = (await savedFrame(page)).image.blobRef;
 
   // Replace: a new stored image, placed fresh; one undo goes back.
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Adjust image' }).click();
   const chooser = page.waitForEvent('filechooser');
   await bar(page).getByRole('button', { name: 'Replace' }).click();
@@ -230,7 +244,7 @@ test('opacity, Delete and Replace in the adjust bar', async ({ page }) => {
   await waitForSavedImage(page, (img) => img.blobRef === first && img.opacity === 0.8);
 
   // Delete: gone, and undoable.
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Adjust image' }).click();
   await bar(page).getByRole('button', { name: 'Delete' }).click();
   await expect(bar(page)).toHaveCount(0);
@@ -274,16 +288,17 @@ test('fill stops at the photo and the eyedropper picks it; Hide images takes it 
   await undoBtn(page).click();
   await expect.poll(() => activeLayerAlpha(page, 480, 540)).toBe(0);
 
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Hide images' }).click();
   await expect(refImage(page)).toBeHidden();
+  await expect(imageBtn(page)).toHaveClass(/is-hidden-images/);
   expect(await pick(page, 480, 540)).toBe('#ffffff');
   await expect.poll(async () => (await readDb(page, 'projects'))[0].referenceHidden).toBe(true);
 
   await reloadApp(page);
   await expect(refImage(page)).toBeHidden();
   // Adjusting shows them again.
-  await openFrameMenu(page);
+  await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Adjust image' }).click();
   await expect(refImage(page)).toBeVisible();
   await done(page);
@@ -392,7 +407,7 @@ async function madeImage(page, w, h, transparent) {
 }
 
 async function importFile(page, file) {
-  await openFrameMenu(page);
+  await openImageMenu(page);
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: /Add image|Adjust image/ }).click();
   if (await bar(page).count()) {

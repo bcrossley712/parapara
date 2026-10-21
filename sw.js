@@ -29,6 +29,7 @@ const APP_SHELL = [
   './js/ui/confirm-dialog.js',
   './js/ui/icons.js',
   './js/ui/reference-bar.js',
+  './js/ui/image-menu.js',
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
   './js/canvas/gestures.js',

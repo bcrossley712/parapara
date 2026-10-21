@@ -5,9 +5,8 @@
 // frame" tile (the wireframe's layout). Tap a tile to go to that frame;
 // the add tile inserts a blank frame after the current one. Tapping
 // the frame she's already on opens a small menu above it (Flipaclip's
-// frame menu): Duplicate, and the frame's reference image (3a) — Add
-// image, or Adjust image once it has one — plus Hide/Show images for
-// the whole project. Step 4's delete and reorder join it.
+// frame menu): Duplicate today; step 4's delete and reorder join it.
+// (The reference image's controls live in the top bar's Image menu.)
 //
 // Bare-bones for now: tiles show the frame number only. Thumbnails,
 // reorder and delete come with step 4 (playback, onion skin), and the
@@ -16,8 +15,7 @@
 // Pure UI: main.js passes state in through render() and gets intents
 // back through the callbacks.
 
-// callbacks: onSelect(frameId), onAdd(), onDuplicate(), onImage()
-//   (add or adjust this frame's image), onToggleImages()
+// callbacks: onSelect(frameId), onAdd(), onDuplicate()
 // options.signal: aborts the document listener (the menu's tap-outside
 // close) when the editor is torn down.
 export function createFrameStrip(callbacks, { signal } = {}) {
@@ -39,7 +37,6 @@ export function createFrameStrip(callbacks, { signal } = {}) {
 
   let lastCurrent = null;
   let lastBusy = false;
-  let lastImages = { current: false, any: false, hidden: false };
 
   // --- the frame menu (above the current tile) ---
   let menu = null;
@@ -53,12 +50,6 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     menu.className = 'pp-frame-menu';
     menu.setAttribute('role', 'menu');
     menu.append(menuItem('Duplicate', () => callbacks.onDuplicate()));
-    // The picker has to open inside this tap (iOS only allows it from a
-    // user gesture), so onImage runs synchronously from the click.
-    menu.append(menuItem(lastImages.current ? 'Adjust image' : 'Add image', () => callbacks.onImage()));
-    if (lastImages.any) {
-      menu.append(menuItem(lastImages.hidden ? 'Show images' : 'Hide images', () => callbacks.onToggleImages()));
-    }
     strip.appendChild(menu);
     // Centered over the tile, kept inside the strip.
     const stripBox = strip.getBoundingClientRect();
@@ -89,13 +80,10 @@ export function createFrameStrip(callbacks, { signal } = {}) {
   }, { signal, capture: true });
   list.addEventListener('scroll', () => closeMenu(), { passive: true });
 
-  // state: { frameIds (timeline order), currentId, busy, images }
-  // images: { current (this frame has one), any (some frame has one),
-  //   hidden (Hide images is on) } — what the menu offers.
-  function render({ frameIds, currentId, busy = false, images = null }) {
+  // state: { frameIds (timeline order), currentId, busy }
+  function render({ frameIds, currentId, busy = false }) {
     closeMenu();
     lastBusy = busy;
-    if (images) lastImages = images;
     const tiles = frameIds.map((id, i) => {
       const tile = document.createElement('button');
       tile.type = 'button';

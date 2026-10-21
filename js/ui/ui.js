@@ -1,8 +1,9 @@
 // js/ui/ui.js
 //
-// Owns: the editor screen — top bar, tool rail (draw/erase/fill/
-// smudge/brush-size/color; later image-import/mic/pan), transport
-// controls — plus toasts and banners, and DOM glue between the other
+// Owns: the editor screen — top bar (Gallery, undo/redo, Image,
+// Layers), tool rail (draw/erase/fill/smudge/brush-size/color; later
+// mic/pan), transport controls — plus toasts and banners, and DOM
+// glue between the other
 // modules. The gallery screen is gallery.js. Custom-styled dialogs only — no
 // native confirm()/alert()/date-input/color chrome, per the working
 // agreement.
@@ -10,7 +11,7 @@
 // Bare-bones so far: enough of the rail (draw/erase/fill/smudge,
 // brush size, color) to drive canvas.js for the drawing-engine
 // testing pass. Transport, timeline, and the rest of the
-// tool rail (image-import/mic/pan) land with their respective build
+// tool rail (mic/pan) land with their respective build
 // steps. Color picker itself lives in color-picker.js.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
@@ -20,6 +21,7 @@ import { GEAR_ICON, GALLERY_ICON } from './icons.js';
 import { createLayersPanel, LAYERS_ICON } from './layers-panel.js';
 import { createFrameStrip } from '../timeline/frame-strip.js';
 import { createReferenceBar } from './reference-bar.js';
+import { createImageMenu } from './image-menu.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -39,6 +41,8 @@ import { createReferenceBar } from './reference-bar.js';
 // options.colors: palette intents from the color picker
 //   ({ onPaletteAdd(hex), onPaletteReplace(index, hex),
 //   onPaletteRemove(index) } — hex is the current color).
+// options.images: the top bar's Image menu intents ({ onImage,
+//   onToggleImages }, see image-menu.js).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onReplace, onDelete, onDone }, see reference-bar.js). onDone also
 //   fires when she taps any other control while adjusting.
@@ -46,7 +50,8 @@ import { createReferenceBar } from './reference-bar.js';
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
 //
-// Returns { canvas, layers (the panel), frames (the strip),
+// Returns { canvas, layers (the panel), frames (the strip), images
+// (the top bar's Image menu: render(state)),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
 // destroy() }. destroy() removes
@@ -63,6 +68,7 @@ export function initUI(container, options = {}) {
     frames: framesCallbacks = {},
     colors: colorCallbacks = {},
     reference: referenceCallbacks = {},
+    images: imagesCallbacks = {},
     onGallery = null,
   } = options;
   container.innerHTML = '';
@@ -89,8 +95,12 @@ export function initUI(container, options = {}) {
   const layersBtn = createIconButton('Layers', LAYERS_ICON, () => {
     layersPanel.setOpen(!layersPanel.isOpen);
   });
+  // Image (3a): the reference image's one home, beside Layers.
+  const imageMenu = createImageMenu({
+    onImage: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
+  }, { container: shell, signal });
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
-  topBar.append(undoBtn, redoBtn, topBarSpacer, layersBtn);
+  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';
@@ -410,6 +420,7 @@ export function initUI(container, options = {}) {
     canvas: canvasApi,
     layers: layersPanel,
     frames: frameStrip,
+    images: imageMenu,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),

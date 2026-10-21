@@ -1146,6 +1146,48 @@ html, body {
   top: calc(100% - 4px);
 }
 
+/* Top bar Image button (js/ui/image-menu.js): a dot when this frame
+   has an image. The menu hangs below it, positioned in JS. */
+.pp-image-btn {
+  position: relative;
+}
+
+.pp-image-btn__icon {
+  display: flex;
+}
+
+.pp-image-btn__dot {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pp-accent);
+  box-shadow: 0 0 0 2px var(--pp-ink-light);
+}
+
+.pp-image-btn.is-active .pp-image-btn__dot {
+  background: var(--pp-ink);
+  box-shadow: none;
+}
+
+.pp-image-btn__dot[hidden] {
+  display: none;
+}
+
+.pp-image-menu {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 /* The frame strip's menu: above the current tile. */
 .pp-frame-menu {
   bottom: calc(100% + 6px);

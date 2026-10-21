@@ -478,15 +478,26 @@ each. That keeps any later change local.
 chrome that looks out of place, like `confirm()` or the color input.
 The system photo sheet is what every iPad app uses, so it's allowed.
 
-**Image controls live in the frame menu, not the layers panel.** The
-image belongs to a frame, and the layers panel was already filling up.
-A pinned "Reference" row at the bottom of the layers list was
-considered and dropped. None of her apps has a strong convention
-for per-frame references: Procreate and Sketchbook insert photos from
-a top-level menu as layers, and Flipaclip imports into a layer. So the
-frame menu follows our own design rather than departing from hers.
-"Hide images" sits there too, worded so it's clear it covers every
-frame.
+**Image controls live in a top-bar Image button with its own menu.**
+The first build put them in the frame menu, reasoning that the image
+belongs to a frame. A pinned "Reference" row in the layers panel had
+already been dropped, since that panel was filling up. On the iPad it
+felt hidden: nothing on screen said images existed. So 3a moved them
+to an Image button beside Layers. The options considered:
+- **Top bar (chosen):** placing a photo is occasional, like opening
+  Layers, and doesn't change what her pen does. The top bar has room
+  (Share joins it in step 6).
+- **Rail:** it's short on height in landscape, with symmetry (3d) and
+  the mic (step 5) still to come.
+- **A single "image+" button with no menu:** it leaves Hide images and
+  3b's actions without a home.
+
+Procreate (top-bar Actions → insert photo) and Sketchbook (toolbar)
+both keep image import visible. The frame menu kept no copy: images
+have one home, and the shortcut bar (later) is where second routes
+belong. The button shows state (dot = this frame has an image,
+slashed = hidden), so she can tell why a photo isn't showing.
+"Hide images" is worded so it's clear it covers every frame.
 
 **Adjust mode gestures.** Two fingers normally pan, zoom and rotate the
 view. In adjust mode they always transform the image instead, as

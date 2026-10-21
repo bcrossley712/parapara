@@ -467,6 +467,8 @@ function mountEditor(session, { canSave }) {
       onSelect: (id) => selectFrame(id),
       onAdd: () => addFrame(),
       onDuplicate: () => duplicateFrame(),
+    },
+    images: {
       onImage: () => addOrAdjustImage(),
       onToggleImages: () => toggleImages(),
     },
@@ -546,15 +548,12 @@ function mountEditor(session, { canSave }) {
       maxLayers: MAX_LAYERS,
       busy,
     });
-    strip.render({
-      frameIds: project.frames,
-      currentId: session.frame.id,
+    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
+    ui.images.render({
+      current: Boolean(session.frame.image?.blobRef),
+      any: session.frames.some((f) => f.image?.blobRef),
+      hidden: project.referenceHidden === true,
       busy,
-      images: {
-        current: Boolean(session.frame.image?.blobRef),
-        any: session.frames.some((f) => f.image?.blobRef),
-        hidden: project.referenceHidden === true,
-      },
     });
   }
 
@@ -930,8 +929,8 @@ function mountEditor(session, { canSave }) {
   //
   // Each frame may have one image she traces over (frame.image =
   // { blobRef, x, y, scale, rotation, opacity }); the blob is stored
-  // once and may be shared by several frames (copy frame). The frame
-  // menu adds or adjusts it; Hide images is project-wide view state
+  // once and may be shared by several frames (copy frame). The top
+  // bar's Image menu adds or adjusts it; Hide images is project-wide view state
   // (project.referenceHidden), not undoable, like layer visibility.
   //
   // Adjust mode: the canvas moves the image live; nothing is written

@@ -93,20 +93,28 @@ icon, manifest `name`/`short_name`, and repo copy.
   is under Architecture; she mostly undoes with the buttons, not
   gestures. The color picker's layout is a first try — adjust if she
   wants it different.
-- **Step 3a: built and tested, awaiting her try on the iPad** (does
-  tracing a reference feel right? see the device-only list in
-  Testing). Then 3b. Step 3 is scoped and split; each sub-step gets
+- **Step 3a: done.** Basic import, adjust and save are confirmed on
+  the iPad. After that trial, the controls moved from the frame menu
+  to a top-bar **Image** button; that move has e2e tests but hasn't
+  been on the iPad yet. Still unverified on the device: a HEIC photo
+  from Photos, memory with a large photo, stylus feel when adjusting,
+  and the adjust outline's thickness when zoomed in. Check these in
+  passing during 3b.
+- **Next: step 3b, in a new conversation.** Each sub-step gets
   confirmed on the iPad before the next one starts
   ([why each choice](docs/DESIGN_NOTES.md#step-3-decisions)):
-  - **3a Reference image core (built):** import from the photo picker, stored
-    once and drawn under every layer. She traces over it; it's never
-    drawn on. It's included in `readVisible`, the thumbnail and
-    export.
-    - **Entry points are in the frame menu** (the image belongs to the
-      frame): **Add image**, which becomes **Adjust image** once the
-      frame has one, and **Hide images / Show images**, a project-wide
-      toggle saved as `referenceHidden`. The layers panel stays
-      layers only.
+  - **3a Reference image core (done):** import from the photo picker,
+    stored once and drawn under every layer. She traces over it; it's
+    never drawn on. It's included in `readVisible`, the thumbnail and
+    (step 6) export.
+    - **Controls live in the top bar's Image button**
+      (`ui/image-menu.js`), beside Layers. Its menu has **Add image**
+      (which becomes **Adjust image** once the frame has one) and
+      **Hide images / Show images**, a project-wide toggle saved as
+      `referenceHidden` (only shown once some frame has an image).
+    - **Button state:** an orange dot when this frame has an image,
+      and a slashed picture when images are hidden. The frame menu
+      and the layers panel have no image items.
     - **Adjust mode:** one finger (or pen/mouse) moves the image; two
       fingers always scale/rotate it, so the view can't pan or zoom
       until Done. Two-finger double-tap still resets the view. A bar
@@ -122,12 +130,17 @@ icon, manifest `name`/`short_name`, and repo copy.
       sharpness. Import, adjust session, Delete and Replace are
       all undoable (`'image'` history entries).
     - How it's built is under Architecture → Reference image.
-  - **3b Reference across frames:** "Use on all frames" (adjust mode)
-    copies this frame's image and transform to every frame as one
-    undo entry. Each frame still keeps its own transform afterward. A
-    new frame inherits the image only if every existing frame shares
-    the same one; otherwise it starts without one. Also a flip-photo
-    button (negative scale) and the frame-strip marker.
+  - **3b Reference across frames:** "Use on all frames" copies this
+    frame's image and transform to every frame as one undo entry.
+    Each frame still keeps its own transform afterward. A new frame
+    inherits the image only if every existing frame shares the same
+    one; otherwise it starts without one. Also a flip-photo button
+    (negative scale) and the frame-strip marker. **Confirm at the
+    start of 3b:** do "Use on all frames" and "Flip photo" go in the
+    Image menu or the adjust bar? I'd lean Image menu for Use on all
+    frames and adjust bar for Flip, since flipping is part of
+    placing. Also whether the storage warning (planned for ~80% of
+    quota) comes in now: her iPad runs near full.
   - **3c Layer menu + flip drawing:** the footer would overflow, so
     tapping the active layer row opens a **layer menu**, the same
     pattern as the frame menu (Sketchbook/Flipaclip/Procreate do this
@@ -429,7 +442,7 @@ Each is here because breaking it caused (or would cause) a real bug.
   gets its click. Sliders commit on pointerdown, since they never
   click. Disabled controls don't commit.
 - **The picker opens inside the tap:** `ui.pickImage()` must run
-  synchronously from a click (frame menu item, Replace). An `await`
+  synchronously from a click (Image menu item, Replace). An `await`
   before it and iOS won't open the picker.
 - Fill's region comes from the visible-layer composite, its pixels go
   to the active layer only — never write the composite back.
@@ -543,21 +556,22 @@ Each is here because breaking it caused (or would cause) a real bug.
         colors.js         pure recents/palette list ops, MAX_RECENTS,
                           MAX_PALETTE, saved-list validation
       ui/
-        ui.js             editor: top bar (Gallery, undo/redo, Layers),
+        ui.js             editor: top bar (Gallery, undo/redo, Image, Layers),
                           tool rail, toasts/banners, DOM glue, destroy
         gallery.js        gallery screen (UI only; intents via callbacks)
         confirm-dialog.js custom modal: showConfirm / showPrompt
         icons.js          icons shared by both screens
         layers-panel.js   layers panel (UI only; intents via callbacks)
         reference-bar.js  adjust-image bar that replaces the rail (UI only)
+        image-menu.js     top-bar Image button + menu, state dot/slash
+                          (UI only)
         color-picker.js   custom HSV picker + eyedropper button,
                           recents row, palette grid (UI only)
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
         frames.js         pure frame-order ops (insert/remove/neighbor)
-        frame-strip.js    frame strip + frame menu incl. Add/Adjust image,
-                          Hide/Show images (UI only; intents
+        frame-strip.js    frame strip + frame menu (UI only; intents
                           via callbacks)
         timeline.js       placeholder: playback, onion skin (step 4)
       export/ audio/      placeholders for later steps
