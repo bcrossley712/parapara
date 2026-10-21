@@ -88,6 +88,9 @@ import {
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { renderThumbnail } from './canvas/thumbnail.js';
+import { renderFrame, makeCanvas, freeCanvas, encodePNG } from './canvas/render-frame.js';
+import { createFrameTiles } from './canvas/frame-tiles.js';
+import { createFrameCache, layerSignature } from './timeline/frame-cache.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -547,6 +550,68 @@ function mountEditor(session, { canSave }) {
   // Settings may have been cleaned up by the canvas (bad saved values).
   toolSettings = canvasApi.getSettings();
 
+  // --- flattened frames: the cache and the strip's pictures (4a-ii) ---
+  //
+  // Every frame flattened — layers only, full size, PNG — for playback
+  // (4b) and onion skin (4c), plus a tile-sized copy that frame-tiles.js
+  // puts over paper and the frame's photo for the frame strip. Rebuilt
+  // in the background, nearest the current frame first, whenever a
+  // frame's pixels or the visible layers change; frame-cache.js has the
+  // rules. Memory only: every open rebuilds it (revisit after 4b).
+  const tileCss = strip.setAspect(project.canvas);
+  const tileScale = Math.min(2, window.devicePixelRatio || 1);
+  const tileSize = {
+    width: Math.round(tileCss.width * tileScale),
+    height: Math.round(tileCss.height * tileScale),
+  };
+  const frameTiles = createFrameTiles({
+    canvasSize: project.canvas,
+    tileSize,
+    read: (ref) => readBitmap(ref),
+    onTile: (id, canvas) => strip.setThumbnail(id, canvas),
+  });
+  const frameCache = createFrameCache({
+    build: (id) => flattenFrame(id),
+    // Not while she's mid-stroke, mid-change (closing counts: it sets
+    // busy) or adjusting a photo, nor while the app is in the background.
+    canWork: () => !busy && !adjust && !canvasApi.isBusy()
+      && document.visibilityState === 'visible',
+    onUpdate: (id, value) => frameTiles.setLayers(id, value.tile),
+    dispose: (value) => freeCanvas(value.tile),
+    onError: (err, id) => console.warn(`Parapara! could not flatten frame ${id}:`, err),
+  });
+
+  // One frame's cache value: { blob (full-size PNG of its layers), tile
+  // (the same at tile size, a canvas) }. The open frame is drawn from
+  // the live layer canvases — synchronously, so unsaved strokes count
+  // and none can land halfway — every other frame from storage.
+  async function flattenFrame(frameId) {
+    const frame = session.frames.find((f) => f.id === frameId);
+    if (!frame) throw new Error(`No frame ${frameId}`);
+    const full = makeCanvas(project.canvas.width, project.canvas.height);
+    let tile = null;
+    try {
+      const open = frameId === session.frame.id;
+      await renderFrame(full.getContext('2d'), {
+        layers: project.layers,
+        frame,
+        canvasSize: project.canvas,
+        ...(open ? { layerSource: (id) => canvasApi.getLayerImage(id) } : { read: readBitmap }),
+      });
+      tile = makeCanvas(tileSize.width, tileSize.height);
+      const tileCtx = tile.getContext('2d');
+      tileCtx.imageSmoothingQuality = 'high';
+      tileCtx.drawImage(full, 0, 0, tile.width, tile.height);
+      const blob = await encodePNG(full);
+      return { blob, tile };
+    } catch (err) {
+      freeCanvas(tile);
+      throw err;
+    } finally {
+      freeCanvas(full);
+    }
+  }
+
   // --- async work guard ---
   //
   // Adding, removing or bringing back a layer or frame, and moving to
@@ -571,6 +636,11 @@ function mountEditor(session, { canSave }) {
       hidden: project.referenceHidden === true,
       busy,
     });
+    // Whatever changed, the cache and tiles catch up (cheap when
+    // nothing they depend on did).
+    frameCache.setSignature(layerSignature(project.layers));
+    frameCache.setFrames(project.frames, session.frame.id);
+    frameTiles.sync(session.frames, { hidden: project.referenceHidden === true });
   }
 
   function exclusive(task) {
@@ -603,6 +673,7 @@ function mountEditor(session, { canSave }) {
 
   function markUnsaved(layerId) {
     unsavedLayers.add(layerId);
+    frameCache.touch(session.frame.id);
     if (session.frame.id === project.frames[0]) thumbnailStale = true;
     autosaver?.schedule();
   }
@@ -786,6 +857,8 @@ function mountEditor(session, { canSave }) {
     const patch = canvasApi.swapRegion(entry.rect, entry.patch, entry.layerId);
     if (!patch) throw new Error(`Undo entry for missing layer ${entry.layerId}`);
     unsavedLayers.add(entry.layerId);
+    if (session.frame.id === project.frames[0]) thumbnailStale = true;
+    frameCache.touch(session.frame.id);
     panel.refreshThumbnail(entry.layerId);
     return { ...entry, patch, bytes: patch.data.byteLength };
   }
@@ -1417,6 +1490,8 @@ function mountEditor(session, { canSave }) {
     // before the gallery goes.
     const cards = await loadGalleryCards();
     flushEditor = null;
+    frameCache.destroy();
+    frameTiles.destroy();
     ui.destroy();
     showGallery(cards);
   }

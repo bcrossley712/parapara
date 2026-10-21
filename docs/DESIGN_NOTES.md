@@ -560,6 +560,50 @@ Sections: [Process lessons](#process-lessons) ·
   wants to draw on the photo and whether 50% bothers her for
   backgrounds.
 
+## Playback and the frame cache
+
+- **Memory first (4a-i).** A flattened 1080p frame is ~8 MB decoded,
+  so before building anything the iPad was measured with dev tests
+  (`timeline/dev-stress.js`) on synthetic frames — denser than real
+  line art (~1.2 MB as PNG), so a conservative case. 9th-gen iPad,
+  October 2026:
+
+  | Measure | Result |
+  |---|---|
+  | Flatten one frame (decode layers + encode PNG) | 1 layer 26+36 ms · 4 layers 66+56 ms · 8 layers 125+76 ms |
+  | Flattened frame, PNG | full 1201 KB · half 556 KB · WebP not supported |
+  | Decode + show one frame | full 28 ms · half 11 ms |
+  | Playback, decoding 6 ahead, full size | 12/24 fps 0% dropped · 30 fps 2% · 60 fps 99% |
+  | Playback, half size | 12/24/30 fps 0% · 60 fps 15% |
+  | Full-size frames held at once | 160 (1.27 GB), 1 or 8 layers — the test's own limit, never failed |
+
+- **What it decided.** Memory turned out not to be the limit (one
+  quiet moment shows the ceiling is above 1.2 GB, not that holding
+  that much is safe), so the plan stands but with room to spare:
+  each frame encoded, a small decoded ring for playback. **Full size,
+  not half:** half decodes faster but the canvas shows ~1,900 device
+  px wide, so 960 px frames would look soft while playing. **fps
+  1–30:** Flipaclip's own maximum, and full size plays 30.
+- **Flattening is the slow part** (~120–200 ms a frame), which shaped
+  invalidation: a layer visibility/opacity change makes every frame
+  stale, and 48 frames take ~6–10 s to rebuild. So rebuild waits for
+  changes to settle, goes nearest-first, and playback shows "Getting
+  ready" rather than starting early (a rebuild can't outrun playback).
+  Every project open pays a full rebuild too — the reason to revisit
+  persisting the cache after 4b.
+- **The 60 fps collapse was the simulation's own flaw:** when decoding
+  can't keep up, decoding frames that are already late makes it fall
+  further behind. Real playback skips ahead instead.
+- **The cache holds layers only (transparent), not the reference
+  image,** so Hide images and image edits never invalidate it, and
+  export's "include images?" becomes a flag. Tiles add the reference
+  back when they're composed (from a small copy of the photo).
+- **One `renderFrame`** (`canvas/render-frame.js`) does the
+  compositing rule — visible layers bottom-up at their opacity, over
+  an optional background and reference — for the gallery thumbnail,
+  the cache (from saved bitmaps, or the open frame's live canvases),
+  and later onion skin and export.
+
 ## Planned features
 
 - **Audio:** one project-wide clip, modeled as `audioClips: []` so a

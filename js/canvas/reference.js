@@ -39,13 +39,17 @@ function hasTransparency(ctx, width, height) {
 
 // Draws `image` (anything drawImage takes, with width/height) at
 // `placement` and its opacity, on top of what's in `ctx`.
-// `unit`/`originX`/`originY`: see placementMatrix.
+// `unit`/`originX`/`originY`: see placementMatrix. `size`: the photo's
+// full { width, height } when `image` is a smaller copy of it (the
+// frame strip's tiles, 4a-ii) — the placement is in full-size pixels.
 export function drawReference(ctx, image, placement, options = {}) {
+  const width = options.size?.width ?? image.width;
+  const height = options.size?.height ?? image.height;
   ctx.save();
   ctx.globalAlpha = placement.opacity;
   ctx.imageSmoothingQuality = 'high';
-  ctx.setTransform(...placementMatrix(placement, image.width, image.height, options));
-  ctx.drawImage(image, 0, 0);
+  ctx.setTransform(...placementMatrix(placement, width, height, options));
+  ctx.drawImage(image, 0, 0, width, height);
   ctx.restore();
 }
 

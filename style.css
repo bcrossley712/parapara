@@ -962,14 +962,18 @@ html, body {
 .pp-frame-strip__tile,
 .pp-frame-strip__add {
   flex-shrink: 0;
-  width: 64px;
-  height: 48px;
+  /* Set from the canvas's shape (frame-strip.js setAspect). */
+  width: var(--pp-tile-width, 64px);
+  height: var(--pp-tile-height, 48px);
   border-radius: 8px;
   font-family: inherit;
   cursor: pointer;
 }
 
 .pp-frame-strip__tile {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
   border: none;
   background: var(--pp-ink-light);
   color: var(--pp-bg);
@@ -981,6 +985,49 @@ html, body {
   background: var(--pp-accent);
   color: var(--pp-ink);
   font-weight: 600;
+}
+
+/* With a picture (4a-ii): the frame fills the tile, the number moves
+   to a corner badge, and the current tile gets an accent ring drawn
+   inside it (the list clips anything outside). */
+.pp-frame-strip__picture {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pp-frame-strip__tile.has-picture {
+  background: #ffffff;
+}
+
+.pp-frame-strip__tile.has-picture .pp-frame-strip__number {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.pp-frame-strip__tile.has-picture.is-current .pp-frame-strip__number {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+.pp-frame-strip__tile.has-picture.is-current::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--pp-accent);
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .pp-frame-strip__tile:disabled {

@@ -284,6 +284,19 @@ test('hiding the app updates the thumbnail', async ({ page }) => {
   await expect.poll(async () => Boolean(await readDb(page, 'blobs', `thumb-${id}`))).toBe(true);
 });
 
+test("undoing a stroke on frame 1 after the thumbnail was drawn redraws it", async ({ page }) => {
+  await openApp(page);
+  await drawStroke(page);
+  const id = (await readDb(page, 'projects'))[0].id;
+  // Hiding the app draws the thumbnail with the stroke in it.
+  await setVisibility(page, 'hidden');
+  await expect.poll(async () => Boolean(await readDb(page, 'blobs', `thumb-${id}`))).toBe(true);
+  await setVisibility(page, 'visible');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await toGallery(page);
+  await expect.poll(() => thumbnailInk(page, 'Animation 1')).toBe(0);
+});
+
 test('the gallery has the gear menu, without the editor-only actions', async ({ page }) => {
   await page.goto('/index.html');
   await page.locator('.pp-gallery').waitFor();

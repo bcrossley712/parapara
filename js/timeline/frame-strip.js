@@ -8,12 +8,26 @@
 // frame menu): Duplicate today; step 4's delete and reorder join it.
 // (The reference image's controls live in the top bar's Image menu.)
 //
-// Bare-bones for now: tiles show the frame number only. Thumbnails,
-// reorder and delete come with step 4 (playback, onion skin), and the
-// transport sits above this strip then.
+// Tiles show a picture of the frame (4a-ii; drawn by
+// canvas/frame-tiles.js, handed in with setThumbnail) with its number
+// in a corner badge; until a frame's picture is ready, the number alone.
+// Tiles take the canvas's shape (setAspect). Reorder and delete come
+// with 4d, and the transport sits above this strip with 4b.
 //
 // Pure UI: main.js passes state in through render() and gets intents
 // back through the callbacks.
+
+// Tile height in CSS px (the strip's layout is built around it); the
+// width follows the canvas's aspect, within limits.
+export const TILE_HEIGHT = 48;
+const MIN_TILE_WIDTH = 36;
+const MAX_TILE_WIDTH = 96;
+
+// A tile's CSS size for a canvas of `canvasSize`.
+export function tileCssSize(canvasSize) {
+  const width = Math.round(TILE_HEIGHT * (canvasSize.width / canvasSize.height));
+  return { width: Math.min(MAX_TILE_WIDTH, Math.max(MIN_TILE_WIDTH, width)), height: TILE_HEIGHT };
+}
 
 // callbacks: onSelect(frameId), onAdd(), onDuplicate()
 // options.signal: aborts the document listener (the menu's tap-outside
@@ -37,6 +51,10 @@ export function createFrameStrip(callbacks, { signal } = {}) {
 
   let lastCurrent = null;
   let lastBusy = false;
+
+  // Picture canvases by frame id (owned by frame-tiles.js). Kept here
+  // across render(), which rebuilds the tile buttons.
+  const pictures = new Map();
 
   // --- the frame menu (above the current tile) ---
   let menu = null;
@@ -89,7 +107,16 @@ export function createFrameStrip(callbacks, { signal } = {}) {
       tile.type = 'button';
       tile.className = 'pp-frame-strip__tile';
       tile.dataset.frameId = id;
-      tile.textContent = String(i + 1);
+      // The number stays the tile's only text (tests read it).
+      const number = document.createElement('span');
+      number.className = 'pp-frame-strip__number';
+      number.textContent = String(i + 1);
+      tile.appendChild(number);
+      const picture = pictures.get(id);
+      if (picture) {
+        tile.prepend(picture);
+        tile.classList.add('has-picture');
+      }
       tile.setAttribute('aria-label', `Frame ${i + 1}`);
       const isCurrent = id === currentId;
       tile.classList.toggle('is-current', isCurrent);
@@ -121,7 +148,31 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     }
   }
 
-  return { element: strip, render, closeMenu };
+  // A frame's picture (a canvas), or null to go back to the number.
+  // The canvas is redrawn in place later; it's only placed here.
+  function setThumbnail(frameId, canvas) {
+    if (canvas) {
+      canvas.classList.add('pp-frame-strip__picture');
+      pictures.set(frameId, canvas);
+    } else {
+      pictures.get(frameId)?.remove();
+      pictures.delete(frameId);
+    }
+    const tile = [...list.children].find((t) => t.dataset.frameId === frameId);
+    if (!tile) return;
+    if (canvas) tile.prepend(canvas);
+    tile.classList.toggle('has-picture', Boolean(canvas));
+  }
+
+  // The canvas's shape, so tiles match it. Returns the tile's CSS size.
+  function setAspect(canvasSize) {
+    const size = tileCssSize(canvasSize);
+    strip.style.setProperty('--pp-tile-width', `${size.width}px`);
+    strip.style.setProperty('--pp-tile-height', `${size.height}px`);
+    return size;
+  }
+
+  return { element: strip, render, closeMenu, setThumbnail, setAspect };
 }
 
 const PLUS_ICON = `

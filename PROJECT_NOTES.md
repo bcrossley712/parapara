@@ -105,28 +105,36 @@ icon, manifest `name`/`short_name`, and repo copy.
   This is when she first sees her animation move, so nothing new goes
   ahead of it without a deliberate decision. **Split, memory first;
   each part confirmed on the iPad before the next:**
-  - **4a-i: built, awaiting iPad numbers.** Two dev tests in the gear
-    menu (`timeline/dev-stress.js`): *Playback speed test* (flatten,
-    encode and decode timings; real playback at 12/24/30/60 fps,
-    full and half size, decoding 6 frames ahead, counting drops) and
-    *Frame memory test* (holds full-size frames until Safari refuses
-    or iOS kills the page; an interrupted run is reported at the next
-    launch). Synthetic frames are denser than real line art (~1.3 MB
-    PNG at 1080p), so they're a conservative case. Results pick the
-    cache's format and resolution for 4a-ii.
-  - **4a-ii:** `renderFrame`, the flattened-frame cache and its
-    invalidation, tile thumbnails. **4b:** playback + transport.
+  - **4a-i: done, measured on the iPad** (dev tests in the gear menu,
+    `timeline/dev-stress.js`; synthetic frames denser than real line
+    art, ~1.2 MB PNG at 1080p, so a conservative case). Results
+    ([details](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
+    160 full-size frames (1.27 GB) held even with 8 layers, never
+    failing — memory isn't the limit. Full-size decode 28 ms: 12/24
+    fps show every frame, 30 drops 2%, 60 collapses. Flattening costs
+    ~120 ms at 4 layers, ~200 ms at 8 (decode + encode).
+  - **4a-ii: built, awaiting the iPad.** `renderFrame`
+    (`canvas/render-frame.js`), the flattened-frame cache
+    (`timeline/frame-cache.js`) and tile pictures
+    (`canvas/frame-tiles.js`). Tiles take the canvas's shape (~85×48
+    for 16:9), the number moves to a corner badge, the current tile gets
+    an accent ring; before a frame's picture is ready it shows the
+    number alone. **Check on the iPad:** drawing feels unchanged while
+    tiles rebuild (a flatten + PNG encode runs after each pause in
+    drawing), and how long tiles take to fill in on open. **4b:**
+    playback + transport.
     **4c:** onion skin. **4d:** reorder + delete.
   - **Decided:**
-    - **Cache:** each frame flattened and *encoded*, held in memory
-      only, rebuilt in the background after a project opens; playback
-      decodes a small ring just ahead of the playhead, so memory
-      doesn't grow with length. Never every frame decoded at once
-      ([why](docs/DESIGN_NOTES.md#layers-and-undo)). **Revisit
-      saving it to IndexedDB** after 4b, once a long animation has
-      been opened on the iPad — if the background rebuild is slow
-      enough to notice, persist it (a new derived blob kind: the
-      sweep and duplicate project must handle it, like the thumbnail).
+    - **Cache:** each frame flattened at **full size** and encoded as
+      **PNG**, held in memory only, rebuilt in the background after a
+      project opens; playback decodes a small ring just ahead of the
+      playhead, so memory doesn't grow with length. Never every frame
+      decoded at once. Half size would play faster but looks soft at
+      her canvas's on-screen size (~1,900 device px wide).
+      **Revisit saving it to IndexedDB after 4b:** a full rebuild is
+      ~6–10 s for 48 frames, and every open pays it. Likely worth it
+      once her animations get long (a new derived blob kind: the sweep
+      and duplicate project must handle it, like the thumbnail).
     - **One `renderFrame`** (generalized from `canvas/thumbnail.js`)
       for the gallery thumbnail, tiles, cache, onion skin and step 6
       export. **The cache holds layers only, transparent, no
@@ -138,31 +146,38 @@ icon, manifest `name`/`short_name`, and repo copy.
       (visible layers' ids + opacity, in order) and the frame's
       *content version* (bumped by a commit, undo/redo, Clear or
       copy on that frame). A signature change marks every entry stale
-      at O(1) — dragging opacity only bumps it. Rebuild is lazy:
-      onion neighbors first (~300 ms after the slider settles), tiles
-      in idle time, the rest on play. Stale tiles stay until replaced
-      (no blank flicker). The open frame re-flattens from the live
-      canvases on commit.
+      at O(1) — dragging opacity only bumps it. Rebuild runs in the
+      background ~300 ms after changes settle, nearest the current
+      frame first (the open frame, then its neighbors), one frame at
+      a time, only while she isn't mid-stroke or mid-change; a result
+      that went stale while building is thrown away. Stale tiles stay
+      until replaced (no blank flicker). The open frame flattens from
+      the live canvases, so unsaved strokes count. **Play before the
+      rebuild finishes** (4b): a short "Getting ready" progress, then
+      it plays — at ~5–8 frames/s a rebuild can't stay ahead of
+      playback, so no starting early.
     - **Clock** (`timeline/clock.js`, built in 4a-i): one rAF loop
       asks a clock for elapsed time; `frameAtTime` picks the frame;
       late frames are dropped, never slowed. Step 5 swaps in the audio
       clock (`AudioContext.currentTime` + output latency) without
-      touching the loop.
+      touching the loop. **When decoding falls behind, skip ahead:**
+      drop late decodes, aim at where the playhead will be, keep the
+      last good frame up (4a-i's 60 fps run showed 2 of 240 frames by
+      chasing late ones). Flipaclip does the same with audio.
     - **Playback:** loops by default, with a toggle to turn it off.
       Drawing is blocked while playing; a tap on the canvas stops it.
       Undo/redo stop playback first, then act. Onion skin is hidden
       while playing (confirm with her).
-    - **FPS:** she picks it in the transport, 1–60 (her apps go well
-      past 24); default 12.
+    - **FPS:** she picks it in the transport, **1–30** (Flipaclip's
+      maximum, and full size plays 30 on her iPad); default 12.
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
       `'frame-delete'` / `'frame-move'` undo types); the last frame
       can't be deleted.
     - **Saved per project:** fps, loop, onion on/off and its settings.
     - Tile thumbnails **include the reference image** (unless Hide
-      images is on), ~160 px wide — that's how she sees which frames
-      have one; no separate marker. Onion skin stays out of
-      `readVisible`.
+      images is on) — that's how she sees which frames have one; no
+      separate marker. Onion skin stays out of `readVisible`.
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
       optional `frame.hold` (missing = 1) read only by `frameAtTime`.
@@ -454,6 +469,19 @@ Each is here because breaking it caused (or would cause) a real bug.
 - Layer canvases are `pointer-events: none`; pointer listeners and
   capture belong to the canvas area (`.pp-canvas-area`), never the
   page or a layer — fingers off the page must still count.
+- **Anything that changes a frame's pixels must `frameCache.touch`
+  that frame** (`main.js`): `markUnsaved` and `swapPixels` do. A
+  change to what layers show goes through `layerSignature`, picked up
+  in `refreshPanel`. Miss one and that frame's tile (and later its
+  playback) shows old pixels until something else touches it.
+- **The cache holds layers only** — no paper, no reference image.
+  Paper and photo are added when it's shown (`drawFlattened`), so Hide
+  images and image edits never invalidate it.
+- **The open frame flattens from its live canvases, synchronously**
+  (`layerSource` in `renderFrame`); others from storage. An await in
+  the live path would let a stroke land halfway through.
+- **`canvasApi.getLayerImage` is read-only** — drawing into it skips
+  undo and saving.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
   sampler** for fill and the eyedropper. The reference image (3a) is
   in it, under the layers, when showing (its single-layer fast path
@@ -570,6 +598,11 @@ Each is here because breaking it caused (or would cause) a real bug.
         canvas.js         input dispatch, tools, viewport, layer surfaces,
                           committed copy; its returned API is the only
                           way other modules touch the canvas
+        render-frame.js   renderFrame: the one "frame, flattened" rule
+                          (gallery thumbnail, cache, tiles; later onion
+                          skin, export); drawFlattened, loadReference
+        frame-tiles.js    frame strip pictures: cached layers over
+                          paper + the frame's photo (4a-ii)
         thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
                           (reference image first, unless hidden)
         reference.js      reference image: on-screen view, drawReference,
@@ -608,6 +641,8 @@ Each is here because breaking it caused (or would cause) a real bug.
                           via callbacks)
         clock.js          pure elapsed time → frame (beatAtTime,
                           frameAtTime); playback's clock math (4a-i)
+        frame-cache.js    pure flattened-frame cache bookkeeping:
+                          layerSignature, freshness, rebuild order (4a-ii)
         dev-stress.js     DEV ONLY: playback speed + frame memory tests
                           (4a-i)
         timeline.js       placeholder: playback, onion skin (step 4)
@@ -638,7 +673,7 @@ bitmap. Planned fields are marked. Extend additively.
     project = {
       id, name, createdAt, updatedAt,
       canvas: { width: 1920, height: 1080 },
-      fps: 12,                                // 4b: she picks 1–60 in the transport
+      fps: 12,                                // 4b: she picks 1–30 in the transport
       loop: true,                             // planned (4b); missing = true
       onionSkin: { ... },                     // planned (4c): on/off + settings, shape decided then
       layers: [                               // index 0 = bottom; shared by all frames

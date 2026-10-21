@@ -1551,6 +1551,14 @@ export function initCanvas(container, options = {}) {
       if (surface) tctx.drawImage(surface.canvas, 0, 0, target.width, target.height);
     },
 
+    // A layer's live pixels as something to drawImage from (its canvas),
+    // or null if it isn't loaded — how the open frame is flattened for
+    // the frame cache (4a-ii), unsaved strokes included. Read-only:
+    // draw from it, never into it, or the edit skips undo and saving.
+    getLayerImage(id) {
+      return surfaces.get(id)?.canvas ?? null;
+    },
+
     // Tears the canvas down when the editor closes (back to the
     // gallery): stops watching for resizes, ignores input, and frees
     // every canvas's pixel memory right away by shrinking it to 0×0 —
