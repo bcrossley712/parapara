@@ -36,6 +36,7 @@ const APP_SHELL = [
   './js/canvas/brush.js',
   './js/canvas/gestures.js',
   './js/canvas/region.js',
+  './js/canvas/ink-map.js',
   './js/canvas/thumbnail.js',
   './js/canvas/render-frame.js',
   './js/canvas/frame-tiles.js',

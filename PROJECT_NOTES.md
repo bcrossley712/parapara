@@ -122,34 +122,19 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **4c: built, not yet confirmed on the iPad** — onion skin. How it
     works is under Architecture → Onion skin. She's new to onion
     skins, so its defaults follow convention (decided here, not asked).
-  - **Before 4d — the open data-loss bug comes first.** On the iPad
-    (trying 4b), two frames of a many-stroke drawing went blank; undo
-    brought back only fragments, so the layer was replaced with blank
-    *without* an undo step (likely blank saved over them, or their
-    pixels saved under another frame). Cause unknown; it hasn't
-    happened again. 4c was safe to build (onion skin only reads the
-    cache), but **4d deletes and reorders frames — the same area — so
-    don't start it until this is chased further:**
-    1. **Ask her / him:** did a "couldn't be saved" notice appear
-       around then? Her iPad runs near full.
-    2. **Extend the randomized e2e hunt** (it ran 16 seeds × 70 steps:
-       touch strokes, gestures, add/duplicate/switch frames,
-       undo/redo, every way of stopping playback — never lost a stroke)
-       to what it didn't cover: **saves that fail** (make
-       `saveLayerBitmap` / the IndexedDB write throw, e.g. a
-       QuotaExceeded, mid-session and during frame switches), eraser /
-       fill / smudge, several layers, photos, and the app going to the
-       background mid-save.
-    3. **Batch the activity log's writes** (`storage/dev-log.js`): it
-       rewrites all 300 lines to localStorage on every event, including
-       every stroke and save — work at stroke end, and enough to widen
-       a CI race. Persist on a short timer and on hide instead.
-    4. Keep the activity log on; **next time it happens, get the log**
-       (gear → Developer → Activity log). Hardening done meanwhile:
-       autosave settles which frame it saves to before any await (see
-       Don't break these).
-    Then **4d** reorder + delete. Ask her about onion skin (below)
-    before 4d is confirmed.
+  - **The data-loss bug: found; guard built, not yet confirmed on
+    the iPad.** Caught with the activity log: while she drew, iOS
+    emptied the layer's canvas (it read back blank and stayed blank on
+    every frame load) while storage still held every frame. Locking
+    the layer happened to stop her next stroke; reopening the app
+    brought it all back. Before, her next stroke saved blank + that
+    stroke over the drawing (undo only had stroke-sized patches — the
+    "fragments"). No notice, no backgrounding involved. The guard is
+    under Architecture → Lost canvases. Cause of the emptying (likely
+    memory) unknown: **if the log shows `load-renewed`, `save-refused`,
+    `check-failed` or `recover`, get the log** — it says when and how
+    often. Then **4d** reorder + delete. Ask her about onion skin
+    (below) before 4d is confirmed.
   - **Decided for 4d** (4b's and 4c's decisions are in Architecture):
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
@@ -518,6 +503,24 @@ Short rules; reasoning in the linked sections.
     setting, so it doesn't stop playback.
   - **Left out unless she asks:** wrap-around, active-layer-only
     ghosts, keyframe-only onion, per-frame ghost toggles.
+- **Lost canvases (after 4c)** ([why](docs/DESIGN_NOTES.md#lost-canvases))
+  — iOS can empty a layer canvas without telling the page; saving it
+  would write blank over her drawing.
+  - **Ink maps** (`canvas/ink-map.js`, pure): a 1/8-scale grid of
+    which cells have paint, per layer; edits mark the cells they touch.
+    **Lost = ink gone from cells she didn't edit** (≥ 8 cells and ≥ half
+    of them), so erasing — even everything — never trips it. A canvas
+    losing only a few cells isn't caught (on purpose: no noise trips).
+  - **On every load** (`loadFrame`, `setLayerImage` → `fillSurface`):
+    the map comes from the decoded image; if the canvas doesn't hold
+    it, the canvas element is swapped for a fresh one (and the
+    committed copy too) and drawn again — a banner says so. Still not
+    holding it → `broken`: painting refused, notice to reopen the app.
+  - **Before every save** and when the app comes back into view
+    (`checkLayer`): a lost layer isn't saved (or held in memory); it's
+    reloaded from storage onto a fresh canvas (`recoverLayers`, one at
+    a time, waits for a quiet moment) with a notice. Strokes since the
+    last save are lost; the drawing isn't.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
@@ -552,6 +555,17 @@ Each is here because breaking it caused (or would cause) a real bug.
   encode could put one frame's pixels under another frame's ref.
 - **`canvasApi.getLayerImage` is read-only** — drawing into it skips
   undo and saving.
+- **Every change to a layer's pixels marks its ink map** — through
+  `notifyChange`, `swapRegion`, `revertUncommitted` (`noteEdit`), or
+  a full refill through `fillSurface` (loads, `setLayerImage`). A new
+  pixel path that skips this makes the save guard refuse her own edit
+  (or miss a lost canvas).
+- **Never save or hold a layer whose `checkLayer` fails** (autosave's
+  save, `leaveFrame`). Any new path that writes layer pixels to
+  storage from the live canvas goes through it too.
+- **Layer canvas elements can be replaced** (`renewSurface`) — never
+  keep a reference to a `.pp-layer` element or its context across
+  calls; ask `canvasApi` each time. Same for the committed copy.
 - **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
   sampler** for fill and the eyedropper. The reference image (3a) is
   in it, under the layers, when showing (its single-layer fast path
@@ -701,6 +715,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
         region.js         pure dirty-rect helpers
+        ink-map.js        pure lost-canvas rule: ink maps, edited cells,
+                          looksLost (after 4c)
       storage/
         storage.js        IndexedDB wrapper + schema factories
         autosave.js       save timing only (debounce, no overlap, flush)
@@ -711,7 +727,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         colors.js         pure recents/palette list ops, MAX_RECENTS,
                           MAX_PALETTE, saved-list validation
         dev-log.js        DEV ONLY: activity log, 300 lines in
-                          localStorage
+                          localStorage, written at most once a second
+                          and on hide
       ui/
         ui.js             editor: top bar (Gallery, undo/redo, Image, Layers),
                           tool rail, toasts/banners, DOM glue, destroy
@@ -825,7 +842,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 **Run tests before handing off any change; add tests for new logic.**
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
-  `npm run test:e2e` (~2.2 min), or `npm test`.
+  `npm run test:e2e` (~3.2 min), or `npm test`.
 - **In a Claude sandbox:** Chromium is preinstalled — run
   `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
@@ -868,9 +885,16 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
   - Each test gets its own browser context (own IndexedDB), so tests
-    must not depend on order or on each other. ~2.2 min after 4b.
+    must not depend on order or on each other. ~3.2 min after the
+    lost-canvas guard.
   - **Find the gear button with `exact: true`** (`name: 'Settings'`)
     — "Onion skin settings" matches a loose lookup too.
+  - **The robot test** (`hunt.spec.js`): seeded random use with a
+    model; checks every mark on screen and after a reload. CI runs 3
+    seeds × 40 steps; locally `HUNT_SEEDS=16 HUNT_STEPS=80`, or
+    `HUNT_SEED=<n>` to rerun a failure (the log is attached).
+    `canvas-loss.spec.js` simulates the lost canvas (cleared, or
+    ignoring `drawImage`).
   - **Images in e2e:** make the test image in the page (a canvas →
     PNG buffer) and feed it through `page.waitForEvent('filechooser')`
     so the real picker path runs (`reference.spec.js`).
@@ -889,4 +913,5 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   smoothness at 24–30 fps with real line art, the stop tap with her
   stylus, the moment of frame loading after a stop, how the onion
   ghosts read over her real line art, and how soon they appear after
-  a frame switch.
+  a frame switch, and whether iPadOS's real lost canvas behaves like
+  the simulations in `canvas-loss.spec.js`.

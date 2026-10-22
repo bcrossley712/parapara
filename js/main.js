@@ -127,6 +127,8 @@ let storageWorks = false;
 // gallery. Runs before any reload the app causes itself (applying an
 // update, Fresh reload) and when the app is hidden.
 let flushEditor = null;
+// The open editor's canvas check (lost canvases, after 4c), or null.
+let checkEditor = null;
 
 // Same save-timing rules as the drawing (autosave.js). Failures are
 // only logged: losing a color choice or a panel state isn't worth
@@ -157,9 +159,12 @@ function setUiState(changes, { now = false } = {}) {
   if (now) uiStateSaver.flush();
 }
 
+// The activity log is written now and again once the saves settle —
+// iOS may not wait for them.
 function flushAll() {
+  devLog.flush();
   const savers = storageWorks ? [settingsSaver.flush(), uiStateSaver.flush(), recentsSaver.flush()] : [];
-  return Promise.all([flushEditor?.(), ...savers]);
+  return Promise.all([flushEditor?.(), ...savers]).finally(() => devLog.flush());
 }
 
 const updater = initUpdater({
@@ -189,6 +194,7 @@ function showNotice(message) {
 document.addEventListener('visibilitychange', () => {
   devLog.add('app', document.visibilityState);
   if (document.visibilityState === 'hidden') flushAll();
+  else checkEditor?.();
 });
 window.addEventListener('pagehide', () => flushAll());
 
@@ -268,9 +274,10 @@ async function prepareSession({ project, frames }) {
   // A frame should have a bitmap slot for every layer; fill any gap
   // (and save it) rather than failing to load.
   if (ensureBitmapRefs(frame, project.layers)) await saveFrame(frame);
-  const images = await decodeFrameImages(project.layers, frame, loadLayerBitmap);
+  const sizes = new Map();
+  const images = await decodeFrameImages(project.layers, frame, loadLayerBitmap, sizes);
   const reference = await decodeReference(frame, loadLayerBitmap, null);
-  return { project, frames, frame, images, reference };
+  return { project, frames, frame, images, reference, sizes };
 }
 
 // --- gallery ---
@@ -601,7 +608,7 @@ function mountEditor(session, { canSave }) {
     if (canSave) recentsSaver.schedule();
   }
 
-  canvasApi.loadFrame({
+  const openLoad = canvasApi.loadFrame({
     layers: project.layers,
     activeLayerId: project.activeLayerId,
     images: savedImages,
@@ -974,9 +981,105 @@ function mountEditor(session, { canSave }) {
     return canSave ? loadLayerBitmap(ref) : null;
   }
 
+  // Bytes last read or written per bitmapRef — only for the log, so a
+  // save that shrinks a drawing stands out.
+  const savedBytes = new Map(session.sizes ?? []);
+
+  // --- canvases that lose their pixels (after 4c) ---
+  //
+  // iOS can empty a layer canvas without telling the page (seen on her
+  // iPad). canvas.js notices on load (and swaps in a fresh canvas) and
+  // before each save (checkLayer); here, a layer that failed the check
+  // is reloaded from storage — the last save — onto a fresh canvas.
+  // Strokes since that save are lost; her drawing isn't.
+  let canvasTroubleShown = false; // one "reopen" notice until a clean load
+
+  function reportCanvasLoad({ renewed, broken }) {
+    if (renewed.length > 0) devLog.add('load-renewed', { frame: tag(session.frame.id), layers: renewed.map(short).join(',') });
+    if (broken.length > 0) {
+      devLog.add('load-broken', { frame: tag(session.frame.id), layers: broken.map(short).join(',') });
+      if (!canvasTroubleShown) {
+        canvasTroubleShown = true;
+        showNotice("Parapara! can't show this frame's drawing right now. Your drawing is safe. Close Parapara! and open it again.");
+      }
+      return;
+    }
+    if (renewed.length > 0) showBanner("This frame's drawing stopped showing, so it was loaded again.");
+    canvasTroubleShown = false;
+  }
+
+  // One recovery at a time; layers refused meanwhile join it. It waits
+  // for a quiet moment (no stroke, no frame or layer change), and is
+  // dropped if another frame loads first — that load checked it.
+  let pendingRecovery = null; // { frameId, ids: Set }
+
+  function recoverLayers(frameId, layerIds) {
+    if (pendingRecovery?.frameId === frameId) {
+      for (const id of layerIds) pendingRecovery.ids.add(id);
+      return;
+    }
+    pendingRecovery = { frameId, ids: new Set(layerIds) };
+    tryRecovery();
+  }
+
+  function tryRecovery() {
+    const pending = pendingRecovery;
+    if (!pending) return;
+    if (closing || session.frame.id !== pending.frameId) {
+      pendingRecovery = null;
+      return;
+    }
+    if (!canAct()) {
+      setTimeout(tryRecovery, 200);
+      return;
+    }
+    pendingRecovery = null;
+    exclusive(async () => {
+      if (session.frame.id !== pending.frameId) return;
+      const frame = session.frame;
+      const ids = [...pending.ids].filter((id) => project.layers.some((l) => l.id === id));
+      devLog.add('recover', { frame: tag(frame.id), layers: ids.map(short).join(',') });
+      canvasApi.renewLayers(ids);
+      const result = { renewed: [], broken: [] };
+      for (const id of ids) {
+        unsavedLayers.delete(id);
+        const blob = await readBitmap(frame.bitmapRefs[id]);
+        const image = blob ? await createImageBitmap(blob) : null;
+        const status = canvasApi.setLayerImage(id, image);
+        image?.close?.();
+        if (status === 'broken') result.broken.push(id);
+        panel.refreshThumbnail(id);
+      }
+      frameCache.touch(frame.id);
+      if (result.broken.length > 0) {
+        reportCanvasLoad(result);
+      } else {
+        canvasTroubleShown = false;
+        showNotice("This frame's drawing stopped showing, so it was loaded again from your last save. Your last stroke or two may be missing.");
+      }
+    });
+  }
+
+  // Checks every layer of the open frame (the app came back into view).
+  function checkCanvases() {
+    if (!canAct()) return;
+    const bad = project.layers.map((l) => l.id).filter((id) => {
+      const check = canvasApi.checkLayer(id);
+      if (!check.ok) devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(id), had: check.had, lost: check.lost });
+      return !check.ok;
+    });
+    if (bad.length > 0) recoverLayers(session.frame.id, bad);
+  }
+
   async function leaveFrame() {
     if (canSave) await autosaver.flush();
     for (const layerId of unsavedLayers) {
+      // Never hold pixels from a canvas that lost them (see the guard).
+      const check = canvasApi.checkLayer(layerId);
+      if (!check.ok) {
+        devLog.add('hold-refused', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+        continue;
+      }
       const blob = await canvasApi.exportPNG(layerId);
       heldBitmaps.set(session.frame.bitmapRefs[layerId], blob);
       devLog.add('held', { frame: tag(session.frame.id), layer: short(layerId), bytes: blob.size });
@@ -991,19 +1094,17 @@ function mountEditor(session, { canSave }) {
     if (!next) throw new Error(`No frame ${frameId}`);
     await leaveFrame();
     if (ensureBitmapRefs(next, project.layers) && canSave) await saveFrame(next);
-    const loadedBytes = [];
-    const images = await decodeFrameImages(project.layers, next, async (ref) => {
-      const blob = await readBitmap(ref);
-      loadedBytes.push(blob ? blob.size : 0);
-      return blob;
-    });
-    devLog.add('show', { from: tag(session.frame.id), to: tag(frameId), bytes: loadedBytes.join('/') });
+    const sizes = new Map();
+    const images = await decodeFrameImages(project.layers, next, readBitmap, sizes);
+    for (const [ref, bytes] of sizes) savedBytes.set(ref, bytes);
+    devLog.add('show', { from: tag(session.frame.id), to: tag(frameId), bytes: [...sizes.values()].join('/') });
     const reference = await decodeReference(next, readBitmap, canvasApi.getReferenceKey());
 
     session.frame = next;
     project.currentFrameId = next.id;
-    canvasApi.loadFrame({ layers: project.layers, activeLayerId: project.activeLayerId, images });
+    const loaded = canvasApi.loadFrame({ layers: project.layers, activeLayerId: project.activeLayerId, images });
     for (const image of images.values()) image.close?.();
+    reportCanvasLoad(loaded);
     applyReference(next, reference);
 
     // Pixels that were held in memory go back to storage now.
@@ -1118,8 +1219,9 @@ function mountEditor(session, { canSave }) {
     setFrames(frames);
     project.activeLayerId = layer.id;
     canvasApi.syncLayers(project.layers);
-    canvasApi.setLayerImage(layer.id, image);
+    const status = canvasApi.setLayerImage(layer.id, image);
     image?.close?.();
+    reportCanvasLoad({ renewed: status === 'renewed' ? [layer.id] : [], broken: status === 'broken' ? [layer.id] : [] });
     canvasApi.setActiveLayer(layer.id);
     // Pixels that came from the record were never saved under the
     // frame's ref; save them now.
@@ -1254,6 +1356,10 @@ function mountEditor(session, { canSave }) {
   canvasApi.onDebug((event, details) => devLog.add(event, { frame: tag(session.frame.id), ...details }));
 
   canvasApi.onBlocked((reason) => {
+    if (reason === 'broken') {
+      showBanner("This layer's drawing can't be shown right now. Close Parapara! and open it again.");
+      return;
+    }
     showBanner(reason === 'locked'
       ? 'This layer is locked. Unlock it in Layers to draw on it.'
       : 'This layer is hidden. Show it in Layers to draw on it.');
@@ -1706,6 +1812,7 @@ function mountEditor(session, { canSave }) {
   }
 
   refreshPanel();
+  reportCanvasLoad(openLoad);
 
   if (!canSave) {
     showNotice("Saving isn't working right now, so drawings won't be kept.");
@@ -1721,23 +1828,38 @@ function mountEditor(session, { canSave }) {
       // the pixels when it's called), and each goes to the ref of the
       // frame it was exported from — never to whatever frame is open by
       // the time the encode finishes.
+      //
+      // The save guard (after 4c): a layer whose canvas has lost ink
+      // outside the areas she edited is never saved — iOS emptied it,
+      // and saving would write blank over her drawing. It's reloaded
+      // from storage instead (recoverLayers).
       const frame = session.frame;
-      const exports = layerIds.map((layerId) => {
+      const refused = [];
+      const exports = [];
+      for (const layerId of layerIds) {
+        const check = canvasApi.checkLayer(layerId);
+        if (!check.ok) {
+          refused.push(layerId);
+          devLog.add('save-refused', { frame: tag(frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+          continue;
+        }
         const encoding = canvasApi.exportPNG(layerId);
         encoding.catch(() => {}); // a failure is handled where it's awaited
-        return { layerId, ref: frame.bitmapRefs[layerId], blob: encoding };
-      });
+        exports.push({ layerId, ref: frame.bitmapRefs[layerId], blob: encoding });
+      }
+      if (refused.length > 0) recoverLayers(frame.id, refused);
       try {
         for (const { layerId, ref, blob: encoding } of exports) {
           const blob = await encoding;
           await saveLayerBitmap(project.id, ref, blob);
-          devLog.add('save', { frame: tag(frame.id), layer: short(layerId), bytes: blob.size });
+          devLog.add('save', { frame: tag(frame.id), layer: short(layerId), bytes: blob.size, was: savedBytes.get(ref) ?? '?' });
+          savedBytes.set(ref, blob.size);
         }
-        if (session.frame !== frame) devLog.add('save-note', 'frame changed during save');
+        if (session.frame.id !== frame.id) devLog.add('save-note', 'frame changed during save');
       } catch (err) {
         devLog.add('save-failed', { frame: tag(frame.id), error: String(err?.message ?? err) });
         // Re-saving one that did land is harmless; losing one isn't.
-        for (const layerId of layerIds) unsavedLayers.add(layerId);
+        for (const { layerId } of exports) unsavedLayers.add(layerId);
         throw err;
       }
     },
@@ -1781,6 +1903,7 @@ function mountEditor(session, { canSave }) {
   }
 
   flushEditor = flush;
+  checkEditor = checkCanvases;
 
   // The Gallery button. Waits out nothing: a tap while a layer or
   // frame change or a stroke is in progress is ignored, like other
@@ -1821,6 +1944,7 @@ function mountEditor(session, { canSave }) {
     // before the gallery goes.
     const cards = await loadGalleryCards();
     flushEditor = null;
+    checkEditor = null;
     playback.destroy();
     playbackFrames.destroy();
     onionView.destroy();
@@ -1858,11 +1982,14 @@ function sameImage(a, b) {
 
 // Decodes a frame's saved layer bitmaps: a Map of layer id ->
 // ImageBitmap, with blank layers left out. A bitmap that won't decode
-// throws — the caller treats that like any failed load.
-async function decodeFrameImages(layers, frame, read) {
+// throws — the caller treats that like any failed load. `sizes`, if
+// given, gets bitmapRef -> bytes read (0 = blank), for the log.
+async function decodeFrameImages(layers, frame, read, sizes = null) {
   const images = new Map();
   for (const layer of layers) {
-    const blob = await read(frame.bitmapRefs[layer.id]);
+    const ref = frame.bitmapRefs[layer.id];
+    const blob = await read(ref);
+    sizes?.set(ref, blob ? blob.size : 0);
     if (blob) images.set(layer.id, await createImageBitmap(blob));
   }
   return images;

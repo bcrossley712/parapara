@@ -656,6 +656,42 @@ Sections: [Process lessons](#process-lessons) ·
   pointer events — found in testing: without that, the canvas took
   the pointer on pointerdown and the buttons never got a click.
 
+## Lost canvases
+
+**What happened (after 4c).** Twice, a frame of a many-stroke drawing
+went blank. The second time the activity log was on: every save and
+every frame load showed full sizes (~100 KB), yet the layer showed
+nothing, the layers panel thumbnail (drawn from that canvas) was blank,
+and it stayed blank on every frame switch — loading drew into it and
+nothing appeared. The onion ghosts (another canvas) and the tiles (the
+cache) were fine. Reopening the app brought everything back. She'd
+locked the layer, so no stroke followed; the first time one did, and
+its save wrote blank + that stroke over the drawing (undo only held
+stroke-sized patches — the "fragments"). No notice, and the app wasn't
+backgrounded. Most likely iOS dropped that canvas's memory; why then is
+unknown.
+
+**Why "ink outside her edits", not file size.** A save that's much
+smaller than what it replaces is also what a big erase looks like. The
+app already knows every rectangle an edit touches (that's how undo
+works), and a lost canvas loses ink *everywhere*, so comparing only
+the untouched cells separates the two exactly — however much she
+erases. Coarse cells (1/8 scale) keep the sample cheap enough to take
+before every save. Small differences are ignored, so resampling noise
+can't trip it; the cost is that a layer with only a few marks isn't
+protected, and neither is a canvas that loses only part of itself
+(never seen).
+
+**Why a fresh element.** The emptied canvas ignored being drawn into
+again, so reloading into it doesn't work; a new `<canvas>` did (in
+testing, a simulated one). If a fresh one fails too, painting is
+refused and she's told to reopen the app — that worked on the iPad.
+
+**Testing it.** Desktop Chromium never loses a canvas, so the specs
+simulate it: clearing the canvas, and making its context ignore
+`drawImage`/`putImageData`. Whether iPadOS's real failure matches is
+device-only.
+
 ## Planned features
 
 - **Audio:** one project-wide clip, modeled as `audioClips: []` so a

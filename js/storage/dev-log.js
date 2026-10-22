@@ -14,6 +14,10 @@
 
 export const DEV_LOG_KEY = 'parapara-dev-log';
 export const DEV_LOG_MAX = 300;
+// Writes are batched: the whole log is rewritten at most this often
+// (it used to be on every event — work at every stroke's end), and
+// right away on flush() (the app being hidden).
+export const DEV_LOG_PERSIST_MS = 1000;
 
 function defaultStorage() {
   try {
@@ -37,8 +41,16 @@ function token(value) {
   return String(value);
 }
 
-export function createDevLog({ storage = defaultStorage(), now = () => new Date(), max = DEV_LOG_MAX } = {}) {
+export function createDevLog({
+  storage = defaultStorage(),
+  now = () => new Date(),
+  max = DEV_LOG_MAX,
+  persistMs = DEV_LOG_PERSIST_MS,
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (id) => clearTimeout(id),
+} = {}) {
   let lines = null; // loaded lazily
+  let timer = null;
 
   function load() {
     if (lines) return lines;
@@ -52,7 +64,20 @@ export function createDevLog({ storage = defaultStorage(), now = () => new Date(
     return lines;
   }
 
+  function schedulePersist() {
+    if (timer !== null) return;
+    timer = setTimer(() => {
+      timer = null;
+      persist();
+    }, persistMs);
+  }
+
   function persist() {
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+    if (!lines) return;
     try {
       storage?.setItem(DEV_LOG_KEY, JSON.stringify(lines));
     } catch {
@@ -73,6 +98,11 @@ export function createDevLog({ storage = defaultStorage(), now = () => new Date(
       }
       lines.push(parts.join(' '));
       if (lines.length > max) lines.splice(0, lines.length - max);
+      schedulePersist();
+    },
+
+    // Writes anything pending now (the app is being hidden or closed).
+    flush() {
       persist();
     },
 

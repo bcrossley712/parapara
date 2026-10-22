@@ -59,6 +59,15 @@ import {
 import { rectAroundPoint, unionRect, clampRect } from './region.js';
 import { createReferenceView } from './reference.js';
 import { dragPlacement, pinchPlacement } from './transform.js';
+import {
+  inkGrid,
+  emptyInk,
+  inkFromRgba,
+  countInk,
+  markEdited,
+  compareInk,
+  looksLost,
+} from './ink-map.js';
 
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
@@ -162,7 +171,14 @@ export function initCanvas(container, options = {}) {
   // moves it.
   const reference = createReferenceView(stack, width, height);
 
-  // Layer surfaces, by layer id: { canvas, ctx, visible, opacity }.
+  // Ink maps (see ink-map.js): which coarse cells of each layer have
+  // paint, and which cells she has edited since the last check.
+  const grid = inkGrid(width, height);
+
+  // Layer surfaces, by layer id: { canvas, ctx, visible, opacity,
+  // locked, ink, edited, broken }. `broken`: the canvas lost its
+  // pixels and a fresh one didn't hold them either — painting is
+  // refused until the next load.
   // `order` is bottom-to-top, matching the DOM order inside the stack.
   const surfaces = new Map();
   let order = [];
@@ -189,7 +205,103 @@ export function initCanvas(container, options = {}) {
     el.height = height;
     el.className = 'pp-layer';
     el.dataset.layerId = id;
-    return { canvas: el, ctx: el.getContext('2d'), visible: true, opacity: 1, locked: false };
+    return {
+      canvas: el, ctx: el.getContext('2d'), visible: true, opacity: 1, locked: false,
+      ink: emptyInk(grid), edited: null, broken: false,
+    };
+  }
+
+  // --- canvases that lose their pixels (after 4c) ---
+  //
+  // iOS can empty a canvas under memory pressure without telling the
+  // page; it then reads back blank and may stay blank when drawn into
+  // again. A save from it would write blank over her drawing. So a
+  // layer is sampled (a tiny scaled-down copy) whenever its pixels are
+  // known — after a load, after a save check — and checked again
+  // before every save (ink-map.js has the rule). A canvas that lost
+  // its pixels is swapped for a fresh element.
+
+  // An ink map of anything drawImage takes, or null if it can't be
+  // sampled. A fresh small canvas each time, so a lost sampler can't
+  // make a healthy layer look empty.
+  function sampleInk(source) {
+    const probe = document.createElement('canvas');
+    probe.width = grid.cols;
+    probe.height = grid.rows;
+    try {
+      const pctx = probe.getContext('2d');
+      if (!pctx) return null;
+      pctx.imageSmoothingEnabled = true;
+      pctx.imageSmoothingQuality = 'high';
+      pctx.drawImage(source, 0, 0, grid.cols, grid.rows);
+      return inkFromRgba(pctx.getImageData(0, 0, grid.cols, grid.rows).data, grid);
+    } catch {
+      return null;
+    } finally {
+      probe.width = 0;
+      probe.height = 0;
+    }
+  }
+
+  // Replaces a layer's canvas element with a new, blank one in the same
+  // place, with the same classes and styles. The committed copy is
+  // renewed too: if one canvas was emptied, it may have been as well.
+  function renewSurface(surface) {
+    const old = surface.canvas;
+    const el = document.createElement('canvas');
+    el.width = width;
+    el.height = height;
+    el.className = old.className;
+    el.dataset.layerId = old.dataset.layerId;
+    el.style.cssText = old.style.cssText;
+    old.replaceWith(el);
+    old.width = 0;
+    old.height = 0;
+    surface.canvas = el;
+    surface.ctx = el.getContext('2d');
+    if (canvas === old) {
+      canvas = el;
+      ctx = surface.ctx;
+    }
+    renewCommitted();
+    if (canvas) syncCommitted({ x: 0, y: 0, w: width, h: height });
+    emitDebug('canvas-renewed', { layer: el.dataset.layerId });
+  }
+
+  function drawInto(surface, image) {
+    surface.ctx.clearRect(0, 0, width, height);
+    if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+  }
+
+  // Puts `image` (or blank) on a layer and records its ink map from the
+  // image itself — what the layer *should* show. If the canvas doesn't
+  // hold it, it's renewed and drawn again. Returns 'ok', 'renewed' or
+  // 'broken' (still not holding it).
+  function fillSurface(surface, image) {
+    drawInto(surface, image);
+    surface.edited = null;
+    surface.broken = false;
+    const expected = image ? sampleInk(image) : emptyInk(grid);
+    if (!expected) {
+      surface.ink = sampleInk(surface.canvas) ?? emptyInk(grid);
+      return 'ok';
+    }
+    surface.ink = expected;
+    if (countInk(expected) === 0) return 'ok';
+    const now = sampleInk(surface.canvas);
+    if (!now || !looksLost(compareInk(expected, now, null))) return 'ok';
+    renewSurface(surface);
+    drawInto(surface, image);
+    const again = sampleInk(surface.canvas);
+    if (again && !looksLost(compareInk(expected, again, null))) return 'renewed';
+    surface.broken = true;
+    emitDebug('canvas-broken', { layer: surface.canvas.dataset.layerId });
+    return 'broken';
+  }
+
+  function noteEdit(layerId, rect) {
+    const surface = surfaces.get(layerId);
+    if (surface) surface.edited = markEdited(surface.edited, rect, grid);
   }
 
   function applySurfaceStyle(surface) {
@@ -253,6 +365,7 @@ export function initCanvas(container, options = {}) {
   function paintBlockReason() {
     const surface = surfaces.get(activeLayerId);
     if (!surface) return null;
+    if (surface.broken) return 'broken';
     if (surface.locked) return 'locked';
     if (!surface.visible) return 'hidden';
     return null;
@@ -337,10 +450,21 @@ export function initCanvas(container, options = {}) {
   // The committed copy (see top of file). Read with getImageData only
   // when a stroke commits, so — like the main canvas — no
   // willReadFrequently hint.
-  const committedCanvas = document.createElement('canvas');
-  committedCanvas.width = width;
-  committedCanvas.height = height;
-  const committedCtx = committedCanvas.getContext('2d');
+  let committedCanvas = null;
+  let committedCtx = null;
+  renewCommitted();
+
+  // (Re)creates the committed copy, blank. Callers resync it.
+  function renewCommitted() {
+    if (committedCanvas) {
+      committedCanvas.width = 0;
+      committedCanvas.height = 0;
+    }
+    committedCanvas = document.createElement('canvas');
+    committedCanvas.width = width;
+    committedCanvas.height = height;
+    committedCtx = committedCanvas.getContext('2d');
+  }
 
   // Canvas-pixel box around everything painted since the last commit
   // (unclamped; clamped at commit). null = nothing uncommitted.
@@ -363,6 +487,7 @@ export function initCanvas(container, options = {}) {
     dirty = null;
     if (!rect) return;
     emitDebug('revert', { layer: activeLayerId, rect: `${rect.x},${rect.y} ${rect.w}x${rect.h}` });
+    noteEdit(activeLayerId, rect);
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
@@ -922,6 +1047,7 @@ export function initCanvas(container, options = {}) {
   // pixels before the edit (ImageData), the layer it was on, and what
   // made it (a TOOLS name, or 'clear' / 'dev' for the gear menu's).
   function notifyChange(change) {
+    noteEdit(change.layerId, change.rect);
     for (const listener of changeListeners) listener(change);
   }
 
@@ -1511,6 +1637,7 @@ export function initCanvas(container, options = {}) {
       const source = isActive ? committedCtx : surface.ctx;
       const replaced = source.getImageData(rect.x, rect.y, rect.w, rect.h);
       surface.ctx.putImageData(patch, rect.x, rect.y);
+      noteEdit(layerId, rect);
       if (isActive) committedCtx.putImageData(patch, rect.x, rect.y);
       return replaced;
     },
@@ -1560,16 +1687,56 @@ export function initCanvas(container, options = {}) {
     // calling this, so there's no window where a stroke could land and
     // then be wiped by a late-arriving load. Doesn't fire onChange —
     // loading isn't an edit.
+    //
+    // Returns { renewed, broken }: ids of layers whose canvas had lost
+    // its pixels and was swapped for a fresh one, and of those whose
+    // fresh one didn't hold them either (painting refused).
     loadFrame({ layers, activeLayerId: nextActive, images = new Map() }) {
       applyLayers(layers);
+      const result = { renewed: [], broken: [] };
       for (const id of order) {
-        const surface = surfaces.get(id);
-        surface.ctx.clearRect(0, 0, width, height);
-        const image = images.get(id);
-        if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+        const status = fillSurface(surfaces.get(id), images.get(id));
+        if (status !== 'ok') result[status].push(id);
       }
       if (surfaces.has(nextActive)) activate(nextActive);
       else if (activeLayerId !== null) activate(activeLayerId); // resync the copy
+      return result;
+    },
+
+    // Swaps these layers' canvases for fresh, blank ones (a check found
+    // them emptied). main.js then loads the frame again from storage.
+    renewLayers(ids) {
+      for (const id of ids) {
+        const surface = surfaces.get(id);
+        if (surface) renewSurface(surface);
+      }
+      if (activeLayerId !== null) activate(activeLayerId);
+    },
+
+    // Before saving a layer: has its canvas lost ink outside the areas
+    // she edited since the last check? { ok, had, lost } (ink-map.js).
+    // When ok, the layer's ink map is brought up to date. Never ok for
+    // a layer marked broken.
+    checkLayer(id) {
+      const surface = surfaces.get(id);
+      if (!surface) return { ok: true, had: 0, lost: 0 };
+      const now = sampleInk(surface.canvas);
+      if (!now) return { ok: !surface.broken, had: 0, lost: 0 };
+      const result = compareInk(surface.ink, now, surface.edited);
+      if (surface.broken || looksLost(result)) return { ok: false, ...result };
+      surface.ink = now;
+      surface.edited = null;
+      // The committed copy mirrors the active layer when nothing is
+      // uncommitted; if it lost its pixels, undo would read blank.
+      if (id === activeLayerId && dirty === null) {
+        const copy = sampleInk(committedCanvas);
+        if (copy && looksLost(compareInk(now, copy, null))) {
+          renewCommitted();
+          syncCommitted({ x: 0, y: 0, w: width, h: height });
+          emitDebug('copy-renewed', { layer: id });
+        }
+      }
+      return { ok: true, ...result };
     },
 
     // Makes the layer stack match `layers` (same shape as loadFrame)
@@ -1583,15 +1750,17 @@ export function initCanvas(container, options = {}) {
     // Replaces one layer's pixels with an already-decoded image (or
     // blank for null) — how a layer brought back by undo gets its saved
     // pixels. Doesn't fire onChange.
+    // Returns 'ok', 'renewed' or 'broken', like each layer in
+    // loadFrame.
     setLayerImage(id, image) {
       const surface = surfaces.get(id);
-      if (!surface) return;
-      surface.ctx.clearRect(0, 0, width, height);
-      if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+      if (!surface) return 'ok';
+      const status = fillSurface(surface, image);
       if (id === activeLayerId) {
         dirty = null;
         syncCommitted({ x: 0, y: 0, w: width, h: height });
       }
+      return status;
     },
 
     // Switches which layer the tools paint on. Refused (returns false)
