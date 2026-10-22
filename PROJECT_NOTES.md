@@ -421,6 +421,10 @@ Short rules; reasoning in the linked sections.
     image when every frame has the same photo — including a project
     with one frame — else starts blank (`inheritedImage`). No schema
     flag. Copy frame already shares the image.
+  - **While a picked photo is being prepared (Replace), the adjust
+    bar's controls are disabled** and an outside tap doesn't commit
+    (`onDone` ignored while busy). Otherwise Done commits the old
+    photo and the new one reopens adjust mode a moment later.
   - One adjust session = one `'image'` undo entry (small records;
     blobs stay in storage for the sweep). Leaving the app commits too.
     **The commit queues its frame save on `frameSaves`; `flush()` and
@@ -856,6 +860,11 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   explicit `timestamp`s when the page may be busy (e.g. mid-fill), or
   the gesture window expires before the second touch is sent.
 - **Rules:**
+  - **A wait must prove the thing happened**, not check something that
+    may already be true (the bar's "Opacity 50%" before a Replace
+    lands — this broke CI twice). For photo imports use
+    `replaceImage` / wait for the old `.pp-reference__image` to go.
+    Brief states (one frame at 6 fps) need a slow fps or fast polling.
   - **No fixed sleeps** — wait for the event (`helpers.js`:
     `waitForDrawingSave`, `waitForToolSettings`, `expect.poll`). Only
     exception: proving something *doesn't* happen.

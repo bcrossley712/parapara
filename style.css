@@ -238,6 +238,13 @@ html, body {
   flex-shrink: 0;
 }
 
+/* While a replaced photo is being prepared (reference-bar.js setBusy). */
+.pp-reference-bar__btn:disabled,
+.pp-reference-bar input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .pp-reference-bar__delete {
   margin-top: auto;
   color: #ff8a7a;

@@ -556,7 +556,12 @@ function mountEditor(session, { canSave }) {
       },
       onReplace: () => pickImage(),
       onDelete: () => deleteImage(),
-      onDone: () => finishAdjust(),
+      // Not while a picked photo is still being prepared (Replace): the
+      // bar is disabled then, and an outside tap mustn't commit the old
+      // photo either.
+      onDone: () => {
+        if (!busy) finishAdjust();
+      },
     },
   });
   const canvasApi = ui.canvas;
@@ -895,6 +900,7 @@ function mountEditor(session, { canSave }) {
       busy,
     });
     strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
+    ui.setAdjustBusy(busy);
     renderTransport();
     ui.images.render({
       current: Boolean(session.frame.image?.blobRef),

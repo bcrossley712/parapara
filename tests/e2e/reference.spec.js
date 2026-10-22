@@ -69,6 +69,21 @@ async function addImage(page) {
   await settled(page);
 }
 
+// Replace from the adjust bar, and wait until the new photo is
+// actually showing: its canvas replaces the old one when the import
+// lands. The bar's text can't tell (a fresh photo starts at 50%, which
+// the old one may already have been at), and Done before then would
+// commit the old photo.
+async function replaceImage(page, file) {
+  const old = await refImage(page).elementHandle();
+  const chooser = page.waitForEvent('filechooser');
+  await bar(page).getByRole('button', { name: 'Replace' }).click();
+  await (await chooser).setFiles(file ?? await testImage(page));
+  await expect.poll(() => old.evaluate((el) => el.isConnected)).toBe(false);
+  await expect(refImage(page)).toHaveCount(1);
+  await settled(page);
+}
+
 async function done(page) {
   await bar(page).getByRole('button', { name: 'Done' }).click();
   await expect(bar(page)).toHaveCount(0);
@@ -235,9 +250,7 @@ test('opacity, Delete and Replace in the adjust bar', async ({ page }) => {
   // Replace: a new stored image, placed fresh; one undo goes back.
   await openImageMenu(page);
   await page.getByRole('menuitem', { name: 'Adjust image' }).click();
-  const chooser = page.waitForEvent('filechooser');
-  await bar(page).getByRole('button', { name: 'Replace' }).click();
-  await (await chooser).setFiles(await testImage(page));
+  await replaceImage(page);
   await expect(bar(page)).toContainText('Opacity 50%');
   await done(page);
   await waitForSavedImage(page, (img) => img.blobRef !== first && img.opacity === 0.5);
@@ -254,6 +267,47 @@ test('opacity, Delete and Replace in the adjust bar', async ({ page }) => {
   await undoBtn(page).click();
   await expect(refImage(page)).toHaveCount(1);
   await waitForSavedImage(page, (img) => img?.blobRef === first);
+});
+
+test('while a replaced photo is being prepared, the bar is off and nothing commits the old one', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  const first = await refImage(page).elementHandle();
+  // Hold the next import's decode until the test lets it go.
+  await page.evaluate(() => {
+    const real = window.createImageBitmap.bind(window);
+    window.__releaseImport = null;
+    let held = false;
+    window.createImageBitmap = (source, ...rest) => {
+      if (held || !(source instanceof File)) return real(source, ...rest);
+      held = true;
+      return new Promise((resolve) => {
+        window.__releaseImport = () => resolve(real(source, ...rest));
+      });
+    };
+  });
+  const chooser = page.waitForEvent('filechooser');
+  await bar(page).getByRole('button', { name: 'Replace' }).click();
+  await (await chooser).setFiles(await testImage(page));
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseImport)).toBe('function');
+
+  for (const name of ['Done', 'Replace', 'Delete', 'Flip horizontally', 'Flip vertically']) {
+    await expect(bar(page).getByRole('button', { name })).toBeDisabled();
+  }
+  await expect(bar(page).getByRole('slider', { name: 'Image opacity' })).toBeDisabled();
+  // A tap on another control doesn't commit the old photo either.
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Layers', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar(page)).toBeVisible();
+
+  await page.evaluate(() => window.__releaseImport());
+  await expect.poll(() => first.evaluate((el) => el.isConnected)).toBe(false);
+  await expect(bar(page).getByRole('button', { name: 'Done' })).toBeEnabled();
+  await done(page);
+  // One undo step for the whole session: undo leaves no image.
+  await waitForSavedImage(page, (img) => img !== null);
+  await undoBtn(page).click();
+  await waitForSavedImage(page, (img) => img === null);
 });
 
 test('tapping another control while adjusting commits, and that control still works', async ({ page }) => {
@@ -413,9 +467,7 @@ async function importFile(page, file) {
   await page.getByRole('menuitem', { name: /Add image|Adjust image/ }).click();
   if (await bar(page).count()) {
     // Already has one: Replace from the adjust bar.
-    const replace = page.waitForEvent('filechooser');
-    await bar(page).getByRole('button', { name: 'Replace' }).click();
-    await (await replace).setFiles(file);
+    await replaceImage(page, file);
   } else {
     await (await chooser).setFiles(file);
   }
@@ -592,9 +644,7 @@ test('Use on all frames asks before replacing a different photo; Cancel changes 
   await expect(tiles(page)).toHaveCount(2);
   await settled(page);
   await adjust(page);
-  const chooser = page.waitForEvent('filechooser');
-  await bar(page).getByRole('button', { name: 'Replace' }).click();
-  await (await chooser).setFiles(await testImage(page));
+  await replaceImage(page);
   await expect(bar(page)).toContainText('Opacity 50%');
   await done(page);
   await waitForSavedImage(page, (img) => img.blobRef !== a);
@@ -633,9 +683,7 @@ test('a new frame inherits a photo every frame shares, but not one from a rotosc
   // Frame 2 gets its own photo: frames now differ, so frame 3 starts blank.
   await settled(page);
   await adjust(page);
-  const chooser = page.waitForEvent('filechooser');
-  await bar(page).getByRole('button', { name: 'Replace' }).click();
-  await (await chooser).setFiles(await testImage(page));
+  await replaceImage(page);
   await expect(bar(page)).toContainText('Opacity 50%');
   await done(page);
   await waitForSavedImage(page, (img) => img.blobRef !== a);

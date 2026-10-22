@@ -68,6 +68,16 @@ Sections: [Process lessons](#process-lessons) ·
   bug. (A planned bug-rate comparison against step 1 was never
   tracked; dropped rather than left open.)
 
+- **CI is slower than the sandbox; races show up there first.** The
+  dev-log push and 4c both failed CI on two photo tests: they tapped
+  Done after Replace while waiting on text ("Opacity 50%") that was
+  already showing, so Done could beat the import. The activity log's
+  extra writes widened the window enough for CI. Locally it failed
+  ~1 in 16 under parallel load. Fixed in the test (wait for the new
+  photo itself) and in the app (bar disabled while it's prepared).
+  A 6 fps playback check had the same flavor. To shake out races,
+  run a spec with `E2E_WORKERS=6 … --repeat-each=8`.
+
 ## Stack
 
 - **Vanilla JS + native ES modules, no Vue, no bundler.** The hard

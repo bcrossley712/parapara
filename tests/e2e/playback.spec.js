@@ -144,14 +144,17 @@ test('a tap on the canvas stops playback and draws nothing, even when dragged', 
 test('stopping lands on the frame that was showing', async ({ page }) => {
   await openApp(page);
   await threeFrames(page);
-  await setFps(page, 6);
+  // 1 fps, so frame 2 stays up long enough to catch on a busy machine
+  // (at 6 fps it's up ~170 ms, and the check can keep missing it).
+  await setSlowest(page);
   await playBtn(page).click();
   await expect(tile(page, 2)).toHaveClass(/is-current/);
   await playBtn(page).click();
   await expect(playBtn(page)).toHaveAttribute('aria-label', 'Play');
   await settled(page);
   const current = (await page.locator('.pp-frame-strip__tile.is-current').textContent()).trim();
-  // Its own drawing is on the live canvas now (frame 2 or 3 at 6 fps).
+  // Its own drawing is on the live canvas now (frame 2, or 3 if the
+  // stop was late).
   if (current === '2') expect(await layerAlpha(page, 900, 500)).toBeGreaterThan(0);
   else if (current === '3') expect(await layerAlpha(page, 1500, 800)).toBeGreaterThan(0);
   else throw new Error(`landed on frame ${current}`);

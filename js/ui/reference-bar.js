@@ -7,6 +7,10 @@
 // canvas.js adjust mode); tapping any other control commits, the same
 // as Done (ui.js handles that).
 //
+// While a picked photo is still being prepared (Replace), every control
+// is disabled (setBusy): a Done tapped then would commit the old photo,
+// and the new one would reopen adjust mode a moment later.
+//
 // Pure UI: main.js passes the opacity in and gets intents back through
 // the callbacks.
 
@@ -70,8 +74,13 @@ export function createReferenceBar(callbacks) {
     opacityText.textContent = `Opacity ${Math.round(value * 100)}%`;
   }
 
+  const controls = [doneBtn, opacityInput, flipH, flipV, replaceBtn, deleteBtn];
+
   return {
     element: bar,
+    setBusy(busy) {
+      for (const control of controls) control.disabled = busy === true;
+    },
     setOpacity(value) {
       opacityInput.value = String(Math.round(value * 100));
       showOpacity(value);

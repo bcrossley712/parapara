@@ -59,6 +59,8 @@ import { createOnionBadge } from './onion-badge.js';
 // (the top bar's Image menu: render(state)),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
+// setAdjustBusy(busy) (the adjust bar's controls off while a photo is
+// being prepared),
 // destroy() }. destroy() removes
 // the editor and everything it hooked up outside its own elements.
 export function initUI(container, options = {}) {
@@ -450,6 +452,7 @@ export function initUI(container, options = {}) {
     setPalette: (list) => picker.setPalette(list),
     pickImage,
     setAdjusting,
+    setAdjustBusy: (busy) => referenceBar.setBusy(busy),
     destroy,
   };
 }
