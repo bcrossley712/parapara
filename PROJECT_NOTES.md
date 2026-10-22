@@ -11,6 +11,13 @@ reasoning and lessons go in `docs/DESIGN_NOTES.md`. Play-by-play
 history goes in git commits, nowhere else. If the two files disagree,
 this one wins.
 
+**Architecture entries stay small:** only what a future step must
+respect — data shapes, invariants, and decisions she made — about 10
+lines per feature. UI specifics (button order, preset lists, exact
+numbers that aren't her decisions) go in code comments. Each step's
+conversation trims its own entry before handing off, so these notes
+don't need a cleanup pass after every step.
+
 ## What this is
 
 **Parapara!** (パラパラ, from parapara manga — Japanese for flipbook):
@@ -115,21 +122,34 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **4c: built, not yet confirmed on the iPad** — onion skin. How it
     works is under Architecture → Onion skin. She's new to onion
     skins, so its defaults follow convention (decided here, not asked).
-    Next: **4d** reorder + delete.
-  - **Open bug (found trying 4b, cause unknown):** on the iPad, two
-    frames of a many-stroke drawing went blank — no restart, and undo
-    brought back only fragments (so the layer was replaced with blank
-    *without* an undo step; likely blank saved over them, or their
-    pixels saved under another frame). A randomized e2e hunt (touch
-    strokes, gestures, add/duplicate/switch frames, undo/redo, every
-    way of stopping playback; 16 seeds × 70 steps) never lost a
-    stroke. Not covered there: iPad memory pressure, eraser/fill/
-    smudge, several layers, photos, switching apps. **It hasn't
-    happened again** (no log yet); 4c went ahead because onion skin
-    only reads the frame cache and never touches saving. **Next time
-    it happens, get the activity log** (gear → Developer → Activity
-    log). Hardening done meanwhile: autosave settles which frame it
-    saves to before any await (see Don't break these).
+  - **Before 4d — the open data-loss bug comes first.** On the iPad
+    (trying 4b), two frames of a many-stroke drawing went blank; undo
+    brought back only fragments, so the layer was replaced with blank
+    *without* an undo step (likely blank saved over them, or their
+    pixels saved under another frame). Cause unknown; it hasn't
+    happened again. 4c was safe to build (onion skin only reads the
+    cache), but **4d deletes and reorders frames — the same area — so
+    don't start it until this is chased further:**
+    1. **Ask her / him:** did a "couldn't be saved" notice appear
+       around then? Her iPad runs near full.
+    2. **Extend the randomized e2e hunt** (it ran 16 seeds × 70 steps:
+       touch strokes, gestures, add/duplicate/switch frames,
+       undo/redo, every way of stopping playback — never lost a stroke)
+       to what it didn't cover: **saves that fail** (make
+       `saveLayerBitmap` / the IndexedDB write throw, e.g. a
+       QuotaExceeded, mid-session and during frame switches), eraser /
+       fill / smudge, several layers, photos, and the app going to the
+       background mid-save.
+    3. **Batch the activity log's writes** (`storage/dev-log.js`): it
+       rewrites all 300 lines to localStorage on every event, including
+       every stroke and save — work at stroke end, and enough to widen
+       a CI race. Persist on a short timer and on hide instead.
+    4. Keep the activity log on; **next time it happens, get the log**
+       (gear → Developer → Activity log). Hardening done meanwhile:
+       autosave settles which frame it saves to before any await (see
+       Don't break these).
+    Then **4d** reorder + delete. Ask her about onion skin (below)
+    before 4d is confirmed.
   - **Decided for 4d** (4b's and 4c's decisions are in Architecture):
     - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
       **Delete** in the frame menu, no confirm (undoable; new
@@ -464,73 +484,40 @@ Short rules; reasoning in the linked sections.
     last good frame up. Step 5 swaps in the audio clock without
     touching the loop.
 - **Playback (4b)** ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
-  - **Transport** (`timeline/transport.js`, UI only): previous frame,
-    play/pause, next frame, loop toggle, fps button → small panel
-    (− / + and presets 6, 8, 12, 15, 24, 30). **fps 1–30, default 12;
-    loop on by default.** Both saved on the project, take effect at
-    once even mid-play, and **aren't undoable** (settings).
-  - **Play** starts on the frame she's on (from frame 1 if loop is off
-    and she's on the last frame); one frame → banner "Add another
-    frame to play." If any frame still needs flattening it shows
-    "Getting ready… n of N" over the canvas (the cache is `rush()`ed)
-    and never starts early. A frame whose flatten *failed* doesn't
-    hold it up (`pendingCount` skips it); it plays its last picture,
-    or blank paper.
+  - **Transport** (`timeline/transport.js`): prev / play / next, loop
+    toggle, fps. **fps 1–30, default 12; loop on by default.** Saved on
+    the project, apply at once (even mid-play), **not undoable**.
+  - **Play** starts on her current frame; it never starts early — if
+    frames still need flattening it shows "Getting ready" (the cache is
+    rushed). A frame whose flatten failed doesn't hold it up.
   - **The loop** (`timeline/playback.js`, pure): frame from elapsed
-    time (`frameAtBeat` with a start index), a ring of 6 decoded
-    frames ahead, late frames skipped. fps/loop changes re-anchor on
-    the frame showing (no jump).
-  - **The picture:** one full-size canvas (`.pp-playback`) inside the
-    wrapper above the layers, so it plays at her current
-    zoom/pan/rotation; it only exists while playing.
-    `canvas/playback-frames.js` decodes each frame (the cache's PNG +
-    its photo unless Hide images; frames sharing a photo share one
-    decoded copy) and draws paper → photo → layers via
-    `drawFlattened`.
+    time, a small decoded ring ahead, late frames skipped. The picture
+    is one canvas above the layers, at her current zoom/pan/rotation,
+    existing only while playing.
   - **Stopping lands her on the frame that was showing** (a normal
-    frame load); the playing picture stays up until it's on screen.
-    Loop off → stops on the last frame. The strip's highlight follows
-    the frame showing and scrolls to it.
-  - **While playing she can't draw:** a touch on the canvas area stops
-    it and is swallowed — that touch and any finger that joins it,
-    until every finger is up — so the stop tap never draws, and no
-    zoom either. **Anything that changes the project stops playback,
-    lands, then acts** (`afterPlayback` in `main.js`: undo/redo,
-    frame and layer actions, Image menu actions, Gallery). A tile tap
-    stops and lands on *that* tile (no menu); prev/next stop and step
-    from the frame showing. Tool, color, size, fps and loop don't
-    stop it. **The Image button only stops it** (the photo picker
-    can't wait for the landing — iOS). Hiding the app stops it
-    (`flush`).
+    frame load); loop off stops on the last frame.
+  - **While playing she can't draw:** a touch stops playback and is
+    swallowed until every finger is up. **Anything that changes the
+    project stops playback, lands, then acts** (`afterPlayback` in
+    `main.js`). Settings (tool, color, size, fps, loop) don't stop it.
+    **The Image button only stops** — iOS won't open the photo picker
+    after a wait. Hiding the app stops it.
 - **Onion skin (4c)** ([why](docs/DESIGN_NOTES.md#onion-skin)):
-  - **Ghosts** = neighboring frames' cached pictures (layers only — no
-    photo, hidden layers out, like the cache), each tinted one solid
-    color (`source-in`, keeps the line's softness), drawn on one
-    full-size canvas (`.pp-onion`) over the photo and under every
-    layer. Previous frames red, next green; the nearest at full
-    strength, further ones fainter (1, 0.55, 0.3). **No wrap-around**,
-    even with loop on. Rules pure in `timeline/onion.js`
-    (`ghostFrames`, `sanitizeOnion`); drawing in `canvas/onion-view.js`.
-  - **Defaults:** off on every project (new and older); 1 before, 1
-    after (0–3 each); opacity 40% (10–80%); tints from five choices
-    per side. **Saved per project (`project.onionSkin`), not
-    undoable** (settings, like fps). Bad fields fall back one by one.
-  - **The opacity slider is CSS** on the ghost canvas — it never
-    redraws. Redraws come from a frame switch, a ghost frame's cache
-    entry being replaced (`onUpdate`), or a count/tint change; the
-    same list twice is a no-op. A draw waits while she's mid-stroke.
-  - **A ghost frame not flattened yet is left out** until its picture
-    arrives; a stale one shows until rebuilt (so a frame she just left
-    shows its older picture for ~300 ms + build time).
-  - **Hidden while playing and while landing** (the canvas is freed);
-    back once she's on the landed frame.
-  - **The badge** (`ui/onion-badge.js`), bottom-left of the canvas
-    area: the onion button toggles; the sliders button opens the panel
-    (Frames before/after steppers, Opacity, Before/After color). A
+  - **Ghosts** are neighbors' cached pictures (layers only — **never
+    the photo**, hidden layers out), tinted one color, on one canvas
+    over the photo and under every layer. Previous red, next green,
+    further ones fainter. **No wrap-around**, even with loop. Rules
+    pure in `timeline/onion.js`; drawing in `canvas/onion-view.js`.
+  - **Defaults (convention, not yet checked with her):** off; 1 before,
+    1 after (0–3 each); 40% (10–80%). **Saved per project
+    (`project.onionSkin`), not undoable**; bad fields fall back one by
+    one.
+  - A ghost not flattened yet is left out; a stale one shows until
+    rebuilt. **Hidden while playing and landing.** The toggle and its
+    settings are a badge on the canvas (`ui/onion-badge.js`); a
     setting, so it doesn't stop playback.
-  - **Left out unless she asks:** wrap-around with loop, ghosts of the
-    active layer only (Rough Animator offers it), keyframe-only onion,
-    per-frame ghost toggles.
+  - **Left out unless she asks:** wrap-around, active-layer-only
+    ghosts, keyframe-only onion, per-frame ghost toggles.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
   `audioClips: []`, non-destructive trim; export to video + Web Share,
@@ -865,6 +852,13 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     lands — this broke CI twice). For photo imports use
     `replaceImage` / wait for the old `.pp-reference__image` to go.
     Brief states (one frame at 6 fps) need a slow fps or fast polling.
+  - **Any spec involving timing (playback, saves, photo imports) gets a
+    stress run before pushing:** `E2E_WORKERS=6
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright test
+    <spec> --repeat-each=8`. CI runs slower than the sandbox, so races
+    show up there first (two failed deploys after 4c). For playback
+    timing, try Playwright's clock control (`page.clock`) to step time
+    exactly, rather than slowing fps down.
   - **No fixed sleeps** — wait for the event (`helpers.js`:
     `waitForDrawingSave`, `waitForToolSettings`, `expect.poll`). Only
     exception: proving something *doesn't* happen.
