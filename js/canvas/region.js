@@ -45,3 +45,30 @@ export function clampRect(rect, width, height) {
   if (right <= x || bottom <= y) return null;
   return { x, y, w: right - x, h: bottom - y };
 }
+
+// The smallest rect holding every pixel with any alpha in RGBA `data`
+// (`width` × `height`), or null if it's all transparent. Copy drawing
+// (4d) keeps only this much, so the clipboard and paste's undo entry
+// are the drawing's size, not the canvas's.
+export function inkBounds(data, width, height) {
+  let top = -1;
+  let bottom = -1;
+  let left = width;
+  let right = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    let first = -1;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x * 4 + 3] !== 0) { first = x; break; }
+    }
+    if (first < 0) continue;
+    if (top < 0) top = y;
+    bottom = y;
+    if (first < left) left = first;
+    for (let x = width - 1; x > right; x--) {
+      if (data[row + x * 4 + 3] !== 0) { right = x; break; }
+    }
+  }
+  if (top < 0) return null;
+  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+}

@@ -75,3 +75,25 @@ test('a new frame inherits the photo only when every frame shares it', () => {
   assert.equal(F.inheritedImage([a, { id: 'c', image: null }], a), null);
   assert.equal(F.inheritedImage([{ id: 'c', image: null }], { id: 'c', image: null }), null);
 });
+
+test('moving a frame (4d): lands at the index, others keep their order', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(F.moveFrameId(ids, 'a', 2), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(F.moveFrameId(ids, 'd', 0), ['d', 'a', 'b', 'c']);
+  assert.deepEqual(F.moveFrameId(ids, 'b', 99), ['a', 'c', 'd', 'b']);
+  assert.deepEqual(F.moveFrameId(ids, 'c', -5), ['c', 'a', 'b', 'd']);
+  assert.deepEqual(ids, ['a', 'b', 'c', 'd']);
+  // No change and unknown ids hand back the same array.
+  assert.equal(F.moveFrameId(ids, 'b', 1), ids);
+  assert.equal(F.moveFrameId(ids, 'zzz', 0), ids);
+});
+
+test('moving back to the old index undoes a move', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e'];
+  for (const id of ids) {
+    const from = ids.indexOf(id);
+    for (let to = 0; to < ids.length; to++) {
+      assert.deepEqual(F.moveFrameId(F.moveFrameId(ids, id, to), id, from), ids);
+    }
+  }
+});

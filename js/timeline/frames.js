@@ -8,7 +8,8 @@
 // Also the reference image's frame-wide rules (3b), which read frame
 // records (frame.image) but never change them.
 //
-// Reorder and delete arrive with the full frame strip (step 4).
+// Delete reuses removeFrameId/insertFrameId (undo puts the frame back
+// at its old index); reorder is moveFrameId (4d).
 
 // Index for a new frame: directly after the current one (Flipaclip
 // adds after the frame you're on), or at the end if there isn't one.
@@ -28,6 +29,18 @@ export function removeFrameId(frameIds, frameId) {
   const index = frameIds.indexOf(frameId);
   if (index < 0) return { frameIds, index };
   return { frameIds: [...frameIds.slice(0, index), ...frameIds.slice(index + 1)], index };
+}
+
+// Reorder (4d): `frameId` moved so it ends up at index `to` (clamped),
+// the others keeping their order. Unknown id or no change → the same
+// array back. Undo is the same call with the old index.
+export function moveFrameId(frameIds, frameId, to) {
+  const from = frameIds.indexOf(frameId);
+  if (from < 0) return frameIds;
+  const rest = [...frameIds.slice(0, from), ...frameIds.slice(from + 1)];
+  const at = Math.max(0, Math.min(to, rest.length));
+  if (at === from) return frameIds;
+  return [...rest.slice(0, at), frameId, ...rest.slice(at)];
 }
 
 // Which frame to show after removing the one at `index`: the frame

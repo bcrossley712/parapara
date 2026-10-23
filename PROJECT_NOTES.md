@@ -119,11 +119,12 @@ icon, manifest `name`/`short_name`, and repo copy.
     In short: memory isn't the limit, and full size plays up to 30 fps.
   - **4b: done and confirmed on the iPad** — playback + transport.
     How it works is under Architecture → Playback.
-  - **4c: built, not yet confirmed on the iPad** — onion skin. How it
-    works is under Architecture → Onion skin. She's new to onion
-    skins, so its defaults follow convention (decided here, not asked).
-  - **The data-loss bug: found; guard built, not yet confirmed on
-    the iPad.** Caught with the activity log: while she drew, iOS
+  - **4c: done and confirmed on the iPad** — onion skin. How it works
+    is under Architecture → Onion skin. She's happy with the colors and
+    40% for now; if she keeps adjusting the opacity, revisit the default.
+  - **The data-loss bug: guard built; no recurrence seen in the log
+    since, but little use yet** — keep the activity log in and keep
+    checking it. Caught with the activity log: while she drew, iOS
     emptied the layer's canvas (it read back blank and stayed blank on
     every frame load) while storage still held every frame. Locking
     the layer happened to stop her next stroke; reopening the app
@@ -133,26 +134,20 @@ icon, manifest `name`/`short_name`, and repo copy.
     under Architecture → Lost canvases. Cause of the emptying (likely
     memory) unknown: **if the log shows `load-renewed`, `save-refused`,
     `check-failed` or `recover`, get the log** — it says when and how
-    often. Then **4d** reorder + delete. Ask her about onion skin
-    (below) before 4d is confirmed.
-  - **Decided for 4d** (4b's and 4c's decisions are in Architecture):
-    - **Reorder:** long-press and drag on the tiles (Flipaclip's way).
-      **Delete** in the frame menu, no confirm (undoable; new
-      `'frame-delete'` / `'frame-move'` undo types); the last frame
-      can't be deleted.
+    often.
+  - **4d: built, not yet confirmed on the iPad** — frame delete,
+    reorder (long-press and drag), and Copy / Paste drawing between
+    frames (she asked for it). How it works is under Architecture →
+    Frame strip editing. Check on the iPad: the long-press feel with
+    her stylus, that the strip stops scrolling once a tile lifts, and
+    no callout or text selection on a held tile.
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
       optional `frame.hold` (missing = 1) read only by `frameAtBeat`.
-    - **Coupled features:** copy/paste a layer's drawing between
-      frames goes with 4d if she wants it. Out unless she misses them:
-      showing the cached frame instantly on a frame switch, a scrubber,
-      ping-pong loop, a play range (in/out points), a clean fullscreen
-      preview, a frame counter, zooming while playing.
-  - **Ask her once she's used onion skin:** are red/green and 40%
-    right (check against Flipaclip on her iPad — the colors follow the
-    usual convention, not a look at her app), and does she want
-    wrap-around with loop, or ghosts of the active layer only (both
-    left out; see Onion skin)?
+    - **Out unless she misses them:** showing the cached frame
+      instantly on a frame switch, a scrubber, ping-pong loop, a play
+      range (in/out points), a clean fullscreen preview, a frame
+      counter, zooming while playing.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -186,6 +181,14 @@ icon, manifest `name`/`short_name`, and repo copy.
   - **Brush variety** (sizes, chisel tips, edge blending) — **build
     with symmetry**: both change `stamp()`, and a directional tip's
     mirrored stamp must mirror its angle too.
+  - **Stabilizer** (requested after 4c — Flipaclip's; smooths out the
+    wobble as she draws): a strength setting that makes the line trail
+    the stylus. **Build with the brush block** — same stroke path in
+    `canvas.js` and the same tool-settings UI. Draw and erase, not fill
+    (smudge: decide then); strength remembered app-wide like size; the
+    line catches up to the stylus on lift; symmetry mirrors the
+    stabilized points. Pull forward on its own if the wobble bothers
+    her sooner. Today: fixed midpoint smoothing only.
   - **Erasers** (observed in 4a; she'll want them, not urgent): the
     eraser is the pen's round hard tip with the same 6 px default and
     1–60 range (its size is already remembered separately). She'll
@@ -212,11 +215,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   images" choice when exporting.
 - **Storage warning** (~80% of quota) — deferred to step 6, when
   export gives it a remedy to point at.
-- **Copy / paste a layer's drawing between frames** (copy this
-  layer on this frame, paste into the same layer on another) — the
-  usual animation-app way; goes with step 4's frame strip, or step 3's
-  transform if she'll want to move what she pastes. Until then:
-  duplicate the frame and Clear the layers she doesn't want.
+- **Onion skin extras — revisit in final touches**, once she knows
+  onion skins (she's too new to judge them now): wrap-around with
+  loop, ghosts of the active layer only.
 - **Rename from the editor** (tap the title, as Procreate does) —
   gallery-only for now.
 - **How-to / tutorials** reachable from the settings (gear) menu —
@@ -252,10 +253,12 @@ Short rules; reasoning in the linked sections.
   app files, and stamps the service-worker version — never compiles.
   ([why](docs/DESIGN_NOTES.md#stack))
 - **Input:** Pointer Events only. Pressure/tilt deliberately unread, so
-  Apple Pencil support is additive. **One deliberate exception:** a
-  non-passive `touchstart`/`touchmove` listener on the canvas area that
-  only calls `preventDefault()` with 3+ touches down, to keep iPadOS's
-  own three-finger undo out of the way. No recognition logic in it.
+  Apple Pencil support is additive. **Two deliberate exceptions**, both
+  non-passive listeners that only call `preventDefault()`, with no
+  recognition logic: `touchstart`/`touchmove` on the canvas area with
+  3+ touches down (keeps iPadOS's three-finger undo out of the way),
+  and `touchmove` on the frame strip while a tile is lifted (4d; the
+  strip mustn't scroll under a drag).
   ([why](docs/DESIGN_NOTES.md#gestures))
 - **Scope-specific folders** (`canvas/`, `timeline/`, `storage/`,
   `export/`, `audio/`, `ui/`); modules don't reach into each other's
@@ -288,8 +291,8 @@ Short rules; reasoning in the linked sections.
     undoable. Replaced the gear menu's dev "Clear drawing".
   - **Frames:** add frame inserts a blank frame *after* the current
     one, with a slot for every layer, and moves onto it. Tapping the
-    current frame's tile opens the frame menu (Duplicate; step 4's
-    delete/reorder go there too). Moving to
+    current frame's tile opens the frame menu (Copy drawing, Paste
+    drawing, Duplicate, Delete — 4d). Moving to
     another frame saves the current one first, then reads the next
     one's layers from storage; a layer that can't be saved (or saving
     is off) is held in memory by bitmapRef until it can be.
@@ -316,7 +319,8 @@ Short rules; reasoning in the linked sections.
     resyncs it. The same copy reverts a touch that became a gesture.
   - Layer structure changes are undoable on the same stack (new entry
     `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
-    frame, `'image'` (3a), and `'image-all'` (3b, Use on all frames:
+    frame, `'frame-delete'` and `'frame-move'` (4d), `'image'` (3a),
+    and `'image-all'` (3b, Use on all frames:
     keeps each changed frame's old image; undo jumps to the frame it
     was applied from). **Visibility, lock and Hide images are
     not undoable** (view state, as in Photoshop). Rename isn't either. An entry for another frame moves
@@ -503,6 +507,24 @@ Short rules; reasoning in the linked sections.
     setting, so it doesn't stop playback.
   - **Left out unless she asks:** wrap-around, active-layer-only
     ghosts, keyframe-only onion, per-frame ghost toggles.
+- **Frame strip editing (4d)** — all from the strip:
+  - **Delete:** frame menu, no confirm, not offered on the last frame;
+    she lands on the frame before (or the new first). `'frame-delete'`
+    is `'frame-add'` run the other way (`takeOutFrame`/`insertFrame`):
+    pixels stay in storage under the frame's refs for undo.
+  - **Reorder:** long-press a tile (400 ms, ≤ 8 px), drag, drop; the
+    strip auto-scrolls near its ends. She stays on her frame. Only
+    `project.frames` changes (`moveFrameId`, pure); `'frame-move'`
+    keeps `from`/`to`. A strip re-render or playback cancels a drag.
+  - **Copy / Paste drawing** (frame menu, active layer): copy crops to
+    the ink (`inkBounds`), runs `checkLayer` first (a lost canvas would
+    copy blank). **Paste goes on top** of what's there, same place;
+    Clear then Paste replaces. One `'pixels'` entry through
+    `notifyChange`; lock/hide refused with a banner. Clipboard in
+    memory, **open project only** (dropped on close).
+  - Any of these can change frame 1, so they mark the gallery
+    thumbnail stale; the strip, cache order and onion ghosts follow
+    in `refreshPanel`.
 - **Lost canvases (after 4c)** ([why](docs/DESIGN_NOTES.md#lost-canvases))
   — iOS can empty a layer canvas without telling the page; saving it
   would write blank over her drawing.
@@ -607,6 +629,11 @@ Each is here because breaking it caused (or would cause) a real bug.
   routes through it.
 - Rotation accumulates frame to frame (`shortestAngleDelta`), never
   diffed against the start angle.
+- **A layer's context keeps the last stroke's blending mode** — erase
+  leaves `destination-out` set. Anything that draws onto a layer
+  outside a stroke (paste, 4d) sets `source-over` and alpha 1 itself
+  inside `save()`/`restore()`, or it erases instead (the robot test
+  caught this).
 - Fill applies immediately but is a gesture candidate like draw/erase:
   a second finger in the window reverts it from the committed copy. It
   commits on pointerup.
@@ -714,7 +741,7 @@ Each is here because breaking it caused (or would cause) a real bug.
         transform.js      pure placement math for the reference image
         brush.js          brush-tip seam: stamp(ctx, point, size)
         gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
-        region.js         pure dirty-rect helpers
+        region.js         pure dirty-rect helpers; inkBounds (4d copy)
         ink-map.js        pure lost-canvas rule: ink maps, edited cells,
                           looksLost (after 4c)
       storage/
@@ -747,10 +774,10 @@ Each is here because breaking it caused (or would cause) a real bug.
         settings-panel.js gear menu (dev section is temporary);
                           attachSettingsMenu for either screen
       timeline/
-        frames.js         pure frame-order ops (insert/remove/neighbor);
+        frames.js         pure frame-order ops (insert/remove/move);
                           reference image across frames (3b)
-        frame-strip.js    frame strip + frame menu (UI only; intents
-                          via callbacks)
+        frame-strip.js    frame strip + frame menu, long-press drag to
+                          reorder (4d) (UI only; intents via callbacks)
         clock.js          pure elapsed time → frame (beatAtTime,
                           frameAtBeat, frameAtTime); fps rules
                           (sanitizeFps, MIN/MAX/DEFAULT_FPS, presets)
@@ -843,8 +870,19 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
   `npm run test:e2e` (~3.2 min), or `npm test`.
-- **In a Claude sandbox:** Chromium is preinstalled — run
-  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e`.
+- **In a Claude sandbox:** Chromium is preinstalled in
+  `/opt/pw-browsers`, but (seen in 4d) as a newer build than the
+  pinned 1.56 expects (`chromium_headless_shell-1243`, laid out as
+  `chrome-headless-shell-linux64/chrome-headless-shell`). If the run
+  says the executable doesn't exist, make a folder with a
+  `chromium_headless_shell-1194/chrome-linux/headless_shell` link to
+  it and point `PLAYWRIGHT_BROWSERS_PATH` there — sandbox only, no
+  repo change. That build is slower: waits time out (frame switches,
+  duplicate taking 2–7 s now and then) and `saving.spec.js`'s "hiding
+  the app saves immediately" always fails, on the original code too.
+  A scratch config extending `playwright.config.js` with a 30 s
+  `expect` timeout separates slow from broken; don't commit it. CI
+  (pinned image) is the reference.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
   the sandbox browser *and* CI's image
   `mcr.microsoft.com/playwright:v1.56.0-noble` in `deploy.yml`. Bump
@@ -890,7 +928,10 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   - **Find the gear button with `exact: true`** (`name: 'Settings'`)
     — "Onion skin settings" matches a loose lookup too.
   - **The robot test** (`hunt.spec.js`): seeded random use with a
-    model; checks every mark on screen and after a reload. CI runs 3
+    model; checks every mark on screen and after a reload. Since 4d it
+    also deletes and drags frames and copies/pastes drawings; after a
+    drag it reads the order back from the strip (auto-scroll can move
+    the drop). CI runs 3
     seeds × 40 steps; locally `HUNT_SEEDS=16 HUNT_STEPS=80`, or
     `HUNT_SEED=<n>` to rerun a failure (the log is attached).
     `canvas-loss.spec.js` simulates the lost canvas (cleared, or
@@ -913,5 +954,7 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
   smoothness at 24–30 fps with real line art, the stop tap with her
   stylus, the moment of frame loading after a stop, how the onion
   ghosts read over her real line art, and how soon they appear after
-  a frame switch, and whether iPadOS's real lost canvas behaves like
-  the simulations in `canvas-loss.spec.js`.
+  a frame switch, whether iPadOS's real lost canvas behaves like
+  the simulations in `canvas-loss.spec.js`, and (4d) the long-press
+  feel, the strip letting go of its scroll once a tile lifts, and no
+  callout on a held tile.

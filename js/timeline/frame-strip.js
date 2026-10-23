@@ -5,14 +5,18 @@
 // frame" tile (the wireframe's layout). Tap a tile to go to that frame;
 // the add tile inserts a blank frame after the current one. Tapping
 // the frame she's already on opens a small menu above it (Flipaclip's
-// frame menu): Duplicate today; step 4's delete and reorder join it.
-// (The reference image's controls live in the top bar's Image menu.)
+// frame menu): Copy drawing, Paste drawing (the active layer's, 4d),
+// Duplicate, and Delete (4d; not on the last frame). (The reference
+// image's controls live in the top bar's Image menu.)
+//
+// Reorder (4d, Flipaclip's way): long-press a tile, it lifts, drag it
+// along the strip (which scrolls near its ends), let go to drop it.
+// Moving a frame doesn't change which frame she's on.
 //
 // Tiles show a picture of the frame (4a-ii; drawn by
 // canvas/frame-tiles.js, handed in with setThumbnail) with its number
 // in a corner badge; until a frame's picture is ready, the number alone.
-// Tiles take the canvas's shape (setAspect). Reorder and delete come
-// with 4d. The transport (4b, transport.js) sits at the strip's left
+// Tiles take the canvas's shape (setAspect). The transport (4b, transport.js) sits at the strip's left
 // end; ui.js puts it there.
 //
 // While the animation plays, the highlight follows the frame showing
@@ -35,7 +39,16 @@ export function tileCssSize(canvasSize) {
   return { width: Math.min(MAX_TILE_WIDTH, Math.max(MIN_TILE_WIDTH, width)), height: TILE_HEIGHT };
 }
 
-// callbacks: onSelect(frameId), onAdd(), onDuplicate()
+// Long-press to lift a tile: how long, and how far the finger may
+// wander first (further is a scroll, not a press). Near either end of
+// the strip a lifted tile scrolls it, faster the closer it gets.
+const LONG_PRESS_MS = 400;
+const LONG_PRESS_SLOP = 8;
+const SCROLL_EDGE = 48;
+const MAX_SCROLL_STEP = 14; // px per animation frame
+
+// callbacks: onSelect(frameId), onAdd(), onDuplicate(), onDelete(),
+// onMove(frameId, toIndex), onCopyDrawing(), onPasteDrawing()
 // options.signal: aborts the document listener (the menu's tap-outside
 // close) when the editor is torn down.
 export function createFrameStrip(callbacks, { signal } = {}) {
@@ -75,7 +88,19 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     menu = document.createElement('div');
     menu.className = 'pp-frame-menu';
     menu.setAttribute('role', 'menu');
-    menu.append(menuItem('Duplicate', () => callbacks.onDuplicate()));
+    const paste = menuItem('Paste drawing', () => callbacks.onPasteDrawing());
+    paste.disabled ||= !lastState?.canPaste;
+    menu.append(
+      menuItem('Copy drawing', () => callbacks.onCopyDrawing()),
+      paste,
+      menuItem('Duplicate', () => callbacks.onDuplicate()),
+    );
+    // The last frame can't be deleted, so it isn't offered.
+    if ((lastState?.frameIds.length ?? 0) > 1) {
+      const del = menuItem('Delete', () => callbacks.onDelete());
+      del.classList.add('pp-frame-menu__item--danger');
+      menu.append(del);
+    }
     strip.appendChild(menu);
     // Centered over the tile, kept inside the strip.
     const stripBox = strip.getBoundingClientRect();
@@ -116,8 +141,145 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
   }
 
-  // state: { frameIds (timeline order), currentId, busy }
+  // --- long-press and drag to reorder (4d) ---
+  //
+  // A press becomes a drag only after LONG_PRESS_MS without moving;
+  // moving sooner (or the browser taking the touch for a scroll, which
+  // cancels the pointer) leaves it a scroll or a tap. Once lifted, the
+  // strip stops scrolling under the finger (touchmove below) and the
+  // tile follows it; the tiles it passes slide aside, like the layers
+  // panel's rows. The click that ends a drag is swallowed.
+  let press = null; // { pointerId, tile, startX, startY, x, timer }
+  let drag = null;  // { pointerId, tile, id, from, target, step, tiles, startX, startScroll, x, raf }
+  let swallowClick = false;
+
+  function cancelPress() {
+    if (!press) return;
+    clearTimeout(press.timer);
+    press = null;
+  }
+
+  function lift() {
+    const { pointerId, tile, x } = press;
+    press = null;
+    if (!tile.isConnected || tile.disabled || lastBusy || playhead !== null) return;
+    closeMenu();
+    const tiles = [...list.children];
+    const gap = parseFloat(getComputedStyle(list).columnGap || '0') || 0;
+    drag = {
+      pointerId,
+      tile,
+      id: tile.dataset.frameId,
+      from: tiles.indexOf(tile),
+      target: tiles.indexOf(tile),
+      step: tile.offsetWidth + gap,
+      tiles,
+      startX: x,
+      startScroll: list.scrollLeft,
+      x,
+      raf: 0,
+    };
+    try { list.setPointerCapture(pointerId); } catch { /* pointer already gone */ }
+    tile.classList.add('is-lifted');
+    strip.classList.add('is-reordering');
+    drag.raf = requestAnimationFrame(dragFrame);
+  }
+
+  // Places the lifted tile under the finger (scrolling included) and
+  // slides the others out of its way.
+  function placeDrag() {
+    const { tile, tiles, from } = drag;
+    const dx = drag.x - drag.startX + (list.scrollLeft - drag.startScroll);
+    tile.style.transform = `translateX(${dx}px)`;
+    drag.target = Math.max(0, Math.min(tiles.length - 1, from + Math.round(dx / drag.step)));
+    tiles.forEach((other, i) => {
+      if (other === tile) return;
+      let shift = 0;
+      if (drag.target > from && i > from && i <= drag.target) shift = -drag.step;
+      if (drag.target < from && i < from && i >= drag.target) shift = drag.step;
+      other.style.transform = shift ? `translateX(${shift}px)` : '';
+    });
+  }
+
+  // Every animation frame while lifted: scroll near the ends, re-place.
+  function dragFrame() {
+    if (!drag) return;
+    const box = list.getBoundingClientRect();
+    let step = 0;
+    if (drag.x < box.left + SCROLL_EDGE) step = -MAX_SCROLL_STEP * Math.min(1, (box.left + SCROLL_EDGE - drag.x) / SCROLL_EDGE);
+    else if (drag.x > box.right - SCROLL_EDGE) step = MAX_SCROLL_STEP * Math.min(1, (drag.x - (box.right - SCROLL_EDGE)) / SCROLL_EDGE);
+    if (step) list.scrollLeft += step;
+    placeDrag();
+    drag.raf = requestAnimationFrame(dragFrame);
+  }
+
+  // Drops the tile (or puts it back, if `cancelled`).
+  function endDrag(cancelled) {
+    if (!drag) return;
+    const { pointerId, tile, tiles, id, from, target, raf } = drag;
+    drag = null;
+    cancelAnimationFrame(raf);
+    try { list.releasePointerCapture(pointerId); } catch { /* already released */ }
+    tile.classList.remove('is-lifted');
+    strip.classList.remove('is-reordering');
+    for (const t of tiles) t.style.transform = '';
+    swallowClick = true;
+    if (!cancelled && target !== from) callbacks.onMove(id, target);
+  }
+
+  list.addEventListener('pointerdown', (event) => {
+    swallowClick = false;
+    if (drag || press || !event.isPrimary) return;
+    const tile = event.target.closest?.('.pp-frame-strip__tile');
+    if (!tile || tile.disabled || lastBusy || playhead !== null) return;
+    press = {
+      pointerId: event.pointerId,
+      tile,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      timer: setTimeout(lift, LONG_PRESS_MS),
+    };
+  });
+  list.addEventListener('pointermove', (event) => {
+    if (drag && event.pointerId === drag.pointerId) {
+      drag.x = event.clientX;
+      placeDrag();
+    } else if (press && event.pointerId === press.pointerId) {
+      press.x = event.clientX;
+      if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > LONG_PRESS_SLOP) cancelPress();
+    }
+  });
+  const onPointerEnd = (event) => {
+    if (drag && event.pointerId === drag.pointerId) endDrag(event.type === 'pointercancel');
+    else if (press && event.pointerId === press.pointerId) cancelPress();
+  };
+  // On the document: a finger (or mouse) let go anywhere ends it.
+  document.addEventListener('pointerup', onPointerEnd, { signal });
+  document.addEventListener('pointercancel', onPointerEnd, { signal });
+  list.addEventListener('lostpointercapture', (event) => {
+    if (drag && event.pointerId === drag.pointerId) endDrag(true);
+  });
+  // A lifted tile owns the finger: the strip mustn't scroll under it.
+  // (Non-passive, but it only acts while lifted, like the canvas
+  // area's three-finger listener.)
+  list.addEventListener('touchmove', (event) => {
+    if (drag) event.preventDefault();
+  }, { passive: false });
+  // No long-press callout or context menu on tiles.
+  list.addEventListener('contextmenu', (event) => event.preventDefault());
+  list.addEventListener('click', (event) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, { capture: true });
+
+  // state: { frameIds (timeline order), currentId, busy, canPaste }
   function render(state) {
+    // Rebuilding the tiles ends any press or drag in progress.
+    cancelPress();
+    endDrag(true);
     lastState = state;
     const { frameIds, busy = false } = state;
     // While playing, the highlight is the frame showing.
@@ -171,7 +333,11 @@ export function createFrameStrip(callbacks, { signal } = {}) {
       if (lastState) render(lastState);
       return;
     }
-    if (playhead === null) closeMenu();
+    if (playhead === null) {
+      closeMenu();
+      cancelPress();
+      endDrag(true);
+    }
     playhead = frameId;
     for (const tile of list.children) {
       const on = tile.dataset.frameId === frameId;

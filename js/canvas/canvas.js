@@ -56,7 +56,7 @@ import {
   THREE_FINGER_JOIN_MS,
   THREE_FINGER_JOIN_MAX_MOVEMENT_PX,
 } from './gestures.js';
-import { rectAroundPoint, unionRect, clampRect } from './region.js';
+import { rectAroundPoint, unionRect, clampRect, inkBounds } from './region.js';
 import { createReferenceView } from './reference.js';
 import { dragPlacement, pinchPlacement } from './transform.js';
 import {
@@ -1614,6 +1614,56 @@ export function initCanvas(container, options = {}) {
       ctx.clearRect(0, 0, width, height);
       committedCtx.clearRect(0, 0, width, height);
       notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: activeLayerId, tool: 'clear' });
+    },
+
+    // --- copy / paste drawing (4d) ---
+
+    // The active layer's drawing, cropped to where there's ink:
+    // { rect, patch (ImageData) }, or null if the layer is blank (or a
+    // stroke is in progress). Read from the committed copy, so it's
+    // exactly what undo would see. main.js checks the layer first
+    // (checkLayer) — a lost canvas would copy blank.
+    copyDrawing() {
+      if (isBusy() || !ctx) return null;
+      const all = committedCtx.getImageData(0, 0, width, height);
+      const rect = inkBounds(all.data, width, height);
+      if (!rect) return null;
+      return { rect, patch: committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h) };
+    },
+
+    // Pastes a copyDrawing() result onto the active layer, at the same
+    // place, *on top of* what's there (never replacing it). An edit
+    // like any other: undoable through onChange, ink map marked.
+    // Refused like Clear for a locked/hidden/broken layer. Returns
+    // true if it pasted.
+    pasteDrawing({ rect: from, patch }) {
+      if (isBusy() || !ctx) return false;
+      const reason = paintBlockReason();
+      if (reason) {
+        for (const listener of blockedListeners) listener(reason);
+        return false;
+      }
+      const rect = clampRect(from, width, height);
+      if (!rect) return false;
+      const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+      // putImageData replaces; drawImage from a scratch canvas blends.
+      const scratch = document.createElement('canvas');
+      scratch.width = patch.width;
+      scratch.height = patch.height;
+      scratch.getContext('2d').putImageData(patch, 0, 0);
+      // The layer's context keeps whatever a stroke left set — after
+      // an erase it's 'destination-out', and the paste would erase.
+      for (const target of [ctx, committedCtx]) {
+        target.save();
+        target.globalCompositeOperation = 'source-over';
+        target.globalAlpha = 1;
+        target.drawImage(scratch, from.x, from.y);
+        target.restore();
+      }
+      scratch.width = 0;
+      scratch.height = 0;
+      notifyChange({ rect, before, layerId: activeLayerId, tool: 'paste' });
+      return true;
     },
 
     // --- undo/redo seam (step 2b) ---

@@ -76,6 +76,7 @@ import {
   insertFrameId,
   removeFrameId,
   frameAfterRemoval,
+  moveFrameId,
   imageForAllFrames,
   inheritedImage,
 } from './timeline/frames.js';
@@ -526,6 +527,10 @@ function mountEditor(session, { canSave }) {
       onSelect: (id) => selectFrame(id),
       onAdd: afterPlayback(() => addFrame()),
       onDuplicate: afterPlayback(() => duplicateFrame()),
+      onDelete: afterPlayback(() => deleteFrame()),
+      onMove: afterPlayback((id, to) => moveFrame(id, to)),
+      onCopyDrawing: afterPlayback(() => copyDrawing()),
+      onPasteDrawing: afterPlayback(() => pasteDrawing()),
     },
     transport: {
       onPlay: () => togglePlay(),
@@ -898,6 +903,8 @@ function mountEditor(session, { canSave }) {
   // no new touches — nothing can land on pixels that are mid-change.
   // One at a time, in order.
   let busy = false;
+  // Copy drawing's clipboard (4d; see copyDrawing below).
+  let clipboard = null; // { rect, patch } from canvasApi.copyDrawing
 
   function refreshPanel() {
     panel.render({
@@ -906,7 +913,7 @@ function mountEditor(session, { canSave }) {
       maxLayers: MAX_LAYERS,
       busy,
     });
-    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
+    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy, canPaste: clipboard !== null });
     ui.setAdjustBusy(busy);
     renderTransport();
     ui.images.render({
@@ -1162,6 +1169,8 @@ function mountEditor(session, { canSave }) {
   //   'layer-move'    { layerId, from, to }
   //   'layer-props'   { layerId, before, after }   (opacity)
   //   'frame-add'     { record }  record = { frame, index }
+  //   'frame-delete'  { record }  (4d) the same record, run the other way
+  //   'frame-move'    { frameId, from, to }  (4d) timeline indexes
   //   'image'         { frameId, before, after }  (3a) frame.image
   //                   records (null = none); blobs stay in storage
   //   'image-all'     { frameId, before, after }  (3b) Use on all
@@ -1291,7 +1300,13 @@ function mountEditor(session, { canSave }) {
         }
         return swapPixels(entry);
       case 'frame-add':
-        exclusive(() => (undoing ? takeOutFrame(entry.record) : insertFrame(entry.record)));
+      case 'frame-delete': {
+        const remove = (entry.type === 'frame-add') === undoing;
+        exclusive(() => (remove ? takeOutFrame(entry.record) : insertFrame(entry.record)));
+        return entry;
+      }
+      case 'frame-move':
+        applyFrameMove(entry.frameId, undoing ? entry.from : entry.to);
         return entry;
       case 'layer-add':
       case 'layer-delete': {
@@ -1383,8 +1398,7 @@ function mountEditor(session, { canSave }) {
 
   // A blank frame right after the current one, with a slot for every
   // layer; she's moved onto it. It keeps the reference image when
-  // every frame shares one (inheritedImage). Undoable (stands in for delete until
-  // the full strip in step 4).
+  // every frame shares one (inheritedImage). Undoable.
   function addFrame() {
     if (!canAct()) return;
     exclusive(async () => {
@@ -1411,6 +1425,87 @@ function mountEditor(session, { canSave }) {
       await insertFrame(record);
       history.push({ type: 'frame-add', record, bytes: 0 });
     });
+  }
+
+  // Delete (4d): the frame she's on, from the frame menu. No confirm —
+  // it's undoable (undo puts it back where it was and shows it). Its
+  // pixels stay in storage under its refs for undo; the launch sweep
+  // clears them once that's moot. She lands on the frame before it.
+  // The last frame can't be deleted.
+  function deleteFrame() {
+    if (!canAct() || project.frames.length <= 1) return;
+    exclusive(async () => {
+      const record = { frame: session.frame, index: -1 };
+      await takeOutFrame(record);
+      history.push({ type: 'frame-delete', record, bytes: 0 });
+    });
+  }
+
+  // Reorder (4d): long-press and drag on the strip. Only the order
+  // changes (project.frames); she stays on the frame she's on.
+  function moveFrame(frameId, to) {
+    if (!canAct()) return;
+    const from = project.frames.indexOf(frameId);
+    if (from < 0 || moveFrameId(project.frames, frameId, to) === project.frames) return;
+    applyFrameMove(frameId, to);
+    history.push({ type: 'frame-move', frameId, from, to, bytes: 0 });
+  }
+
+  // Frame 1 may change (the gallery thumbnail); the strip, the cache's
+  // rebuild order and the onion ghosts follow in refreshPanel.
+  function applyFrameMove(frameId, to) {
+    project.frames = moveFrameId(project.frames, frameId, to);
+    const byId = new Map(session.frames.map((f) => [f.id, f]));
+    session.frames = project.frames.map((id) => byId.get(id));
+    devLog.add('frame-move', { frame: tag(frameId), to });
+    thumbnailStale = true;
+    scheduleProjectSave();
+    refreshPanel();
+  }
+
+  // Copy / paste drawing (4d): the active layer's drawing on this
+  // frame, pasted onto the active layer of another frame, on top of
+  // what's there. The clipboard is in memory, for this open project
+  // only (dropped on close). Paste is one 'pixels' undo entry.
+  // (clipboard is declared up with `busy`: refreshPanel reads it.)
+
+  function copyDrawing() {
+    if (!canAct()) return;
+    const layerId = project.activeLayerId;
+    const layer = project.layers.find((l) => l.id === layerId);
+    // A canvas iOS emptied would copy blank: recover it instead.
+    const check = canvasApi.checkLayer(layerId);
+    if (!check.ok) {
+      devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+      recoverLayers(session.frame.id, [layerId]);
+      return;
+    }
+    const copied = canvasApi.copyDrawing();
+    if (!copied) {
+      showBanner(`${layer?.name ?? 'This layer'} has nothing to copy on this frame.`);
+      return;
+    }
+    clipboard = copied;
+    devLog.add('copy-drawing', { frame: tag(session.frame.id), layer: short(layerId), rect: `${copied.rect.w}x${copied.rect.h}` });
+    showBanner(`Copied ${layer?.name ?? 'the layer'}'s drawing. Paste it from another frame's menu.`);
+    refreshPanel();
+  }
+
+  // Refused for a locked or hidden layer, with wording for pasting (the
+  // canvas would refuse too, but its banner talks about drawing).
+  function pasteDrawing() {
+    if (!canAct() || !clipboard) return;
+    const layer = project.layers.find((l) => l.id === project.activeLayerId);
+    if (layer?.locked) {
+      showBanner('This layer is locked. Unlock it in Layers to paste on it.');
+      return;
+    }
+    if (layer && !layer.visible) {
+      showBanner('This layer is hidden. Show it in Layers to paste on it.');
+      return;
+    }
+    devLog.add('paste-drawing', { frame: tag(session.frame.id), layer: short(project.activeLayerId) });
+    canvasApi.pasteDrawing(clipboard);
   }
 
   // Copies pixels from each `from` bitmapRef to its `to` ref (pairs

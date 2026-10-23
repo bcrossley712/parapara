@@ -1,7 +1,8 @@
 // The robot test: a seeded, randomized hunt for lost drawing.
 //
-// A robot user draws, erases, smudges, undoes, redoes, adds and switches
-// frames and layers, plays and stops, hides the app, has saves fail
+// A robot user draws, erases, smudges, undoes, redoes, adds, switches,
+// deletes and drags frames (4d), copies and pastes drawings (4d),
+// switches layers, plays and stops, hides the app, has saves fail
 // (out of space), and has a layer canvas lose its pixels (what iOS did
 // on her iPad, after 4c). A model follows along. Every mark is a short
 // line at its own spot, so at the end each one can be checked — on
@@ -48,6 +49,17 @@ const undoBtn = (page) => page.getByRole('button', { name: 'Undo', exact: true }
 const redoBtn = (page) => page.getByRole('button', { name: 'Redo', exact: true });
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
+const currentTileId = (page) => page.locator('.pp-frame-strip__tile.is-current').getAttribute('data-frame-id');
+const tileIds = (page) => tiles(page).evaluateAll((els) => els.map((e) => e.dataset.frameId));
+
+async function frameMenu(page, item) {
+  await idle(page);
+  // A "switch frame" onto the frame she's on opens the menu already.
+  if (!(await page.locator('.pp-frame-menu').isVisible())) {
+    await page.locator('.pp-frame-strip__tile.is-current').click();
+  }
+  await page.getByRole('menuitem', { name: item, exact: true }).click();
+}
 
 async function idle(page) {
   await expect(addFrameBtn(page)).toBeEnabled();
@@ -154,7 +166,7 @@ for (const seed of SEEDS) {
     await setPanel(page, false);
 
     // The model.
-    const frameA = { key: 'A' };
+    const frameA = { key: 'A', id: await currentTileId(page) };
     const model = {
       timeline: [frameA],
       layers: [base, second],
@@ -163,6 +175,7 @@ for (const seed of SEEDS) {
       redo: [],
       spots: [...SPOTS].sort(() => random() - 0.5),
       frames: 1,
+      clipboard: null, // spots copied (4d)
     };
     const push = (entry) => {
       model.history.push(entry);
@@ -174,6 +187,14 @@ for (const seed of SEEDS) {
       else if (entry.type === 'frame-add') {
         if (forward) model.timeline.splice(entry.index, 0, entry.frame);
         else model.timeline.splice(model.timeline.indexOf(entry.frame), 1);
+      } else if (entry.type === 'frame-delete') {
+        if (forward) model.timeline.splice(model.timeline.indexOf(entry.frame), 1);
+        else model.timeline.splice(entry.index, 0, entry.frame);
+      } else if (entry.type === 'frame-move') {
+        model.timeline.splice(model.timeline.indexOf(entry.frame), 1);
+        model.timeline.splice(forward ? entry.to : entry.from, 0, entry.frame);
+      } else if (entry.type === 'paste') {
+        for (const mark of entry.marks) mark.present = forward;
       } else if (entry.type === 'layer-add') {
         if (forward) model.layers.push(entry.layer);
         else model.layers = model.layers.filter((l) => l !== entry.layer);
@@ -225,8 +246,64 @@ for (const seed of SEEDS) {
         const frame = { key: String.fromCharCode(65 + model.frames++) };
         await addFrameBtn(page).click();
         await expect(tiles(page)).toHaveCount(model.timeline.length + 1);
+        await idle(page);
+        frame.id = await currentTileId(page);
         model.timeline.splice(index, 0, frame);
         push({ type: 'frame-add', frame, index });
+      }],
+      [3, 'delete frame', async () => {
+        if (model.timeline.length < 2) return false;
+        const index = await currentIndex(page);
+        const frame = model.timeline[index];
+        await frameMenu(page, 'Delete');
+        await expect(tiles(page)).toHaveCount(model.timeline.length - 1);
+        model.timeline.splice(index, 1);
+        push({ type: 'frame-delete', frame, index });
+      }],
+      [3, 'drag frame', async () => {
+        if (model.timeline.length < 2) return false;
+        await idle(page);
+        const from = Math.floor(random() * model.timeline.length);
+        const to = Math.max(0, Math.min(model.timeline.length - 1, from + pick([-2, -1, 1, 2])));
+        if (to === from) return false;
+        await tile(page, from + 1).scrollIntoViewIfNeeded();
+        const a = await tile(page, from + 1).boundingBox();
+        const b = await tile(page, to + 1).boundingBox();
+        await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+        await page.mouse.down();
+        await expect(tile(page, from + 1)).toHaveClass(/is-lifted/);
+        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
+        await page.mouse.up();
+        await expect(page.locator('.is-lifted')).toHaveCount(0);
+        await idle(page);
+        // Where it landed (the strip may have scrolled under it): read it
+        // back, and check nothing else changed order.
+        const frame = model.timeline[from];
+        const ids = await tileIds(page);
+        const landed = ids.indexOf(frame.id);
+        const rest = model.timeline.filter((f) => f !== frame).map((f) => f.id);
+        expect(ids.filter((id) => id !== frame.id), `seed ${seed}: only the dragged frame moves`).toEqual(rest);
+        if (landed === from) return false;
+        model.timeline.splice(from, 1);
+        model.timeline.splice(landed, 0, frame);
+        push({ type: 'frame-move', frame, from, to: landed });
+      }],
+      [2, 'copy drawing', async () => {
+        const frame = model.timeline[await currentIndex(page)];
+        const layer = await activeLayer(page);
+        const spots = model.marks.filter((m) => m.present && m.frame === frame && m.layer === layer).map((m) => m.spot);
+        await frameMenu(page, 'Copy drawing');
+        // A blank layer copies nothing and leaves the clipboard alone.
+        if (spots.length > 0) model.clipboard = spots;
+      }],
+      [3, 'paste drawing', async () => {
+        if (!model.clipboard) return false;
+        const frame = model.timeline[await currentIndex(page)];
+        const layer = await activeLayer(page);
+        await frameMenu(page, 'Paste drawing');
+        const marks = model.clipboard.map((spot) => ({ frame, layer, spot, present: true }));
+        model.marks.push(...marks);
+        push({ type: 'paste', marks });
       }],
       [12, 'switch frame', async () => {
         if (model.timeline.length < 2) return false;
@@ -309,10 +386,18 @@ for (const seed of SEEDS) {
         await tile(page, n).click();
         await expect(tile(page, n)).toHaveClass(/is-current/);
         await idle(page);
+        // A spot may hold several marks (a paste over the same drawing):
+        // painted if any of them is there.
+        const spots = new Map();
         for (const mark of model.marks.filter((m) => m.frame === frame && model.layers.includes(m.layer))) {
+          const key = `${mark.layer} ${mark.spot.x} ${mark.spot.y}`;
+          const known = spots.get(key);
+          spots.set(key, { mark, present: Boolean(known?.present) || mark.present });
+        }
+        for (const { mark, present } of spots.values()) {
           const painted = await paintedOn(page, mark.layer, mark.spot.x + 12, mark.spot.y);
-          expect(painted, `${where}: seed ${seed}, frame ${n} (${frame.key}), mark at ${mark.spot.x},${mark.spot.y} should be ${mark.present ? 'there' : 'gone'}. Steps: ${steps.join(', ')}`)
-            .toBe(mark.present);
+          expect(painted, `${where}: seed ${seed}, frame ${n} (${frame.key}), mark at ${mark.spot.x},${mark.spot.y} should be ${present ? 'there' : 'gone'}. Steps: ${steps.join(', ')}`)
+            .toBe(present);
         }
       }
     }
