@@ -878,28 +878,10 @@ html, body {
   width: 100%;
 }
 
-/* Two rows of two: Rename · Duplicate / Clear · Delete. */
-.pp-layers__actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.pp-layers__btn {
-  min-width: 0;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
-  font-family: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.pp-layers__btn:disabled {
-  opacity: 0.4;
-  cursor: default;
+/* The layer menu (layers-panel.js): to the left of the panel, level
+   with the active row (top set in JS). Looks like the frame menu. */
+.pp-layer-menu {
+  right: calc(100% + 8px);
 }
 
 /* Fading banner (js/ui/ui.js showBanner): brief info, no button, never
@@ -1592,7 +1574,8 @@ html, body {
 
 /* Shared look: dark rounded menu of text items. */
 .pp-gallery-menu,
-.pp-frame-menu {
+.pp-frame-menu,
+.pp-layer-menu {
   position: absolute;
   z-index: 20;
   display: flex;
@@ -1605,7 +1588,8 @@ html, body {
 }
 
 .pp-gallery-menu__item,
-.pp-frame-menu__item {
+.pp-frame-menu__item,
+.pp-layer-menu__item {
   padding: 12px 14px;
   border: none;
   border-radius: 8px;
@@ -1618,16 +1602,19 @@ html, body {
 }
 
 .pp-gallery-menu__item:active,
-.pp-frame-menu__item:active {
+.pp-frame-menu__item:active,
+.pp-layer-menu__item:active {
   background: var(--pp-ink-light);
 }
 
-.pp-frame-menu__item:disabled {
+.pp-frame-menu__item:disabled,
+.pp-layer-menu__item:disabled {
   opacity: 0.45;
 }
 
 .pp-gallery-menu__item--danger,
-.pp-frame-menu__item--danger {
+.pp-frame-menu__item--danger,
+.pp-layer-menu__item--danger {
   color: #ff8a7a;
 }
 

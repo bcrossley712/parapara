@@ -506,6 +506,8 @@ function mountEditor(session, { canSave }) {
       onAdd: afterPlayback(() => addLayer()),
       onDelete: afterPlayback((id) => deleteLayer(id)),
       onDuplicate: afterPlayback((id) => duplicateLayer(id)),
+      onCopy: afterPlayback(() => copyDrawing()),
+      onPaste: afterPlayback(() => pasteDrawing()),
       onClear: afterPlayback((id) => clearLayer(id)),
       onRename: afterPlayback((id, name) => renameLayer(id, name)),
       onToggleVisible: afterPlayback((id) => toggleLayerProp(id, 'visible')),
@@ -529,8 +531,6 @@ function mountEditor(session, { canSave }) {
       onDuplicate: afterPlayback(() => duplicateFrame()),
       onDelete: afterPlayback(() => deleteFrame()),
       onMove: afterPlayback((id, to) => moveFrame(id, to)),
-      onCopyDrawing: afterPlayback(() => copyDrawing()),
-      onPasteDrawing: afterPlayback(() => pasteDrawing()),
     },
     transport: {
       onPlay: () => togglePlay(),
@@ -912,8 +912,9 @@ function mountEditor(session, { canSave }) {
       activeLayerId: project.activeLayerId,
       maxLayers: MAX_LAYERS,
       busy,
+      canPaste: clipboard !== null,
     });
-    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy, canPaste: clipboard !== null });
+    strip.render({ frameIds: project.frames, currentId: session.frame.id, busy });
     ui.setAdjustBusy(busy);
     renderTransport();
     ui.images.render({
@@ -1463,8 +1464,9 @@ function mountEditor(session, { canSave }) {
     refreshPanel();
   }
 
-  // Copy / paste drawing (4d): the active layer's drawing on this
-  // frame, pasted onto the active layer of another frame, on top of
+  // Copy / paste drawing (4d; the layer menu): the active layer's
+  // drawing on this frame, pasted onto whichever layer is active when
+  // she pastes — another layer, another frame, or both — on top of
   // what's there. The clipboard is in memory, for this open project
   // only (dropped on close). Paste is one 'pixels' undo entry.
   // (clipboard is declared up with `busy`: refreshPanel reads it.)
@@ -1487,7 +1489,7 @@ function mountEditor(session, { canSave }) {
     }
     clipboard = copied;
     devLog.add('copy-drawing', { frame: tag(session.frame.id), layer: short(layerId), rect: `${copied.rect.w}x${copied.rect.h}` });
-    showBanner(`Copied ${layer?.name ?? 'the layer'}'s drawing. Paste it from another frame's menu.`);
+    showBanner(`Copied ${layer?.name ?? 'the layer'}'s drawing. Tap the layer to paste into (on any frame), then Paste.`);
     refreshPanel();
   }
 

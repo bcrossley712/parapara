@@ -7,7 +7,7 @@
 // undo stays out of the way, and how the thresholds feel on her stylus.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
+import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layerMenu } from './helpers.js';
 
 const undoBtn = (page) => page.getByRole('button', { name: 'Undo' });
 const redoBtn = (page) => page.getByRole('button', { name: 'Redo' });
@@ -150,8 +150,7 @@ test('fill is undoable', async ({ page }) => {
 
 test('Clear is undoable, and clearing a blank canvas adds no undo step', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Layers', exact: true }).click();
-  const clear = () => page.getByRole('button', { name: 'Clear', exact: true }).click();
+  const clear = () => layerMenu(page, 'Clear');
 
   await clear();
   await expect(undoBtn(page)).toBeDisabled();

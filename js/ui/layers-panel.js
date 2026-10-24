@@ -4,10 +4,14 @@
 // (doesn't shrink the canvas), opened from the top bar's Layers button.
 // Like Sketchbook/Procreate/Flipaclip: top layer listed first, each row
 // with a thumbnail, name, visibility and lock toggles and a drag handle;
-// tap a row to make it the active layer. Below the list, the active
-// layer's opacity, Rename, Duplicate, Clear and Delete. Clear and Delete
-// stay tappable on a locked layer — main.js refuses with a banner that
-// says why, as a stroke on a locked layer does.
+// tap a row to make it the active layer. Tapping the active layer's
+// row opens its layer menu (Procreate's popover, Sketchbook's and
+// Flipaclip's layer menu; the frame strip's current tile works the
+// same way): Copy, Paste (4d), Rename, Duplicate, Clear, Delete. Flip
+// and merge down join it later. Below the list, only the active
+// layer's opacity — a slider doesn't belong in a menu. Clear, Paste
+// and Delete stay tappable on a locked layer — main.js refuses with a
+// banner that says why, as a stroke on a locked layer does.
 //
 // Pure UI: knows nothing about storage (beyond the shared name-length
 // limit), history or the canvas. main.js
@@ -20,13 +24,16 @@ import { MAX_LAYER_NAME } from '../storage/layers.js';
 // callbacks:
 //   onSelect(id), onAdd(), onDelete(id), onRename(id, name),
 //   onDuplicate(id), onClear(id),
+//   onCopy(id), onPaste(id)        copy / paste drawing (4d)
 //   onToggleVisible(id), onToggleLock(id),
 //   onMove(id, toIndex)            toIndex: 0 = bottom
 //   onOpacityInput(id, opacity)    live while dragging (0-1)
 //   onOpacityCommit(id, before, after)  on release
 //   drawThumbnail(id, canvas)      fill a thumbnail canvas
 //   onOpenChange(open)
-export function createLayersPanel(callbacks) {
+// options.signal: aborts the document listener (the menu's tap-outside
+// close) when the editor is torn down.
+export function createLayersPanel(callbacks, { signal } = {}) {
   const panel = document.createElement('aside');
   panel.className = 'pp-layers pp-layers--hidden';
   panel.setAttribute('aria-label', 'Layers');
@@ -55,38 +62,78 @@ export function createLayersPanel(callbacks) {
   opacityInput.max = '100';
   opacityInput.setAttribute('aria-label', 'Layer opacity');
   opacityLabel.append(opacityText, opacityInput);
-  const actions = document.createElement('div');
-  actions.className = 'pp-layers__actions';
-  const renameBtn = textButton('Rename');
-  const duplicateBtn = textButton('Duplicate');
-  const clearBtn = textButton('Clear');
-  const deleteBtn = textButton('Delete');
-  deleteBtn.classList.add('pp-layers__delete');
-  actions.append(renameBtn, duplicateBtn, clearBtn, deleteBtn);
-  footer.append(opacityLabel, actions);
+  footer.append(opacityLabel);
 
   panel.append(header, list, footer);
 
-  let state = { layers: [], activeLayerId: null, maxLayers: Infinity, busy: false };
+  let state = { layers: [], activeLayerId: null, maxLayers: Infinity, busy: false, canPaste: false };
   let open = false;
   let renamingId = null;
   const thumbs = new Map(); // layer id -> <canvas>
 
-  // --- header / footer actions ---
+  // --- header action ---
 
   addBtn.addEventListener('click', () => callbacks.onAdd());
-  deleteBtn.addEventListener('click', () => {
-    if (state.activeLayerId) callbacks.onDelete(state.activeLayerId);
-  });
-  clearBtn.addEventListener('click', () => {
-    if (state.activeLayerId) callbacks.onClear(state.activeLayerId);
-  });
-  duplicateBtn.addEventListener('click', () => {
-    if (state.activeLayerId) callbacks.onDuplicate(state.activeLayerId);
-  });
-  renameBtn.addEventListener('click', () => {
-    if (state.activeLayerId) startRename(state.activeLayerId);
-  });
+
+  // --- the layer menu (beside the active row) ---
+  //
+  // Opens to the left of the panel, level with the row, kept inside the
+  // area the panel sits in. Its items act on the active layer, which is
+  // the row it was opened from.
+  let menu = null;
+  function closeMenu() {
+    menu?.remove();
+    menu = null;
+  }
+  function openMenu(row) {
+    closeMenu();
+    const id = state.activeLayerId;
+    const many = state.layers.length;
+    const busy = state.busy;
+    menu = document.createElement('div');
+    menu.className = 'pp-layer-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Layer menu');
+    menu.append(
+      menuItem('Copy', busy, () => callbacks.onCopy(id)),
+      menuItem('Paste', busy || !state.canPaste, () => callbacks.onPaste(id)),
+      menuItem('Rename', busy, () => startRename(id)),
+      menuItem('Duplicate', busy || many >= state.maxLayers, () => callbacks.onDuplicate(id)),
+      menuItem('Clear', busy, () => callbacks.onClear(id)),
+      menuItem('Delete', busy || many <= 1, () => callbacks.onDelete(id), 'pp-layer-menu__item--danger'),
+    );
+    panel.appendChild(menu);
+    // Level with the row, but never past the bottom (or top) of the
+    // area the panel floats in.
+    const panelBox = panel.getBoundingClientRect();
+    const areaBox = (panel.offsetParent ?? document.body).getBoundingClientRect();
+    const want = row.getBoundingClientRect().top - panelBox.top;
+    const lowest = areaBox.bottom - panelBox.top - menu.offsetHeight - 8;
+    const highest = areaBox.top - panelBox.top + 8;
+    menu.style.top = `${Math.max(highest, Math.min(want, lowest))}px`;
+  }
+  function menuItem(label, disabled, onClick, extraClass) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pp-layer-menu__item';
+    if (extraClass) btn.classList.add(extraClass);
+    btn.setAttribute('role', 'menuitem');
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.addEventListener('click', () => {
+      closeMenu();
+      onClick();
+    });
+    return btn;
+  }
+  // A tap anywhere but the menu or the active row (whose own click
+  // toggles it) closes it; so does scrolling the list.
+  document.addEventListener('pointerdown', (event) => {
+    if (!menu || menu.contains(event.target)) return;
+    if (event.target.closest?.('.pp-layers__row.is-active')) return;
+    closeMenu();
+  }, { signal, capture: true });
+  list.addEventListener('scroll', () => closeMenu(), { passive: true });
 
   // Opacity: live updates while dragging, one commit (one undo step)
   // on release.
@@ -201,8 +248,11 @@ export function createLayersPanel(callbacks) {
     });
 
     row.append(handle, thumbWrap, name, eye, lock);
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (event) => {
       if (layer.id !== state.activeLayerId) callbacks.onSelect(layer.id);
+      else if (event.target.closest('.pp-layers__handle')) return; // a drag, not a tap
+      else if (menu) closeMenu();
+      else openMenu(row);
     });
     return row;
   }
@@ -262,9 +312,11 @@ export function createLayersPanel(callbacks) {
     }
   }
 
-  // state: { layers (bottom first), activeLayerId, maxLayers, busy }
+  // state: { layers (bottom first), activeLayerId, maxLayers, busy,
+  // canPaste }
   function render(next) {
     state = { ...state, ...next };
+    closeMenu();
     const ids = new Set(state.layers.map((l) => l.id));
     for (const id of thumbs.keys()) if (!ids.has(id)) thumbs.delete(id);
     if (renamingId && !ids.has(renamingId)) renamingId = null;
@@ -278,10 +330,6 @@ export function createLayersPanel(callbacks) {
     opacityText.textContent = `Opacity ${Math.round(Number(opacityInput.value))}%`;
     opacityInput.disabled = !active || state.busy;
     addBtn.disabled = state.busy || state.layers.length >= state.maxLayers;
-    deleteBtn.disabled = state.busy || !active || state.layers.length <= 1;
-    renameBtn.disabled = state.busy || !active;
-    clearBtn.disabled = state.busy || !active;
-    duplicateBtn.disabled = state.busy || !active || state.layers.length >= state.maxLayers;
   }
 
   // Redraws one layer's thumbnail (after an edit lands). Skipped while
@@ -302,6 +350,7 @@ export function createLayersPanel(callbacks) {
   function setOpen(next, { notify = true } = {}) {
     if (next === open) return;
     open = next;
+    closeMenu();
     panel.classList.toggle('pp-layers--hidden', !open);
     if (open) {
       for (const [id, canvas] of thumbs) callbacks.drawThumbnail(id, canvas);
@@ -318,6 +367,7 @@ export function createLayersPanel(callbacks) {
     refreshThumbnail,
     refreshThumbnails,
     setOpen,
+    closeMenu,
     get isOpen() { return open; },
   };
 }
@@ -328,14 +378,6 @@ function iconButton(label, icon, className) {
   btn.className = className;
   btn.setAttribute('aria-label', label);
   btn.innerHTML = icon;
-  return btn;
-}
-
-function textButton(label) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'pp-layers__btn';
-  btn.textContent = label;
   return btn;
 }
 

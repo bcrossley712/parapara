@@ -1,7 +1,8 @@
 // The robot test: a seeded, randomized hunt for lost drawing.
 //
 // A robot user draws, erases, smudges, undoes, redoes, adds, switches,
-// deletes and drags frames (4d), copies and pastes drawings (4d),
+// deletes and drags frames (4d), copies a layer's drawing and pastes
+// it into whichever layer is active, on any frame (4d),
 // switches layers, plays and stops, hides the app, has saves fail
 // (out of space), and has a layer canvas lose its pixels (what iOS did
 // on her iPad, after 4c). A model follows along. Every mark is a short
@@ -18,7 +19,7 @@
 // photos, touch gestures (undo.spec.js), and the real iOS failure.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, setVisibility } from './helpers.js';
+import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, setVisibility, layerMenu } from './helpers.js';
 
 const SEEDS = process.env.HUNT_SEED
   ? [Number(process.env.HUNT_SEED)]
@@ -292,7 +293,9 @@ for (const seed of SEEDS) {
         const frame = model.timeline[await currentIndex(page)];
         const layer = await activeLayer(page);
         const spots = model.marks.filter((m) => m.present && m.frame === frame && m.layer === layer).map((m) => m.spot);
-        await frameMenu(page, 'Copy drawing');
+        await idle(page);
+        await layerMenu(page, 'Copy');
+        await setPanel(page, false);
         // A blank layer copies nothing and leaves the clipboard alone.
         if (spots.length > 0) model.clipboard = spots;
       }],
@@ -300,7 +303,9 @@ for (const seed of SEEDS) {
         if (!model.clipboard) return false;
         const frame = model.timeline[await currentIndex(page)];
         const layer = await activeLayer(page);
-        await frameMenu(page, 'Paste drawing');
+        await idle(page);
+        await layerMenu(page, 'Paste');
+        await setPanel(page, false);
         const marks = model.clipboard.map((spot) => ({ frame, layer, spot, present: true }));
         model.marks.push(...marks);
         push({ type: 'paste', marks });

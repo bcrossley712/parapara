@@ -86,3 +86,31 @@ export function savedToolSettings(page) {
 export async function waitForToolSettings(page, expected, options = {}) {
   await expect.poll(() => savedToolSettings(page), options).toMatchObject(expected);
 }
+
+// --- the layer menu (tap the active layer's row) ---
+
+// The layers panel isn't mid-change: the opacity slider is enabled
+// (off while busy). Stands in for "the footer's buttons are enabled"
+// from before the layer menu.
+export const layersSettled = (page) => expect(page.getByLabel('Layer opacity')).toBeEnabled();
+
+// Opens the layers panel if needed, then the active layer's menu.
+export async function openLayerMenu(page) {
+  if (!(await page.locator('.pp-layers').isVisible())) {
+    await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  }
+  await layersSettled(page);
+  if (!(await page.locator('.pp-layer-menu').isVisible())) {
+    await page.locator('.pp-layers__row.is-active .pp-layers__name').click();
+  }
+  await expect(page.locator('.pp-layer-menu')).toBeVisible();
+}
+
+// An item in the layer menu (open it first).
+export const layerMenuItem = (page, name) => page.locator('.pp-layer-menu').getByRole('menuitem', { name, exact: true });
+
+// Opens the menu and picks `name`.
+export async function layerMenu(page, name) {
+  await openLayerMenu(page);
+  await layerMenuItem(page, name).click();
+}

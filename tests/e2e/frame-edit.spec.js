@@ -1,8 +1,9 @@
 // End-to-end tests for step 4d: deleting a frame (frame menu, no
 // confirm, undoable, never the last one), reordering frames by
 // long-press and drag on the strip (undoable, she stays on her frame),
-// and Copy / Paste drawing between frames (the active layer, pasted on
-// top, undoable, refused on a locked layer).
+// and Copy / Paste in the layer menu (a layer's drawing into any layer,
+// on this frame or another, pasted on top, undoable, refused on a
+// locked layer).
 //
 // Run: npm run test:e2e
 //
@@ -13,7 +14,7 @@
 // on a held tile.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
+import { openApp, reloadApp, readDb, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -223,34 +224,70 @@ test('a move updates the onion ghosts without a frame switch', async ({ page }) 
   await expect.poll(() => ghostAt(500)).toBe(false);
 });
 
-// --- copy / paste drawing ---
+// --- copy / paste drawing (the layer menu) ---
 
-test('Paste drawing puts the copy on top of another frame\'s drawing; undo and redo; saved', async ({ page }) => {
+const layerIdsTopFirst = (page) => page.locator('.pp-layers__row').evaluateAll((els) => els.map((e) => e.dataset.layerId));
+function paintedOn(page, layerId, x, y) {
+  return page.evaluate(([id, px, py]) => {
+    const c = document.querySelector(`.pp-layer[data-layer-id="${id}"]`);
+    return c.getContext('2d').getImageData(px, py, 1, 1).data[3] > 0;
+  }, [layerId, x, y]);
+}
+async function selectLayer(page, id) {
+  await page.locator(`.pp-layers__row[data-layer-id="${id}"] .pp-layers__name`).click();
+  await expect(page.locator(`.pp-layers__row[data-layer-id="${id}"]`)).toHaveClass(/is-active/);
+}
+
+test('the frame menu has no copy or paste (they are layer actions)', async ({ page }) => {
+  await openApp(page);
+  await addFrame(page);
+  await openMenu(page);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Duplicate', 'Delete']);
+});
+
+test('Paste puts a layer\'s drawing into another layer on the same frame, on top; undoable', async ({ page }) => {
+  await openApp(page);
+  await stroke(page, 300); // Layer 1
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Add layer' }).click();
+  await layersSettled(page);
+  await stroke(page, 600); // Layer 2
+  const [l2, l1] = await layerIdsTopFirst(page);
+
+  await selectLayer(page, l1);
+  await layerMenu(page, 'Copy');
+  await expect(banner(page)).toContainText('Copied Layer 1');
+  await selectLayer(page, l2);
+  await layerMenu(page, 'Paste');
+  expect(await paintedOn(page, l2, 900, 300)).toBe(true);
+  expect(await paintedOn(page, l2, 900, 600)).toBe(true); // on top, not replaced
+  expect(await paintedOn(page, l1, 900, 300)).toBe(true); // the source is untouched
+  expect(await paintedOn(page, l1, 900, 600)).toBe(false);
+
+  await undo(page);
+  expect(await paintedOn(page, l2, 900, 300)).toBe(false);
+  expect(await paintedOn(page, l2, 900, 600)).toBe(true);
+});
+
+test('Paste works on another frame too; undo and redo; saved; the clipboard ends with the project', async ({ page }) => {
   await openApp(page);
   await stroke(page, 300);
   await addFrame(page);
   await stroke(page, 600);
 
-  // Nothing copied yet.
-  await openMenu(page);
-  await expect(menuItem(page, 'Paste drawing')).toBeDisabled();
-  await page.locator('.pp-frame-strip__tile.is-current').click(); // close
-
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Paste')).toBeDisabled(); // nothing copied yet
   await goToFrame(page, 1);
-  await openMenu(page);
-  await menuItem(page, 'Copy drawing').click();
-  await expect(banner(page)).toContainText('Copied Layer 1');
+  await layerMenu(page, 'Copy');
 
   await goToFrame(page, 2);
-  await openMenu(page);
   const before = await savedDrawingBytes(page);
-  await menuItem(page, 'Paste drawing').click();
+  await layerMenu(page, 'Paste');
   expect(await paintedAt(page, 900, 300)).toBe(true);
-  expect(await paintedAt(page, 900, 600)).toBe(true); // on top, not replaced
+  expect(await paintedAt(page, 900, 600)).toBe(true);
 
   await undo(page);
   expect(await paintedAt(page, 900, 300)).toBe(false);
-  expect(await paintedAt(page, 900, 600)).toBe(true);
   await redo(page);
   expect(await paintedAt(page, 900, 300)).toBe(true);
 
@@ -259,47 +296,39 @@ test('Paste drawing puts the copy on top of another frame\'s drawing; undo and r
   await goToFrame(page, 2);
   expect(await paintedAt(page, 900, 300)).toBe(true);
   expect(await paintedAt(page, 900, 600)).toBe(true);
-  // The clipboard doesn't outlive the open project.
-  await openMenu(page);
-  await expect(menuItem(page, 'Paste drawing')).toBeDisabled();
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Paste')).toBeDisabled();
 });
 
 test('copying a blank layer says so and copies nothing', async ({ page }) => {
   await openApp(page);
-  await openMenu(page);
-  await menuItem(page, 'Copy drawing').click();
+  await layerMenu(page, 'Copy');
   await expect(banner(page)).toContainText('nothing to copy');
-  await openMenu(page);
-  await expect(menuItem(page, 'Paste drawing')).toBeDisabled();
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Paste')).toBeDisabled();
 });
 
 test('a locked layer refuses a paste', async ({ page }) => {
   await openApp(page);
   await stroke(page, 300);
-  await openMenu(page);
-  await menuItem(page, 'Copy drawing').click();
+  await layerMenu(page, 'Copy');
   await addFrame(page);
-  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Lock Layer 1' }).click();
-  await openMenu(page);
-  await menuItem(page, 'Paste drawing').click();
+  await layerMenu(page, 'Paste');
   await expect(banner(page)).toContainText('locked');
   expect(await paintedAt(page, 900, 300)).toBe(false);
-  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled(); // the add frame, not a paste
-  await undo(page);
+  await undo(page); // the add frame, not a paste
   await expect(tiles(page)).toHaveCount(1);
 });
 
 test('a paste right after erasing still paints (the eraser\'s mode does not carry over)', async ({ page }) => {
   await openApp(page);
   await stroke(page, 300);
-  await openMenu(page);
-  await menuItem(page, 'Copy drawing').click();
+  await layerMenu(page, 'Copy');
   await addFrame(page);
   // Erase somewhere else; the layer's context is left in erase mode.
   await page.getByRole('button', { name: 'Erase', exact: true }).click();
   await stroke(page, 900);
-  await openMenu(page);
-  await menuItem(page, 'Paste drawing').click();
+  await layerMenu(page, 'Paste');
   expect(await paintedAt(page, 900, 300)).toBe(true);
 });

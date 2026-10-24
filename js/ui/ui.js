@@ -133,7 +133,7 @@ export function initUI(container, options = {}) {
       layersBtn.setAttribute('aria-pressed', String(open));
       layersCallbacks.onOpenChange?.(open);
     },
-  });
+  }, { signal });
   layersBtn.setAttribute('aria-pressed', 'false');
 
   // Canvas area above, frame strip below with the transport at its

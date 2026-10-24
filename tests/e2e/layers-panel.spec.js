@@ -9,7 +9,7 @@
 // "Fill all layers" is for that).
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
+import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
 
 const rows = (page) => page.locator('.pp-layers__row');
 const addBtn = (page) => page.getByRole('button', { name: 'Add layer' });
@@ -37,8 +37,8 @@ async function addLayer(page) {
   const before = await rows(page).count();
   await addBtn(page).click();
   await expect(rows(page)).toHaveCount(before + 1);
-  // The add finishes asynchronously; Rename is disabled until it does.
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  // The add finishes asynchronously; the panel is busy until it does.
+  await layersSettled(page);
 }
 
 // A mouse stroke in canvas-pixel coordinates.
@@ -148,7 +148,7 @@ test('a deleted layer comes back with its drawing on undo, and is gone after red
   const drawn = await painted(page, top);
   expect(drawn).toBeGreaterThan(500);
 
-  await page.getByRole('button', { name: 'Delete' }).click();
+  await layerMenu(page, 'Delete');
   await expect(rows(page)).toHaveCount(1);
   await expect.poll(() => activeId(page)).toBe(bottom); // the layer below
   expect(await painted(page, top)).toBeNull();
@@ -173,7 +173,8 @@ test('a deleted layer comes back with its drawing on undo, and is gone after red
 test('the only layer cannot be deleted', async ({ page }) => {
   await openApp(page);
   await openPanel(page);
-  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Delete')).toBeDisabled();
 });
 
 test('dragging a layer by its handle reorders it; undo puts it back; order is saved', async ({ page }) => {
@@ -269,7 +270,7 @@ test('a locked or hidden layer refuses strokes with a notice; toggles are saved 
 test('rename edits the name in place and it is saved', async ({ page }) => {
   await openApp(page);
   await openPanel(page);
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await layerMenu(page, 'Rename');
   const input = page.getByRole('textbox', { name: 'Layer name' });
   await expect(input).toBeFocused();
   await input.fill('Line art');
@@ -277,7 +278,7 @@ test('rename edits the name in place and it is saved', async ({ page }) => {
   expect(await rowNames(page)).toEqual(['Line art']);
 
   // Escape cancels.
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await layerMenu(page, 'Rename');
   await page.getByRole('textbox', { name: 'Layer name' }).fill('Nope');
   await page.getByRole('textbox', { name: 'Layer name' }).press('Escape');
   expect(await rowNames(page)).toEqual(['Line art']);
@@ -377,8 +378,6 @@ test('the developer fill tool reaches the layer cap and paints every layer', asy
 
 // --- Clear, and lock protecting a layer (2e) ---
 
-const clearBtn = (page) => page.getByRole('button', { name: 'Clear', exact: true });
-const deleteBtn = (page) => page.getByRole('button', { name: 'Delete', exact: true });
 
 test('Clear empties the active layer on this frame only, and is undoable', async ({ page }) => {
   await openApp(page);
@@ -398,13 +397,13 @@ test('Clear empties the active layer on this frame only, and is undoable', async
   await expect(page.getByRole('button', { name: 'Add frame' })).toBeEnabled();
   expect(await painted(page, l2)).toBe(l2Painted);
 
-  await clearBtn(page).click();
+  await layerMenu(page, 'Clear');
   expect(await painted(page, l2)).toBe(0);
   expect(await painted(page, l1)).toBe(l1Painted); // other layer untouched
 
   await undo(page);
   expect(await painted(page, l2)).toBe(l2Painted);
-  await clearBtn(page).click();
+  await layerMenu(page, 'Clear');
 
   // Frame 1's Layer 2 still has its drawing.
   await page.getByRole('button', { name: 'Frame 1', exact: true }).click();
@@ -422,17 +421,17 @@ test('a locked layer can\'t be cleared or deleted; the banner says why', async (
   const before = await painted(page, id);
   await page.getByRole('button', { name: 'Lock Layer 2' }).click();
 
-  await clearBtn(page).click();
+  await layerMenu(page, 'Clear');
   await expect(page.locator('#pp-banner')).toContainText('Unlock it in Layers to clear it');
   expect(await painted(page, id)).toBe(before);
 
-  await deleteBtn(page).click();
+  await layerMenu(page, 'Delete');
   await expect(page.locator('#pp-banner')).toContainText('Unlock it in Layers to delete it');
   await expect(rows(page)).toHaveCount(2);
 
   // Unlocked, both work again.
   await page.getByRole('button', { name: 'Unlock Layer 2' }).click();
-  await deleteBtn(page).click();
+  await layerMenu(page, 'Delete');
   await expect(rows(page)).toHaveCount(1);
 });
 
@@ -443,7 +442,55 @@ test('a hidden layer can\'t be cleared', async ({ page }) => {
   await stroke(page, 300, 300, 800, 300);
   const before = await painted(page, id);
   await page.getByRole('button', { name: 'Hide Layer 1' }).click();
-  await clearBtn(page).click();
+  await layerMenu(page, 'Clear');
   await expect(page.locator('#pp-banner')).toContainText('Show it in Layers to clear it');
   expect(await painted(page, id)).toBe(before);
+});
+
+// --- the layer menu (4d) ---
+
+test('tapping the active layer opens its menu; tapping another layer just selects it; the footer keeps only opacity', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  await addLayer(page); // Layer 2, active
+  const menu = page.locator('.pp-layer-menu');
+  await expect(page.locator('.pp-layers__footer button')).toHaveCount(0);
+  await expect(page.getByLabel('Layer opacity')).toBeVisible();
+
+  // Another row: selects it, no menu.
+  await page.locator('.pp-layers__row:not(.is-active) .pp-layers__name').click();
+  await expect(rows(page).last()).toHaveClass(/is-active/); // Layer 1 (bottom)
+  await expect(menu).toHaveCount(0);
+
+  // The active row: opens the menu, in order; again: closes it.
+  await page.locator('.pp-layers__row.is-active .pp-layers__name').click();
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Copy', 'Paste', 'Rename', 'Duplicate', 'Clear', 'Delete']);
+  await expect(layerMenuItem(page, 'Paste')).toBeDisabled(); // nothing copied
+  await page.locator('.pp-layers__row.is-active .pp-layers__name').click();
+  await expect(menu).toHaveCount(0);
+
+  // The eye and lock toggles don't open it.
+  await page.getByRole('button', { name: 'Lock Layer 1' }).click();
+  await expect(menu).toHaveCount(0);
+
+  // A tap elsewhere closes it.
+  await openLayerMenu(page);
+  await page.locator('.pp-layers__title').click();
+  await expect(menu).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(2);
+});
+
+test('the menu acts on the layer it was opened from', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const l1 = await activeId(page);
+  await stroke(page, 300, 300, 800, 300);
+  await addLayer(page);
+  const l2 = await activeId(page);
+  await stroke(page, 300, 600, 800, 600);
+  const l1Painted = await painted(page, l1);
+  await layerMenu(page, 'Clear');
+  expect(await painted(page, l2)).toBe(0);
+  expect(await painted(page, l1)).toBe(l1Painted);
 });

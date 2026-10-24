@@ -10,7 +10,7 @@
 // layers), and how the strip scrolls under her finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp } from './helpers.js';
+import { openApp, reloadApp, layersSettled, layerMenu } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -155,7 +155,7 @@ test('layers are shared: a layer added or hidden on one frame is on every frame'
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Add layer' }).click();
   await expect(page.locator('.pp-layers__row')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   const ids2 = await page.locator('.pp-layer').evaluateAll((els) => els.map((e) => e.dataset.layerId));
 
   await goToFrame(page, 1);
@@ -177,17 +177,17 @@ test('deleting a layer on one frame and undoing on another brings back both fram
   await openApp(page);
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Add layer' }).click();
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   await stroke(page, 300); // Layer 2, frame 1
   await addFrame(page);
   await stroke(page, 700); // Layer 2, frame 2
 
-  await page.getByRole('button', { name: 'Delete' }).click();
+  await layerMenu(page, 'Delete');
   await expect(page.locator('.pp-layers__row')).toHaveCount(1);
   await goToFrame(page, 1);
   await undo(page); // brings Layer 2 back (on frame 1, where we are now)
   await expect(page.locator('.pp-layers__row')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   expect(await paintedAt(page, 900, 300)).toBe(true);
   await goToFrame(page, 2);
   expect(await paintedAt(page, 900, 700)).toBe(true);

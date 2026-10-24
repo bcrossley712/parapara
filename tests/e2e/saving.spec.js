@@ -9,7 +9,7 @@
 // the background save finishes before iPadOS suspends the app.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, setVisibility, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
+import { openApp, reloadApp, setVisibility, savedDrawingBytes, waitForDrawingSave, layerMenu } from './helpers.js';
 
 // Counts painted (non-transparent) canvas pixels in a box around where
 // drawStroke() draws. The canvas is transparent where nothing is
@@ -76,9 +76,8 @@ test('Clear is saved like any other edit', async ({ page }) => {
   await waitForDrawingSave(page, null);
   const withStroke = await savedDrawingBytes(page);
 
-  // Clear lives in the layers panel (2e).
-  await page.getByRole('button', { name: 'Layers', exact: true }).click();
-  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  // Clear lives in the layer menu.
+  await layerMenu(page, 'Clear');
   await waitForDrawingSave(page, withStroke);
   await reloadApp(page);
 

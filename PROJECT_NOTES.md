@@ -135,12 +135,18 @@ icon, manifest `name`/`short_name`, and repo copy.
     memory) unknown: **if the log shows `load-renewed`, `save-refused`,
     `check-failed` or `recover`, get the log** — it says when and how
     often.
-  - **4d: built, not yet confirmed on the iPad** — frame delete,
-    reorder (long-press and drag), and Copy / Paste drawing between
-    frames (she asked for it). How it works is under Architecture →
-    Frame strip editing. Check on the iPad: the long-press feel with
-    her stylus, that the strip stops scrolling once a tile lifts, and
-    no callout or text selection on a held tile.
+  - **4d: built, not yet confirmed on the iPad** — frame delete and
+    reorder (long-press and drag) on the strip; the **layer menu**,
+    with **Copy / Paste** of a layer's drawing (she asked for it: copy
+    one layer, paste into a different layer, on this frame or
+    another). How it works is under Architecture → Frame strip editing
+    and Layer menu. *The first 4d delivery got copy/paste wrong* — it
+    was framed as between frames and put in the frame menu, from an
+    old open item that said "same layer on another frame"; corrected
+    before she saw it. Check on the iPad: the long-press feel with her
+    stylus, that the strip stops scrolling once a tile lifts, no
+    callout or text selection on a held tile, and that tapping the
+    active layer reads clearly as "open its menu".
     - **Frame holds** (a drawing lasting several beats, Rough
       Animator) are out unless she asks; adding them later is an
       optional `frame.hold` (missing = 1) read only by `frameAtBeat`.
@@ -170,10 +176,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
 - **After the main build — requested, deferred so step 4 comes sooner**
   ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
-  - **Layer menu + flip drawing** (was 3c): tapping the active layer
-    row opens a menu (Rename, Duplicate, Clear, Flip H/V, Delete;
-    merge down later), footer keeps only opacity. Flip = active layer,
-    this frame, one `'pixels'` undo entry; lock/hide refuse it.
+  - **Flip drawing** (was 3c; the layer menu it goes in was built in
+    4d): Flip H/V items in the layer menu. Flip = active layer, this
+    frame, one `'pixels'` undo entry; lock/hide refuse it.
   - **Symmetry** (was 3d): rail toggle, vertical/horizontal/both,
     fixed axis at canvas center (not movable), saved per project; draw,
     erase and smudge mirror, fill doesn't. Mirrored stamps must grow the
@@ -285,14 +290,21 @@ Short rules; reasoning in the linked sections.
     refused with a notice; a touch on it can still become a gesture.
     **Lock also blocks Delete** (2e) — lock protects the layer, not
     just its pixels. Rename, move, opacity and Duplicate stay allowed.
-    The buttons stay tappable; the banner says why. Merge down (later)
-    must respect lock too.
-  - **Clear** (panel footer, 2e): the active layer on this frame only,
+    The menu items stay tappable; the banner says why. Merge down
+    (later) must respect lock too.
+  - **Layer menu (4d)** ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
+    tapping the **active** layer's row opens it (tapping another row
+    just selects; the handle, eye and lock don't open it), to the left
+    of the panel, level with the row. Items: Copy, Paste, Rename,
+    Duplicate, Clear, Delete; Flip H/V and merge down join later. The
+    panel's footer keeps only the opacity slider. Closes on any tap
+    outside it, on list scroll, and on every panel render.
+  - **Clear** (layer menu; 2e): the active layer on this frame only,
     undoable. Replaced the gear menu's dev "Clear drawing".
   - **Frames:** add frame inserts a blank frame *after* the current
     one, with a slot for every layer, and moves onto it. Tapping the
-    current frame's tile opens the frame menu (Copy drawing, Paste
-    drawing, Duplicate, Delete — 4d). Moving to
+    current frame's tile opens the frame menu (Duplicate, Delete —
+    4d). Moving to
     another frame saves the current one first, then reads the next
     one's layers from storage; a layer that can't be saved (or saving
     is off) is held in memory by bitmapRef until it can be.
@@ -334,8 +346,8 @@ Short rules; reasoning in the linked sections.
     meanwhile undo/redo, panel actions and new touches are ignored.
   - `history.js` and `layers.js` are pure; `canvas.js` exposes the
     seams; `main.js` glues.
-- **Copying (2e)** — copy frame (frame menu), copy layer (panel
-  footer), duplicate project (gallery ⋯):
+- **Copying (2e)** — copy frame (frame menu), copy layer (layer
+  menu's Duplicate), duplicate project (gallery ⋯):
   - Record builders in `layers.js` are pure and return `pairs` of
     [fromBlob, toBlob]; **pixels are copied before anything points at
     the new refs**, one blob in memory at a time.
@@ -507,7 +519,8 @@ Short rules; reasoning in the linked sections.
     setting, so it doesn't stop playback.
   - **Left out unless she asks:** wrap-around, active-layer-only
     ghosts, keyframe-only onion, per-frame ghost toggles.
-- **Frame strip editing (4d)** — all from the strip:
+- **Frame strip editing (4d)** — delete and reorder from the strip;
+  copy/paste from the layer menu:
   - **Delete:** frame menu, no confirm, not offered on the last frame;
     she lands on the frame before (or the new first). `'frame-delete'`
     is `'frame-add'` run the other way (`takeOutFrame`/`insertFrame`):
@@ -516,10 +529,13 @@ Short rules; reasoning in the linked sections.
     strip auto-scrolls near its ends. She stays on her frame. Only
     `project.frames` changes (`moveFrameId`, pure); `'frame-move'`
     keeps `from`/`to`. A strip re-render or playback cancels a drag.
-  - **Copy / Paste drawing** (frame menu, active layer): copy crops to
-    the ink (`inkBounds`), runs `checkLayer` first (a lost canvas would
-    copy blank). **Paste goes on top** of what's there, same place;
-    Clear then Paste replaces. One `'pixels'` entry through
+  - **Copy / Paste** (layer menu): Copy takes the active layer's
+    drawing on this frame; Paste puts it into **whichever layer is
+    active when she pastes** — another layer, another frame, or both
+    (her chosen layer, never a new one, unlike Procreate). Copy crops
+    to the ink (`inkBounds`), runs `checkLayer` first (a lost canvas
+    would copy blank). **Paste goes on top** of what's there, same
+    place; Clear then Paste replaces. One `'pixels'` entry through
     `notifyChange`; lock/hide refused with a banner. Clipboard in
     memory, **open project only** (dropped on close).
   - Any of these can change frame 1, so they mark the gallery
@@ -762,7 +778,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         gallery.js        gallery screen (UI only; intents via callbacks)
         confirm-dialog.js custom modal: showConfirm / showPrompt
         icons.js          icons shared by both screens
-        layers-panel.js   layers panel (UI only; intents via callbacks)
+        layers-panel.js   layers panel + layer menu (4d) (UI only;
+                          intents via callbacks)
         reference-bar.js  adjust-image bar that replaces the rail (UI only)
         image-menu.js     top-bar Image button + menu, state dot/slash
                           (UI only)
@@ -936,6 +953,10 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
     `HUNT_SEED=<n>` to rerun a failure (the log is attached).
     `canvas-loss.spec.js` simulates the lost canvas (cleared, or
     ignoring `drawImage`).
+  - **Layer actions in e2e** go through the layer menu: `helpers.js`
+    `layerMenu(page, item)` / `openLayerMenu` / `layerMenuItem`; wait
+    for the panel to settle with `layersSettled` (the opacity slider is
+    off while busy).
   - **Images in e2e:** make the test image in the page (a canvas →
     PNG buffer) and feed it through `page.waitForEvent('filechooser')`
     so the real picker path runs (`reference.spec.js`).

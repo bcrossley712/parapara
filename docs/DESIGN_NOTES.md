@@ -732,7 +732,17 @@ these forces a redo of what's built; each is additive.
   tap-the-active-layer popover). The frame strip already works this way
   (tap the current tile), so the layer row does too. The footer keeps
   only the opacity slider, since a slider doesn't belong in a menu.
-  Build it with whichever comes first, flip drawing or merge down.
+  Built in 4d, when Copy and Paste would have made the footer six
+  actions (the trigger was "whichever comes first, flip drawing or
+  merge down"; copy/paste came first). It opens to the left of the
+  panel, not under the row, so it never covers the layers she's
+  choosing between.
+- **Copy / paste is a layer action, not a frame action.** She copies
+  one layer's drawing and pastes it into a different layer, on this
+  frame or another. An older open item described it as "paste into
+  the same layer on another frame", and the first 4d build followed
+  that into the frame menu. Paste goes into the layer she chose, on
+  top; Procreate's paste-as-new-layer was considered and turned down.
 - **Flip drawing lives in the layers panel.** It acts on the active
   layer, so it sits with the other layer actions (Clear, Copy). A
   top-bar button was suggested and rejected: it would separate a layer

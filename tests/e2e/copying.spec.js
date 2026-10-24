@@ -10,7 +10,7 @@
 // feels under her finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb } from './helpers.js';
+import { openApp, reloadApp, readDb, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -58,7 +58,7 @@ async function addLayer(page) {
   const before = await rows(page).count();
   await page.getByRole('button', { name: 'Add layer' }).click();
   await expect(rows(page)).toHaveCount(before + 1);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
 }
 
 // A horizontal mouse stroke at canvas-pixel height y.
@@ -180,9 +180,9 @@ test('Duplicate layer copies its drawing on every frame, above it, unlocked, and
   const [source] = await layerIds(page);
   await page.getByRole('button', { name: 'Lock Layer 1' }).click();
 
-  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await layerMenu(page, 'Duplicate');
   await expect(rows(page)).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   await expect(rows(page).first()).toContainText('Layer 1 copy'); // top row = above
   const copy = await activeLayerId(page);
   expect(copy).not.toBe(source);
@@ -211,16 +211,16 @@ test('undo removes a copied layer and redo brings it back with its drawing', asy
   await openApp(page);
   await stroke(page, 300);
   await openLayers(page);
-  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await layerMenu(page, 'Duplicate');
   await expect(rows(page)).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   const copy = await activeLayerId(page);
 
   await undo(page);
   await expect(rows(page)).toHaveCount(1);
   await redo(page);
   await expect(rows(page)).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Rename' })).toBeEnabled();
+  await layersSettled(page);
   expect(await activeLayerId(page)).toBe(copy);
   expect(await paintedAt(page, 900, 300, copy)).toBe(true);
 });
@@ -229,9 +229,11 @@ test('Duplicate layer is off at the layer cap', async ({ page }) => {
   await openApp(page);
   await openLayers(page);
   for (let i = 1; i < 8; i++) await addLayer(page);
-  await expect(page.getByRole('button', { name: 'Duplicate', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Duplicate', exact: true })).toBeEnabled();
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Duplicate')).toBeDisabled();
+  await layerMenuItem(page, 'Delete').click();
+  await openLayerMenu(page);
+  await expect(layerMenuItem(page, 'Duplicate')).toBeEnabled();
 });
 
 // --- duplicate project ---
@@ -269,7 +271,7 @@ test('a long layer name never makes its row taller than two lines, and its copy 
   const row = rows(page).first();
   const shortHeight = (await row.boundingBox()).height;
 
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await layerMenu(page, 'Rename');
   const input = page.locator('.pp-layers__name-input');
   await input.fill('W'.repeat(60)); // capped by maxLength
   await input.press('Enter');
@@ -279,7 +281,7 @@ test('a long layer name never makes its row taller than two lines, and its copy 
   const lineHeight = await name.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
   expect((await name.boundingBox()).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
 
-  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await layerMenu(page, 'Duplicate');
   await expect(rows(page)).toHaveCount(2);
   const copyName = await page.locator('.pp-layers__name').first().textContent();
   expect(copyName.length).toBeLessThanOrEqual(40);

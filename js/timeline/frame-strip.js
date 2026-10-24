@@ -5,8 +5,8 @@
 // frame" tile (the wireframe's layout). Tap a tile to go to that frame;
 // the add tile inserts a blank frame after the current one. Tapping
 // the frame she's already on opens a small menu above it (Flipaclip's
-// frame menu): Copy drawing, Paste drawing (the active layer's, 4d),
-// Duplicate, and Delete (4d; not on the last frame). (The reference
+// frame menu): Duplicate, and Delete (4d; not on the last frame).
+// (Copy / paste of a layer's drawing is in the layer menu.) (The reference
 // image's controls live in the top bar's Image menu.)
 //
 // Reorder (4d, Flipaclip's way): long-press a tile, it lifts, drag it
@@ -48,7 +48,7 @@ const SCROLL_EDGE = 48;
 const MAX_SCROLL_STEP = 14; // px per animation frame
 
 // callbacks: onSelect(frameId), onAdd(), onDuplicate(), onDelete(),
-// onMove(frameId, toIndex), onCopyDrawing(), onPasteDrawing()
+// onMove(frameId, toIndex)
 // options.signal: aborts the document listener (the menu's tap-outside
 // close) when the editor is torn down.
 export function createFrameStrip(callbacks, { signal } = {}) {
@@ -88,13 +88,7 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     menu = document.createElement('div');
     menu.className = 'pp-frame-menu';
     menu.setAttribute('role', 'menu');
-    const paste = menuItem('Paste drawing', () => callbacks.onPasteDrawing());
-    paste.disabled ||= !lastState?.canPaste;
-    menu.append(
-      menuItem('Copy drawing', () => callbacks.onCopyDrawing()),
-      paste,
-      menuItem('Duplicate', () => callbacks.onDuplicate()),
-    );
+    menu.append(menuItem('Duplicate', () => callbacks.onDuplicate()));
     // The last frame can't be deleted, so it isn't offered.
     if ((lastState?.frameIds.length ?? 0) > 1) {
       const del = menuItem('Delete', () => callbacks.onDelete());
@@ -275,7 +269,7 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     event.stopPropagation();
   }, { capture: true });
 
-  // state: { frameIds (timeline order), currentId, busy, canPaste }
+  // state: { frameIds (timeline order), currentId, busy }
   function render(state) {
     // Rebuilding the tiles ends any press or drag in progress.
     cancelPress();
