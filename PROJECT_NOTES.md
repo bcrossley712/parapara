@@ -140,10 +140,7 @@ icon, manifest `name`/`short_name`, and repo copy.
     with **Copy / Paste** of a layer's drawing (she asked for it: copy
     one layer, paste into a different layer, on this frame or
     another). How it works is under Architecture → Frame strip editing
-    and Layer menu. *The first 4d delivery got copy/paste wrong* — it
-    was framed as between frames and put in the frame menu, from an
-    old open item that said "same layer on another frame"; corrected
-    before she saw it. Check on the iPad: the long-press feel with her
+    and Layer menu. Check on the iPad: the long-press feel with her
     stylus, that the strip stops scrolling once a tile lifts, no
     callout or text selection on a held tile, and that tapping the
     active layer reads clearly as "open its menu".
@@ -154,18 +151,31 @@ icon, manifest `name`/`short_name`, and repo copy.
       instantly on a frame switch, a scrubber, ping-pong loop, a play
       range (in/out points), a clean fullscreen preview, a frame
       counter, zooming while playing.
+- **Quick tasks before step 5's audio work:** (a) a sandbox setup
+  script that links the preinstalled Chromium build under the pinned
+  name, so every conversation stops re-deriving it; (b) optional: run
+  CI's e2e with `E2E_WORKERS=4` (GitHub's runner has 4 cores); (c)
+  optional: when the lost-canvas guard fires, log how many full-size
+  canvases exist and whether playback/onion were on.
+- **Step 5 (audio) — decide first, before recording anything:** the
+  stored audio format, **together with how step 6 will export**, so
+  export can mix the audio in without converting or re-recording it.
+  Store it compressed (her iPad runs near full). The playback clock is
+  already built for audio to take over (Architecture → Frame cache and
+  playback). Convention check against Flipaclip's audio track
+  (record, import, trim, where the waveform shows).
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
   under Open items.
 
 **Open items**
-- **Save the frame cache to IndexedDB? Decide after 4b.** Every
-  project open rebuilds it (~6–10 s for 48 frames). Saving it would
-  make opens instant but costs storage on her near-full iPad (roughly
-  0.5–1 MB per frame for real line art) and adds a derived blob kind
-  that the sweep and duplicate project must handle, like the
-  thumbnail. A trade-off, not a free win.
+- **Save the frame cache to IndexedDB?** Not yet. **Trigger:** she
+  notices the wait when opening a project (every open rebuilds it —
+  ~6–10 s for 48 frames). Saving it would make opens instant but costs
+  storage on her near-full iPad (roughly 0.5–1 MB per frame for real
+  line art) and adds a derived blob kind that the sweep and duplicate
+  project must handle, like the thumbnail.
 - **Merge down** — deferred on purpose (needs opacity-aware
   compositing and a two-layer undo entry). Revisit after step 4.
 - **Fill sample toggle** (current layer vs all visible, as Sketchbook
@@ -293,12 +303,9 @@ Short rules; reasoning in the linked sections.
     The menu items stay tappable; the banner says why. Merge down
     (later) must respect lock too.
   - **Layer menu (4d)** ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
-    tapping the **active** layer's row opens it (tapping another row
-    just selects; the handle, eye and lock don't open it), to the left
-    of the panel, level with the row. Items: Copy, Paste, Rename,
-    Duplicate, Clear, Delete; Flip H/V and merge down join later. The
-    panel's footer keeps only the opacity slider. Closes on any tap
-    outside it, on list scroll, and on every panel render.
+    tapping the **active** layer's row opens it (another row just
+    selects). Items: Copy, Paste, Rename, Duplicate, Clear, Delete;
+    Flip H/V and merge down join later. The footer keeps only opacity.
   - **Clear** (layer menu; 2e): the active layer on this frame only,
     undoable. Replaced the gear menu's dev "Clear drawing".
   - **Frames:** add frame inserts a blank frame *after* the current
@@ -519,28 +526,20 @@ Short rules; reasoning in the linked sections.
     setting, so it doesn't stop playback.
   - **Left out unless she asks:** wrap-around, active-layer-only
     ghosts, keyframe-only onion, per-frame ghost toggles.
-- **Frame strip editing (4d)** — delete and reorder from the strip;
-  copy/paste from the layer menu:
-  - **Delete:** frame menu, no confirm, not offered on the last frame;
-    she lands on the frame before (or the new first). `'frame-delete'`
-    is `'frame-add'` run the other way (`takeOutFrame`/`insertFrame`):
-    pixels stay in storage under the frame's refs for undo.
-  - **Reorder:** long-press a tile (400 ms, ≤ 8 px), drag, drop; the
-    strip auto-scrolls near its ends. She stays on her frame. Only
-    `project.frames` changes (`moveFrameId`, pure); `'frame-move'`
-    keeps `from`/`to`. A strip re-render or playback cancels a drag.
-  - **Copy / Paste** (layer menu): Copy takes the active layer's
-    drawing on this frame; Paste puts it into **whichever layer is
-    active when she pastes** — another layer, another frame, or both
-    (her chosen layer, never a new one, unlike Procreate). Copy crops
-    to the ink (`inkBounds`), runs `checkLayer` first (a lost canvas
-    would copy blank). **Paste goes on top** of what's there, same
-    place; Clear then Paste replaces. One `'pixels'` entry through
-    `notifyChange`; lock/hide refused with a banner. Clipboard in
-    memory, **open project only** (dropped on close).
-  - Any of these can change frame 1, so they mark the gallery
-    thumbnail stale; the strip, cache order and onion ghosts follow
-    in `refreshPanel`.
+- **Frame strip editing (4d)** — delete and reorder on the strip;
+  copy/paste in the layer menu:
+  - **Delete:** frame menu, no confirm (undoable), not on the last
+    frame. `'frame-delete'` is `'frame-add'` run backwards; pixels stay
+    in storage under the frame's refs for undo.
+  - **Reorder:** long-press a tile and drag; she stays on her frame.
+    Only `project.frames` changes; `'frame-move'` keeps `from`/`to`.
+  - **Copy / Paste:** Copy takes the active layer's drawing on this
+    frame (after `checkLayer` — a lost canvas would copy blank). Paste
+    goes **on top** in **whichever layer is active** — her choice,
+    never a new layer. One `'pixels'` undo entry; lock/hide refuse it.
+    Clipboard lives in memory, open project only.
+  - All three can change frame 1, so they mark the gallery thumbnail
+    stale.
 - **Lost canvases (after 4c)** ([why](docs/DESIGN_NOTES.md#lost-canvases))
   — iOS can empty a layer canvas without telling the page; saving it
   would write blank over her drawing.
@@ -885,21 +884,21 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 
 **Run tests before handing off any change; add tests for new logic.**
 
+**Hand-off checklist, every step:** tests pass (stress-run any timing
+spec) → this step's Architecture entry trimmed to the size rule at the
+top (≈10 lines; UI specifics in code comments) → Current state says
+what's built and what to check on the iPad, with no story of how it
+got there.
+
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
   `npm run test:e2e` (~3.2 min), or `npm test`.
 - **In a Claude sandbox:** Chromium is preinstalled in
-  `/opt/pw-browsers`, but (seen in 4d) as a newer build than the
-  pinned 1.56 expects (`chromium_headless_shell-1243`, laid out as
-  `chrome-headless-shell-linux64/chrome-headless-shell`). If the run
-  says the executable doesn't exist, make a folder with a
-  `chromium_headless_shell-1194/chrome-linux/headless_shell` link to
-  it and point `PLAYWRIGHT_BROWSERS_PATH` there — sandbox only, no
-  repo change. That build is slower: waits time out (frame switches,
-  duplicate taking 2–7 s now and then) and `saving.spec.js`'s "hiding
-  the app saves immediately" always fails, on the original code too.
-  A scratch config extending `playwright.config.js` with a 30 s
-  `expect` timeout separates slow from broken; don't commit it. CI
-  (pinned image) is the reference.
+  `/opt/pw-browsers`, but may be a newer build than the pinned version
+  expects ("executable doesn't exist" → link the newer build under the
+  expected folder name; sandbox only, no repo change). That build is
+  slower and one saving test always fails on it, so **a sandbox run is
+  a pre-check; CI (pinned image) is the real check.** A setup script
+  for this is a pending task (see Current state).
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
   the sandbox browser *and* CI's image
   `mcr.microsoft.com/playwright:v1.56.0-noble` in `deploy.yml`. Bump
