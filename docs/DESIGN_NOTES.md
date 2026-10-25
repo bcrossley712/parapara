@@ -697,6 +697,33 @@ device-only.
 - **Audio:** one project-wide clip, modeled as `audioClips: []` so a
   second clip later isn't a restructure. Non-destructive trim
   (`trimStart`/`trimEnd` in seconds); Web Audio plays just that slice.
+- **Audio format, decided with step 6 in mind (step 5 scoping,
+  October 2026).** With sound, the export has to be MP4 (H.264 +
+  AAC): GIF has no audio and WebM doesn't play reliably in Messages
+  or Photos. Either way step 6 makes it — WebCodecs encoders + an MP4
+  muxer (faster than real time, frame-exact; needs a muxer, vendored
+  or hand-written) or MediaRecorder on the playing canvas + a Web
+  Audio stream (no muxer, but real time) — the clip is decoded
+  (`decodeAudioData`), trimmed and encoded once. So the stored format
+  doesn't lock step 6; what step 6 needs is that every stored clip
+  decodes on her iPad, which the import test guarantees. Recordings
+  stay in MediaRecorder's default AAC/MP4: the export's own codec and
+  ~0.5–1 MB a minute. **Passing AAC through without re-encoding was
+  rejected:** trims would have to land on packet edges, and mp3
+  imports would need a second path. **Re-encoding WAV on import was
+  rejected for now** (a size cap instead): it would mean WebKit's AAC
+  encoder in step 5, bug included (below).
+- **Step 6 trap — WebKit's AAC AudioEncoder** writes a malformed
+  decoder config, so an MP4 muxed from it has a silent audio track
+  (WebKit bug 302253; fixed in WebKit main 2026-10-22, still present
+  in Safari 27.0.1, so on her iPad for a while). Workaround: build the
+  2-byte AAC AudioSpecificConfig ourselves and ignore the encoder's.
+  Only a real exported file played on a phone proves it.
+- **Flipaclip's audio, for comparison:** import (wav, mp4, m4a, mp3),
+  record by pressing and holding the mic, trim with handles, drag the
+  clip to where it starts; up to 8 tracks on iOS, slicing, looping
+  past the end, a paid sound library. Deleting frames leaves audio
+  alone — ours too (audio is in time, not tied to frames).
 - **Export tiers:** (1) video/animation export + native Web Share —
   covers "send it to a friend," the main use; (2) shareable link via a
   Cloudflare Worker + R2, deferred until the core app is proven;

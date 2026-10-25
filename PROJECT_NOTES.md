@@ -106,64 +106,83 @@ icon, manifest `name`/`short_name`, and repo copy.
   does she want to draw/erase on the photo itself (→ "Make into
   layer"), and does starting at 50% bother her when it's a background
   (→ remember her last opacity, or a choice on import)? Neither blocks
-  step 4.
-- **Now: step 4** — playback, onion skin, full frame strip (reorder,
-  delete, a picture thumbnail on each tile that keeps its number).
-  This is when she first sees her animation move, so nothing new goes
-  ahead of it without a deliberate decision. Each part is confirmed on
-  the iPad before the next.
-  - **4a: done and confirmed on the iPad** — memory measured, shared
-    frame flattening, the frame cache, tile pictures. How it works is
-    under Architecture → Frame cache and playback; the measurements
-    are in [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
-    In short: memory isn't the limit, and full size plays up to 30 fps.
-  - **4b: done and confirmed on the iPad** — playback + transport.
-    How it works is under Architecture → Playback.
-  - **4c: done and confirmed on the iPad** — onion skin. How it works
-    is under Architecture → Onion skin. She's happy with the colors and
-    40% for now; if she keeps adjusting the opacity, revisit the default.
-  - **The data-loss bug: guard built; no recurrence seen in the log
-    since, but little use yet** — keep the activity log in and keep
-    checking it. Caught with the activity log: while she drew, iOS
-    emptied the layer's canvas (it read back blank and stayed blank on
-    every frame load) while storage still held every frame. Locking
-    the layer happened to stop her next stroke; reopening the app
-    brought it all back. Before, her next stroke saved blank + that
-    stroke over the drawing (undo only had stroke-sized patches — the
-    "fragments"). No notice, no backgrounding involved. The guard is
-    under Architecture → Lost canvases. Cause of the emptying (likely
-    memory) unknown: **if the log shows `load-renewed`, `save-refused`,
-    `check-failed` or `recover`, get the log** — it says when and how
-    often.
-  - **4d: built, not yet confirmed on the iPad** — frame delete and
-    reorder (long-press and drag) on the strip; the **layer menu**,
-    with **Copy / Paste** of a layer's drawing (she asked for it: copy
-    one layer, paste into a different layer, on this frame or
-    another). How it works is under Architecture → Frame strip editing
-    and Layer menu. Check on the iPad: the long-press feel with her
-    stylus, that the strip stops scrolling once a tile lifts, no
-    callout or text selection on a held tile, and that tapping the
-    active layer reads clearly as "open its menu".
-    - **Frame holds** (a drawing lasting several beats, Rough
-      Animator) are out unless she asks; adding them later is an
-      optional `frame.hold` (missing = 1) read only by `frameAtBeat`.
-    - **Out unless she misses them:** showing the cached frame
-      instantly on a frame switch, a scrubber, ping-pong loop, a play
-      range (in/out points), a clean fullscreen preview, a frame
-      counter, zooming while playing.
-- **Quick tasks before step 5's audio work:** (a) a sandbox setup
-  script that links the preinstalled Chromium build under the pinned
-  name, so every conversation stops re-deriving it; (b) optional: run
-  CI's e2e with `E2E_WORKERS=4` (GitHub's runner has 4 cores); (c)
-  optional: when the lost-canvas guard fires, log how many full-size
-  canvases exist and whether playback/onion were on.
-- **Step 5 (audio) — decide first, before recording anything:** the
-  stored audio format, **together with how step 6 will export**, so
-  export can mix the audio in without converting or re-recording it.
-  Store it compressed (her iPad runs near full). The playback clock is
-  already built for audio to take over (Architecture → Frame cache and
-  playback). Convention check against Flipaclip's audio track
-  (record, import, trim, where the waveform shows).
+  step 5.
+- **Step 4: done and confirmed on the iPad** — 4a frame cache and
+  tile pictures, 4b playback + transport, 4c onion skin, 4d frame
+  delete/reorder and the layer menu with Copy / Paste. How each works
+  is under Architecture (Frame cache and playback, Playback, Onion
+  skin, Frame strip editing, Layer menu); 4a's measurements are in
+  [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
+  Onion skin: she's happy with the colors and 40% for now; if she
+  keeps adjusting the opacity, revisit the default.
+  - **Frame holds** (a drawing lasting several beats, Rough Animator)
+    are out unless she asks; adding them later is an optional
+    `frame.hold` (missing = 1) read only by `frameAtBeat`.
+  - **Out unless she misses them:** showing the cached frame
+    instantly on a frame switch, a scrubber, ping-pong loop, a play
+    range (in/out points), a clean fullscreen preview, a frame
+    counter, zooming while playing.
+- **The data-loss bug: guard built; no recurrence seen in the log
+  since, but little use yet** — keep the activity log in and keep
+  checking it. iOS emptied a layer's canvas while she drew (storage
+  still held every frame); before the guard, her next stroke saved
+  blank over the drawing. The guard is under Architecture → Lost
+  canvases. Cause (likely memory) unknown: **if the log shows
+  `load-renewed`, `load-broken`, `save-refused`, `check-failed`,
+  `hold-refused` or `recover`, get the log** — it says when and how
+  often, and now also `canvases=<full-size>/<all>` (in the page;
+  offscreen ones aren't counted), `play=` and `onion=`.
+- **A layer encode that never finishes fails the save after 15 s**
+  instead of locking the editor (see Don't break these); if the log
+  shows `save-failed … timed out`, get the log.
+- **Now: step 5 — audio.** Decided (the reasoning, and what it means
+  for step 6, is in [design notes](docs/DESIGN_NOTES.md#planned-features)):
+  - **One clip:** record or import, non-destructive trim, and an
+    `offset` (seconds, missing = 0) for where it starts in the
+    animation. Seconds, not frames: the clock is time.
+  - **Stored as recorded or imported, never re-encoded:** recordings
+    in whatever Safari's MediaRecorder gives by default (AAC in MP4);
+    imports (wav, mp3, m4a, aac) as their original bytes, accepted
+    only if a test decode works on the iPad. A blob in `blobs`
+    (ArrayBuffer + MIME), added to `mapBlobRefs`. No DB version bump.
+  - **Caps:** 3 minutes per clip (it's held decoded, ~23 MB a minute);
+    WAV accepted under a size cap (it's ~10 MB a minute).
+  - **The animation's length wins:** audio past frames ÷ fps is cut,
+    in playback and export. **Audio edits are undoable** (small
+    `'audio'` records like `'image'`; blobs stay for the sweep).
+    **Nothing new remembered** app-wide.
+  - **Clock:** `AudioContext.currentTime` (corrected for output
+    latency) through playback's `now` seam; wall clock with no clip.
+    "Getting ready" waits for the clip to decode.
+  - **Her choices:** **hold to record** (Flipaclip; let go to stop);
+    **the animation plays while she records**, so she can time her
+    voice to it; **the waveform shows only in the sound panel** —
+    the canvas keeps its full height (no lane under the tiles).
+  - **Recording:** starts from the frame she's on (`offset` = that
+    frame's time); plays without looping and stops picture and
+    recording at the last frame, even with loop on. A new recording
+    or import **replaces** the clip (undoable); the old one is silent
+    while she records. A hold under ~0.5 s records nothing ("Hold to
+    record" banner). The first hold asks for the mic, which interrupts
+    it — a banner says to hold again. Mic delay: measured on the iPad
+    and corrected once in code, no setting.
+  - **Sound panel:** a **Sound** button in the top bar (by Image and
+    Layers), with a dot when the project has sound. The panel slides
+    up over the bottom of the canvas, just above the tiles (covers,
+    never shrinks it, like the layers panel): the waveform at the
+    tiles' scale, scrolling with them; trim handles on its ends; drag
+    its middle to move `offset`; hold-to-record, Import, Delete. Play
+    works with it open (a line moves across the waveform); sound
+    plays open or closed.
+  - **Parts, each confirmed on the iPad before the next:** **5a**
+    storage, import and playback in sync (no mic yet) · **5b** the
+    sound panel, waveform and trim · **5c** hold-to-record while
+    playing.
+  - **Out unless she asks** (Flipaclip has them): more tracks,
+    slicing, looping past the end, volume, a sound library, scrubbing
+    sound while stepping frames.
+  - **Device-only:** mic permission in the installed app (iOS may ask
+    every launch), whether Silent mode mutes it, recording latency.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -257,7 +276,8 @@ show the photo instead); onion-skin toggle as a
 badge in the canvas area's bottom-left corner (4c); Share as a
 first-class top-bar icon. Layers panel
 on the right, over the canvas (doesn't shrink it), opened from a
-top-bar button.
+top-bar button. Sound panel (step 5): slides up over the bottom of the
+canvas above the frame tiles, opened from a top-bar Sound button.
 
 ## Architecture
 
@@ -560,7 +580,8 @@ Short rules; reasoning in the linked sections.
     last save are lost; the drawing isn't.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   one audio clip as
-  `audioClips: []`, non-destructive trim; export to video + Web Share,
+  `audioClips: []`, non-destructive trim (step 5's decisions are under
+  Current state); export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota (with step 6).
 
@@ -592,6 +613,11 @@ Each is here because breaking it caused (or would cause) a real bug.
   encode could put one frame's pixels under another frame's ref.
 - **`canvasApi.getLayerImage` is read-only** — drawing into it skips
   undo and saving.
+- **`exportPNG` gives up after `EXPORT_TIMEOUT_MS` (15 s)** with a
+  `TimeoutError` (step 5). Every save and frame switch waits on it, so
+  a `toBlob` that never calls back would otherwise lock the editor
+  with no message. Autosave shows its own notice for it (not "out of
+  space"); the layer stays unsaved and the next edit retries.
 - **Every change to a layer's pixels marks its ink map** — through
   `notifyChange`, `swapRegion`, `revertUncommitted` (`noteEdit`), or
   a full refill through `fillSurface` (loads, `setLayerImage`). A new
@@ -827,8 +853,9 @@ tests — `timeline/dev-stress.js`, its import and launch call in
 `main.js`, its `sw.js` entry and its `.pp-dev-report` CSS); after 4b,
 the **Activity log** — `storage/dev-log.js`, `ui/dev-log-view.js`,
 their `sw.js` entries, `tests/unit/dev-log.test.js`,
-`tests/e2e/dev-log.spec.js`, the `devLog.add` calls and the
-`showNotice` wrapper in `main.js`, `canvasApi.onDebug`, and the
+`tests/e2e/dev-log.spec.js`, the `devLog.add` calls, `guardContext`
+and the `showNotice` wrapper in `main.js` (and the guard-context
+assertions in `canvas-loss.spec.js`), `canvasApi.onDebug`, and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
 (`parapara-dev-log`).
 
@@ -854,7 +881,9 @@ bitmap. Planned fields are marked. Extend additively.
       referenceHidden: false,                 // 3a, Hide images; missing = false
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
-      audioClips: [ { id, blobRef, trimStart, trimEnd } ]   // planned (step 5)
+      audioClips: [ { id, blobRef, trimStart, trimEnd, offset } ]
+                                              // planned (step 5): one clip; seconds;
+                                              // offset = where it starts, missing = 0
     }
 
     frame = {
@@ -892,13 +921,20 @@ got there.
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
   `npm run test:e2e` (~3.2 min), or `npm test`.
-- **In a Claude sandbox:** Chromium is preinstalled in
-  `/opt/pw-browsers`, but may be a newer build than the pinned version
-  expects ("executable doesn't exist" → link the newer build under the
-  expected folder name; sandbox only, no repo change). That build is
-  slower and one saving test always fails on it, so **a sandbox run is
-  a pre-check; CI (pinned image) is the real check.** A setup script
-  for this is a pending task (see Current state).
+- **In a Claude sandbox:** after `npm install`, run
+  `bash tests/sandbox-setup.sh` once, then e2e with
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`. The preinstalled
+  Chromium is newer than the pin and keeps its executables in
+  different folders; the script links them where the pin looks.
+  **On that build, a canvas's `toBlob` sometimes never calls back**
+  (traced in step 5's session): the autosave waits forever, the strip
+  stays disabled, and the test times out waiting for a save or a frame
+  switch (5 s waits, before the app's 15 s encode timeout fires).
+  That's ~13–23 tests a full run, more when the machine is busy, a
+  different set each time — nothing to do with the app. So **a sandbox run is a pre-check; CI
+  (pinned image) is the real check**: judge sandbox failures by
+  whether they're this stall, and compare against a run without the
+  change when in doubt.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
   the sandbox browser *and* CI's image
   `mcr.microsoft.com/playwright:v1.56.0-noble` in `deploy.yml`. Bump
@@ -910,7 +946,8 @@ got there.
   `serve.js` serves the repo and simulates deploys
   (`/__test__/state?version=…&slowInstallMs=…`). **Two projects** in
   `playwright.config.js`: `app` (everything else, fully parallel, 2
-  workers — `E2E_WORKERS` overrides) then `updates` (serial, after
+  workers — `E2E_WORKERS` overrides; CI sets 4 in `deploy.yml` for
+  GitHub's 4-core runner, drop it if CI starts flaking) then `updates` (serial, after
   `app`, because changing the deploy version reaches every open page;
   a failing `app` test skips it). New specs that touch
   `/__test__/state` go in `updates`. Mouse input for strokes; touch gestures

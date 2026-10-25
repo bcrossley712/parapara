@@ -100,6 +100,10 @@ test('a save from a canvas that lost its pixels is refused, and the layer is rel
   const log = await logText(page);
   expect(log).toContain('save-refused');
   expect(log).toContain('recover');
+  // What else was going on (dev only): full-size canvases in the page
+  // / all canvases, playback state, onion skin.
+  expect(log).toMatch(/save-refused .*canvases=\d+\/\d+ play=idle onion=off/);
+  expect(log).toMatch(/recover .*canvases=\d+\/\d+ play=idle onion=off/);
 });
 
 test('a canvas that stays blank is swapped for a fresh one when the frame loads', async ({ page }) => {

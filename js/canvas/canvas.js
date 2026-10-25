@@ -104,6 +104,14 @@ const SMUDGE_SPACING_RATIO = 0.5;
 // actual starting color can't drift apart.
 export const DEFAULT_COLOR = '#2b2b2b';
 
+// How long exportPNG waits for toBlob before giving up (step 5). A
+// layer encodes in well under 100 ms on her iPad (4a-i); a toBlob that
+// never calls back (seen on a sandbox Chromium build) would otherwise
+// leave the save — and every frame switch waiting on it — stuck for
+// good, with no message. Giving up turns it into an ordinary failed
+// save: the layer stays unsaved and the next edit retries.
+export const EXPORT_TIMEOUT_MS = 15000;
+
 // --- tool settings (remembered across launches; see main.js) ---
 //
 // Tools, and which of them have a size. Fill has no size (a flood
@@ -1715,11 +1723,21 @@ export function initCanvas(container, options = {}) {
 
     // A layer's pixels (default: the active layer) as a PNG Blob.
     // toBlob encodes asynchronously, so this doesn't block drawing.
+    // Rejects with a TimeoutError if toBlob hasn't called back within
+    // EXPORT_TIMEOUT_MS; a late callback is then ignored. toBlob copies
+    // the pixels when it's called, so the export still matches the
+    // moment it was asked for (autosave relies on that).
     exportPNG(layerId = activeLayerId) {
       const surface = surfaces.get(layerId);
       if (!surface) return Promise.reject(new Error(`Layer ${layerId} is not loaded`));
       return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const err = new Error('Canvas PNG export timed out');
+          err.name = 'TimeoutError';
+          reject(err);
+        }, EXPORT_TIMEOUT_MS);
         surface.canvas.toBlob((blob) => {
+          clearTimeout(timer);
           if (blob) resolve(blob);
           else reject(new Error('Canvas PNG export failed'));
         }, 'image/png');

@@ -20,7 +20,8 @@ const PORT = 8765;
 export default defineConfig({
   testDir: 'tests/e2e',
   // Two workers by default — the Claude sandbox has 2 CPUs, and canvas
-  // work gets flaky when oversubscribed. E2E_WORKERS overrides.
+  // work gets flaky when oversubscribed. E2E_WORKERS overrides; CI sets
+  // 4 for GitHub's 4-core runner (deploy.yml).
   workers: Number(process.env.E2E_WORKERS) || 2,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,

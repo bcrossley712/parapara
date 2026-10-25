@@ -135,3 +135,52 @@ test('no errors in the console during normal use', async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+// Step 5: a canvas encode that never finishes (toBlob never calling
+// back — seen on a sandbox Chromium build) must not lock the editor.
+// exportPNG gives up after EXPORT_TIMEOUT_MS; the save fails like any
+// other, with its own notice, and the next stroke saves normally.
+// Playwright's clock skips the wait.
+test('a layer encode that never finishes fails the save instead of locking the editor', async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    // 'hang': a layer's toBlob never calls back. 'stand-in': it answers
+    // at once with a tiny PNG, so the retry is tested without the
+    // browser's own encoder (which stalls on the sandbox build).
+    window.__layerToBlob = 'real';
+    window.__hung = 0;
+    const real = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+      if (this.classList.contains('pp-layer')) {
+        if (window.__layerToBlob === 'hang') {
+          window.__hung += 1;
+          return; // never calls back
+        }
+        if (window.__layerToBlob === 'stand-in') {
+          setTimeout(() => callback(new Blob([new Uint8Array(64)], { type: 'image/png' })), 0);
+          return;
+        }
+      }
+      return real.call(this, callback, ...args);
+    };
+  });
+  await openApp(page);
+
+  await page.evaluate(() => { window.__layerToBlob = 'hang'; });
+  await drawStroke(page);
+  await expect.poll(() => page.evaluate(() => window.__hung)).toBeGreaterThan(0);
+
+  await page.clock.fastForward(16000);
+  const toast = page.locator('.pp-toast');
+  await expect(toast).toContainText("couldn't be saved just now");
+  await expect(toast).not.toContainText('out of space');
+  expect(await savedDrawingBytes(page)).toBe(null);
+
+  // The editor isn't stuck: once encoding works, the next stroke saves.
+  await page.evaluate(() => { window.__layerToBlob = 'stand-in'; });
+  await toast.getByRole('button').click();
+  await drawStroke(page);
+  await waitForDrawingSave(page, null);
+  expect(await savedDrawingBytes(page)).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Add frame' })).toBeEnabled();
+});

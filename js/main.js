@@ -1002,10 +1002,27 @@ function mountEditor(session, { canSave }) {
   // Strokes since that save are lost; her drawing isn't.
   let canvasTroubleShown = false; // one "reopen" notice until a clean load
 
+  // DEV ONLY (activity log): what else was going on when the guard
+  // fired, to test the memory theory. `canvases` is full-size canvases
+  // in the page / all canvases in the page; offscreen ones (the
+  // committed copy, flattening scratch) can't be counted from here.
+  function guardContext() {
+    const all = document.querySelectorAll('canvas');
+    let full = 0;
+    for (const c of all) {
+      if (c.width >= project.canvas.width && c.height >= project.canvas.height) full += 1;
+    }
+    return {
+      canvases: `${full}/${all.length}`,
+      play: playback.state,
+      onion: project.onionSkin.on ? 'on' : 'off',
+    };
+  }
+
   function reportCanvasLoad({ renewed, broken }) {
-    if (renewed.length > 0) devLog.add('load-renewed', { frame: tag(session.frame.id), layers: renewed.map(short).join(',') });
+    if (renewed.length > 0) devLog.add('load-renewed', { frame: tag(session.frame.id), layers: renewed.map(short).join(','), ...guardContext() });
     if (broken.length > 0) {
-      devLog.add('load-broken', { frame: tag(session.frame.id), layers: broken.map(short).join(',') });
+      devLog.add('load-broken', { frame: tag(session.frame.id), layers: broken.map(short).join(','), ...guardContext() });
       if (!canvasTroubleShown) {
         canvasTroubleShown = true;
         showNotice("Parapara! can't show this frame's drawing right now. Your drawing is safe. Close Parapara! and open it again.");
@@ -1046,7 +1063,7 @@ function mountEditor(session, { canSave }) {
       if (session.frame.id !== pending.frameId) return;
       const frame = session.frame;
       const ids = [...pending.ids].filter((id) => project.layers.some((l) => l.id === id));
-      devLog.add('recover', { frame: tag(frame.id), layers: ids.map(short).join(',') });
+      devLog.add('recover', { frame: tag(frame.id), layers: ids.map(short).join(','), ...guardContext() });
       canvasApi.renewLayers(ids);
       const result = { renewed: [], broken: [] };
       for (const id of ids) {
@@ -1073,7 +1090,7 @@ function mountEditor(session, { canSave }) {
     if (!canAct()) return;
     const bad = project.layers.map((l) => l.id).filter((id) => {
       const check = canvasApi.checkLayer(id);
-      if (!check.ok) devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(id), had: check.had, lost: check.lost });
+      if (!check.ok) devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(id), had: check.had, lost: check.lost, ...guardContext() });
       return !check.ok;
     });
     if (bad.length > 0) recoverLayers(session.frame.id, bad);
@@ -1085,7 +1102,7 @@ function mountEditor(session, { canSave }) {
       // Never hold pixels from a canvas that lost them (see the guard).
       const check = canvasApi.checkLayer(layerId);
       if (!check.ok) {
-        devLog.add('hold-refused', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+        devLog.add('hold-refused', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost, ...guardContext() });
         continue;
       }
       const blob = await canvasApi.exportPNG(layerId);
@@ -1478,7 +1495,7 @@ function mountEditor(session, { canSave }) {
     // A canvas iOS emptied would copy blank: recover it instead.
     const check = canvasApi.checkLayer(layerId);
     if (!check.ok) {
-      devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+      devLog.add('check-failed', { frame: tag(session.frame.id), layer: short(layerId), had: check.had, lost: check.lost, ...guardContext() });
       recoverLayers(session.frame.id, [layerId]);
       return;
     }
@@ -1937,7 +1954,7 @@ function mountEditor(session, { canSave }) {
         const check = canvasApi.checkLayer(layerId);
         if (!check.ok) {
           refused.push(layerId);
-          devLog.add('save-refused', { frame: tag(frame.id), layer: short(layerId), had: check.had, lost: check.lost });
+          devLog.add('save-refused', { frame: tag(frame.id), layer: short(layerId), had: check.had, lost: check.lost, ...guardContext() });
           continue;
         }
         const encoding = canvasApi.exportPNG(layerId);
@@ -1962,7 +1979,13 @@ function mountEditor(session, { canSave }) {
     },
     onError: (err) => {
       console.error('Parapara! autosave failed:', err);
-      showNotice("Your drawing couldn't be saved. The iPad may be out of space.");
+      // A stuck encode (exportPNG's timeout) isn't a space problem; the
+      // drawing is still on screen and the next stroke tries again.
+      if (err?.name === 'TimeoutError') {
+        showNotice("Your drawing couldn't be saved just now. Parapara! will try again after your next stroke.");
+      } else {
+        showNotice("Your drawing couldn't be saved. The iPad may be out of space.");
+      }
     },
   });
 

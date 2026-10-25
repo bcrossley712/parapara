@@ -39,8 +39,12 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      # GitHub's standard Linux runner has 4 cores (the sandbox default
+      # of 2 is for its 2 CPUs). If CI starts flaking, drop the env.
       - name: End-to-end tests
         run: npm run test:e2e
+        env:
+          E2E_WORKERS: 4
 
       # On failure, keep Playwright's report (screenshots, traces) so the
       # next conversation can see what broke.
