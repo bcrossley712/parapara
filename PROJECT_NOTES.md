@@ -192,6 +192,12 @@ icon, manifest `name`/`short_name`, and repo copy.
   open the color picker (and the Image, layer, frame, onion, fps and
   gear menus), tap the canvas — the menu closes, no dot; the next tap
   draws.
+- **Robot test seed 115 loses a mark — found after 5b, not yet
+  investigated.** `HUNT_SEED=115` fails every time it gets past the
+  sandbox stall: frame A's first mark is gone on screen at the end.
+  It fails the same on the 5a commit (before 5b and the menu change),
+  so it's older; CI only runs seeds 101–103. Its steps include "canvas
+  loses its pixels" — check the lost-canvas recovery first.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -1070,7 +1076,12 @@ got there.
   - **Find the gear button with `exact: true`** (`name: 'Settings'`)
     — "Onion skin settings" matches a loose lookup too.
   - **The robot test** (`hunt.spec.js`): seeded random use with a
-    model; checks every mark on screen and after a reload. Since 4d it
+    model; checks every mark on screen and after a reload. **When it
+    fails in the sandbox, read the message:** a timeout can be the
+    stall, but "mark … should be there/gone" is a real mismatch —
+    compare against a run without the change. (After 5b a menu-closing
+    tap broke it in CI this way; its model now knows a tap with the
+    frame menu open only closes it.) Since 4d it
     also deletes and drags frames and copies/pastes drawings; after a
     drag it reads the order back from the strip (auto-scroll can move
     the drop). CI runs 3

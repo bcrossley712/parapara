@@ -202,7 +202,26 @@ for (const seed of SEEDS) {
       }
     };
 
+    // A "switch frame" onto the frame she's on leaves the frame menu
+    // open, and a canvas tap with a menu open only closes it (after 5b).
+    // So the first stroke then is a closing tap: it must close the menu
+    // and paint nothing — modeled as a mark that's never there (and
+    // outside the undo history) — before the real mark is made.
+    async function closeMenuByTap() {
+      if (!(await page.locator('.pp-frame-menu').isVisible())) return true;
+      const spot = model.spots.pop();
+      if (!spot) return false;
+      const frame = model.timeline[await currentIndex(page)];
+      const layer = await activeLayer(page);
+      await line(page, spot.x, spot.y, spot.x + 24);
+      await expect(page.locator('.pp-frame-menu')).toHaveCount(0);
+      model.marks.push({ frame, layer, spot, present: false });
+      steps.push('(tap closes frame menu)');
+      return true;
+    }
+
     async function markStroke() {
+      if (!(await closeMenuByTap())) return false;
       const spot = model.spots.pop();
       if (!spot) return false;
       const frame = model.timeline[await currentIndex(page)];
