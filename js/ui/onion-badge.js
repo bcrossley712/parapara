@@ -160,7 +160,12 @@ export function createOnionBadge(callbacks, { signal } = {}) {
     afterTints.render(next.tintAfter);
   }
 
-  return { element, render, closePanel: () => setPanelOpen(false) };
+  return {
+    element,
+    render,
+    closePanel: () => setPanelOpen(false),
+    get isMenuOpen() { return panel.isConnected; },
+  };
 }
 
 function badgeButton(label, icon, onClick) {

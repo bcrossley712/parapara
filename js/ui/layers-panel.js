@@ -369,6 +369,8 @@ export function createLayersPanel(callbacks, { signal } = {}) {
     setOpen,
     closeMenu,
     get isOpen() { return open; },
+    // The layer menu (not the panel): open, a canvas tap only closes it.
+    get isMenuOpen() { return menu !== null; },
   };
 }
 

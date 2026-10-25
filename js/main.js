@@ -102,7 +102,8 @@ import { createPlaybackFrames } from './canvas/playback-frames.js';
 import { createOnionView } from './canvas/onion-view.js';
 import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
-import { sanitizeAudioClips, newClip, checkImportSize, MAX_CLIP_SECONDS } from './audio/clip.js';
+import { sanitizeAudioClips, newClip, checkImportSize, sameClips, MAX_CLIP_SECONDS } from './audio/clip.js';
+import { computePeaks } from './audio/peaks.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -563,21 +564,23 @@ function mountEditor(session, { canSave }) {
       onUseOnAllFrames: afterPlayback(() => useImageOnAllFrames()),
       onToggleImages: afterPlayback(() => toggleImages()),
     },
+    // The sound panel (5b). Play works with it open; opening it isn't
+    // an edit, so the button doesn't stop playback.
     sound: {
-      // Like Image: the file picker must open inside the tap (iOS), so a
-      // tap on the button while playing only stops playback.
-      onButton: () => {
+      // Like Image: the file picker must open inside the tap (iOS), so
+      // Import while playing only stops playback.
+      onImport: () => {
         if (playback.active || landing) {
           stopPlayback();
-          return false;
+          return;
         }
-        return true;
-      },
-      onImport: () => {
         if (!canAct() || adjust) return;
         ui.pickAudio((file) => importSound(file));
       },
       onDelete: afterPlayback(() => deleteSound()),
+      onChange: (clip) => changeClip(clip),
+      onPlayingTouch: () => stopPlayback(),
+      onOpenChange: () => renderSound(),
     },
     reference: {
       onOpacityInput: (opacity) => {
@@ -745,6 +748,11 @@ function mountEditor(session, { canSave }) {
   // async; until it's done, Play shows "Getting ready".
   const audio = createAudio();
   let soundLoading = null; // promise while the clip is being decoded
+  // The current clip's decoded sound (only that one is kept), and the
+  // waveform's peaks (audio/peaks.js), worked out the first time the
+  // panel shows this sound — never for a project whose panel stays shut.
+  let soundBuffer = { ref: null, buffer: null };
+  let soundPeaks = { ref: null, peaks: null };
 
   const playback = createPlayback({
     clock: audio.clock,
@@ -756,6 +764,7 @@ function mountEditor(session, { canSave }) {
     show: (id, value) => {
       playbackFrames.draw(canvasApi.getPlaybackContext(), value);
       strip.setPlayhead(id);
+      ui.sound.setPlayhead(project.frames.indexOf(id));
     },
     pending: () => frameCache.pendingCount + (soundLoading ? 1 : 0),
     prepare: () => frameCache.rush(),
@@ -788,6 +797,8 @@ function mountEditor(session, { canSave }) {
       canNext: index < project.frames.length - 1,
       busy: busy || Boolean(landing),
     });
+    // The sound panel follows fps, frame count and playing too.
+    renderSound();
   }
 
   function togglePlay() {
@@ -823,6 +834,7 @@ function mountEditor(session, { canSave }) {
   function landOn(frameId) {
     const done = () => {
       strip.setPlayhead(null);
+      ui.sound.setPlayhead(null);
       canvasApi.hidePlayback();
     };
     if (!frameId || frameId === session.frame.id || !project.frames.includes(frameId)) {
@@ -956,7 +968,6 @@ function mountEditor(session, { canSave }) {
       hidden: project.referenceHidden === true,
       busy,
     });
-    ui.sound.render({ has: project.audioClips.length > 0, busy });
     // Whatever changed, the cache and tiles catch up (cheap when
     // nothing they depend on did).
     frameCache.setSignature(layerSignature(project.layers));
@@ -1678,6 +1689,7 @@ function mountEditor(session, { canSave }) {
     if (project.referenceHidden) setImagesHidden(false);
     ui.setAdjusting(true, canvasApi.getReferencePlacement().opacity);
     ui.setHistoryState(false, false);
+    renderSound();
   }
 
   // Ends adjust mode and records what changed, as one undo step.
@@ -1688,6 +1700,7 @@ function mountEditor(session, { canSave }) {
     canvasApi.setAdjusting(false);
     ui.setAdjusting(false);
     ui.setHistoryState(history.canUndo, history.canRedo);
+    renderSound();
     const key = canvasApi.getReferenceKey();
     const after = key ? { blobRef: key, ...canvasApi.getReferencePlacement() } : null;
     if (sameImage(before, after)) return;
@@ -1736,11 +1749,10 @@ function mountEditor(session, { canSave }) {
   // One clip per project (project.audioClips; rules in audio/clip.js).
   // Its file is stored exactly as picked (saveAudioBlob) before the
   // project points at it, then decoded for playback. Import (Replace)
-  // and Delete are one 'audio' undo entry each; the file stays in
-  // storage for undo, and the sweep clears it once nothing points at
-  // it. Only the current clip's decoded sound is kept in memory.
-
-  let soundBuffer = { ref: null, buffer: null };
+  // and Delete are one 'audio' undo entry each, as is each trim or
+  // move in the sound panel (5b); the file stays in storage for undo,
+  // and the sweep clears it once nothing points at it. Only the current
+  // clip's decoded sound is kept in memory.
 
   // Puts the project's clip on the audio engine, decoding its file
   // first unless it's the one already decoded. A file that's missing
@@ -1767,6 +1779,7 @@ function mountEditor(session, { canSave }) {
         if (project.audioClips[0]?.blobRef !== clip.blobRef) return;
         soundBuffer = { ref: clip.blobRef, buffer: decoded };
         audio.setClip(project.audioClips[0], decoded);
+        renderSound();
       } catch (err) {
         console.warn('Parapara! could not load the sound:', err);
         devLog.add('sound-failed', { sound: short(clip.blobRef), error: String(err?.message ?? err) });
@@ -1776,6 +1789,7 @@ function mountEditor(session, { canSave }) {
     soundLoading = loading;
     loading.finally(() => {
       if (soundLoading === loading) soundLoading = null;
+      renderSound();
     });
     return loading;
   }
@@ -1844,7 +1858,44 @@ function mountEditor(session, { canSave }) {
     });
   }
 
-  // Delete sound (Sound menu). Undoable; the file stays for undo.
+  // A trim or move in the sound panel (5b): one 'audio' undo step per
+  // drag. The decoded sound is the same, so nothing reloads.
+  function changeClip(clip) {
+    if (!canAct() || adjust || playback.active || landing) return;
+    const before = project.audioClips;
+    const after = [clip];
+    if (sameClips(before, after)) return;
+    setClips(after);
+    history.push({ type: 'audio', before, after, bytes: 0 });
+    devLog.add('sound-edit', {
+      trim: `${clip.trimStart.toFixed(2)}-${clip.trimEnd.toFixed(2)}`,
+      at: clip.offset.toFixed(2),
+    });
+  }
+
+  // The sound panel's state: the clip, its decoded length and peaks
+  // (once loaded), and what limits editing.
+  function renderSound() {
+    const clip = project.audioClips[0] ?? null;
+    const buffer = clip && soundBuffer.ref === clip.blobRef ? soundBuffer.buffer : null;
+    if (buffer && ui.sound.isOpen && soundPeaks.ref !== clip.blobRef) {
+      const channels = [];
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) channels.push(buffer.getChannelData(ch));
+      soundPeaks = { ref: clip.blobRef, peaks: computePeaks(channels, buffer.sampleRate) };
+    }
+    ui.sound.render({
+      clip,
+      duration: buffer ? buffer.duration : 0,
+      peaks: buffer && soundPeaks.ref === clip.blobRef ? soundPeaks.peaks : null,
+      loading: Boolean(soundLoading),
+      fps: project.fps,
+      frameCount: project.frames.length,
+      busy: busy || Boolean(adjust),
+      playing: playback.active || Boolean(landing),
+    });
+  }
+
+  // Delete sound (sound panel). Undoable; the file stays for undo.
   function deleteSound() {
     if (!canAct() || adjust || project.audioClips.length === 0) return;
     const before = project.audioClips;

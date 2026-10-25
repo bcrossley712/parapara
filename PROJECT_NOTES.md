@@ -145,8 +145,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   playing. What's built is under Architecture → Sound; the format
   reasoning, step 6's export, and where her songs can come from are in
   [design notes](docs/DESIGN_NOTES.md#planned-features).
-  - **5a: built, not yet confirmed on the iPad.** Check: the Sound
-    button's picker opens Files directly (no Photo Library / Take
+  - **5a: built, not yet confirmed on the iPad** (her iPad had no
+    sound files yet — Voice Memos → Share → Save to Files makes an m4a
+    to test with). Check: the panel's Import opens Files directly (no Photo Library / Take
     Video menu — first try showed it, fixed by listing extensions)
     and offers her mp3/m4a/wav files;
     an import plays in time with the animation, from frame 1 and from
@@ -162,13 +163,16 @@ icon, manifest `name`/`short_name`, and repo copy.
     **the animation plays while she records**, so she can time her
     voice to it; **the waveform shows only in the sound panel** —
     the canvas keeps its full height (no lane under the tiles).
-  - **5b — sound panel:** the Sound button opens it instead of 5a's
-    menu. It slides up over the bottom of the canvas, just above the
-    tiles (covers, never shrinks it, like the layers panel): the
-    waveform at the tiles' scale, scrolling with them; trim handles on
-    its ends; drag its middle to move `offset`; hold-to-record, Import,
-    Delete. Play works with it open (a line moves across the
-    waveform); sound plays open or closed.
+  - **5b: built, not yet confirmed on the iPad** (how it works:
+    Architecture → Sound). Check: the track lines up with the tiles and
+    scrolls with them smoothly; dragging a handle or the clip with her
+    stylus (handles big enough? edge scrolling too fast or slow?);
+    picking a part of a long song on the overview; the playhead line
+    while playing; a touch on the panel while playing only stops; the
+    onion badge above the panel; memory with a 3-minute song open
+    (the waveform is worked out when the panel first opens — any
+    pause?). Ask her whether the panel should reopen by itself next
+    launch (it doesn't).
   - **5c — recording:** starts from the frame she's on (`offset` =
     that frame's time); plays without looping and stops picture and
     recording at the last frame, even with loop on. Stored in
@@ -183,6 +187,11 @@ icon, manifest `name`/`short_name`, and repo copy.
     sound while stepping frames.
   - **Device-only:** mic permission in the installed app (iOS may ask
     every launch), whether Silent mode mutes it, recording latency.
+- **A canvas tap with a menu open only closes it (after 5b): built,
+  not yet confirmed on the iPad.** Check with her stylus and fingers:
+  open the color picker (and the Image, layer, frame, onion, fps and
+  gear menus), tap the canvas — the menu closes, no dot; the next tap
+  draws.
 - **Build order after step 4:** 5 audio record/import + single-clip
   trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
   (share links, Krita reference import) · then the requested extras
@@ -411,6 +420,12 @@ Short rules; reasoning in the linked sections.
   layers panel was open, which screen she was on, and the last
   project. The view (pan/zoom/rotation) resets on launch and on every
   open.
+- **Menus vs the canvas** (after 5b, Procreate's way): a touch on the
+  canvas while a menu or popover is open (color picker, Image, layer,
+  frame, onion settings, fps, gear) only closes it — no stroke, fill or
+  pick, and fingers joining it are ignored until all are up (the
+  playback-stop swallow). Panels she works with open (layers, sound)
+  don't count. Taps on other controls still act and close the menu.
 - **Messages:** information that isn't a problem (locked/hidden
   layer, layer cap) is a fading banner that never blocks touches
   (`showBanner`); real problems (couldn't save) are a toast that waits
@@ -582,7 +597,7 @@ Short rules; reasoning in the linked sections.
     reloaded from storage onto a fresh canvas (`recoverLayers`, one at
     a time, waits for a quiet moment) with a notice. Strokes since the
     last save are lost; the drawing isn't.
-- **Sound (5a)** ([why](docs/DESIGN_NOTES.md#planned-features)):
+- **Sound (5a, 5b)** ([why](docs/DESIGN_NOTES.md#planned-features)):
   - **One clip** in `project.audioClips` (rules pure in
     `audio/clip.js`; bad records dropped on open, never a failed
     open): `trimStart`/`trimEnd` pick the part of the file, `offset`
@@ -604,14 +619,27 @@ Short rules; reasoning in the linked sections.
     **The animation's length wins:** only the part inside frames ÷
     fps plays. No clip, or a context that doesn't start within 1 s:
     the wall clock, silently.
-  - **Sound button** (top bar, before Image): a dot when there's
-    sound; 5a's menu = Import (Replace) sound, Delete sound. A tap
-    while playing only stops (the picker must open inside the tap,
-    like Image). Import/Replace/Delete are one `'audio'` undo entry
-    each (`{ before, after }` clip lists); files stay in storage for
-    undo and the sweep.
+  - **Sound button** (top bar, before Image; a dot when there's
+    sound) toggles the **sound panel** (5b, `ui/sound-panel.js`) over
+    the canvas area's bottom, above the tiles — covers, never shrinks;
+    not remembered across launches. Import while playing only stops
+    (picker inside the tap). Import/Replace/Delete and each trim/move
+    drag are one `'audio'` undo entry (`{ before, after }` clip lists);
+    files stay in storage for undo and the sweep.
+  - **Panel (5b):** a track at the tiles' scale (one frame = a tile +
+    its gap, `strip.timeline`), scrolling with them: drag the clip to
+    move it — left past frame 1 grows `trimStart` (offset stays ≥ 0);
+    handles trim; an end pulled back to the animation's end plays to
+    the file's end. Above it, an **overview of the whole file** (not
+    in Flipaclip — she can't reach a song's middle at tile scale): drag
+    or tap it to pick which part plays (`slipClip`). Rules pure in
+    `audio/clip.js`; no snapping; min length one frame. A touch on the
+    track or overview while playing only stops. While open, the onion
+    badge and "Getting ready" sit above it and the layers panel ends
+    above it. Peaks (`audio/peaks.js`) are worked out when the panel
+    first shows a sound.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  the sound panel and recording (5b, 5c — under Current state);
+  recording (5c — under Current state);
   export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota (with step 6).
@@ -696,6 +724,18 @@ Each is here because breaking it caused (or would cause) a real bug.
   menu item, Replace, Import sound). An `await` before it and iOS
   won't open the picker. Likewise **`audio.unlock()` runs
   synchronously in the Play tap** — iOS starts sound only from one.
+- **The sound panel stops its own pointer events** (like the onion
+  badge) — it's inside the canvas area, which would take a touch on it
+  for a stroke or a playback stop. **Its waveform canvases are only as
+  wide as the track**, redrawn on scroll — never one canvas the length
+  of the song (iOS canvas limits and memory).
+- **The menu-dismiss listener in `ui.js` is registered before any
+  menu is created** (document, capture): it must see the menu still
+  open, and menus close themselves in their own capture listeners. It
+  marks the touch with `canvasApi.dismissTouch(id)`, which the canvas's
+  pointerdown consumes and clears every time — a leftover id would
+  swallow the next mouse tap (a mouse's id never changes). A new menu
+  needs an `isMenuOpen` getter added to `anyMenuOpen()`.
 - **The Sound and Image buttons have separate class names**
   (`.pp-sound-btn…`, `.pp-image-btn…`; shared rules list both). Tests
   find the Image button by class — sharing one broke every reference
@@ -846,7 +886,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         reference-bar.js  adjust-image bar that replaces the rail (UI only)
         image-menu.js     top-bar Image button + menu, state dot/slash
                           (UI only)
-        sound-menu.js     top-bar Sound button + 5a's menu (UI only)
+        sound-panel.js    top-bar Sound button + the sound panel: track,
+                          overview, trim/move drags (UI only) (5b)
         onion-badge.js    onion skin's badge + settings panel (UI only)
                           (4c)
         color-picker.js   custom HSV picker + eyedropper button,
@@ -858,7 +899,8 @@ Each is here because breaking it caused (or would cause) a real bug.
         frames.js         pure frame-order ops (insert/remove/move);
                           reference image across frames (3b)
         frame-strip.js    frame strip + frame menu, long-press drag to
-                          reorder (4d) (UI only; intents via callbacks)
+                          reorder (4d); `timeline` geometry/scroll for
+                          the sound panel (5b) (UI only)
         clock.js          pure elapsed time → frame (beatAtTime,
                           frameAtBeat, frameAtTime); fps rules
                           (sanitizeFps, MIN/MAX/DEFAULT_FPS, presets)
@@ -874,7 +916,9 @@ Each is here because breaking it caused (or would cause) a real bug.
                           clean-up, which frames are ghosts (4c)
       audio/
         clip.js           pure sound rules: clip clean-up, import caps,
-                          where the clip lands in the animation (5a)
+                          where the clip lands in the animation (5a);
+                          move/trim/slip rules (5b)
+        peaks.js          pure waveform peaks from decoded samples (5b)
         audio.js          AudioContext, decode, the audio clock
                           playback runs on (5a)
       export/             placeholder for step 6
@@ -1046,6 +1090,9 @@ got there.
     see what the audio clock schedules. Headless Chromium runs the
     AudioContext after the Play click. Blobs come back from
     `page.evaluate` as byte arrays (ArrayBuffers don't survive it).
+    Panel drags (5b) grab the clip's *visible* part (the track clips
+    it when scrolled) and start from frame 1 — a drag ending near the
+    track's left end edge-scrolls and moves the clip further.
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo
@@ -1066,4 +1113,7 @@ got there.
   feel, the strip letting go of its scroll once a tile lifts, and no
   callout on a held tile; (5a) sound in sync by ear, Safari's output
   delay, which files the picker offers, Silent mode, and sound
-  starting on the first Play after opening.
+  starting on the first Play after opening; a canvas tap closing a menu
+  without drawing, with her stylus; (5b) dragging the clip and
+  handles with her stylus, the track scrolling smoothly with the
+  tiles, and memory/pause with a long song's waveform.

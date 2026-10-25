@@ -405,6 +405,11 @@ export function initCanvas(container, options = {}) {
   // shown (it's ~8 MB at 1920×1080).
   let playbackCanvas = null;
 
+  // Touches that only close a menu (ui.js: a menu was open when it
+  // landed): swallowed like the playback-stop tap, fingers joining
+  // included, so closing a menu never draws.
+  const dismissing = new Set(); // pointer ids
+
   function swallow(event) {
     swallowed.add(event.pointerId);
     try {
@@ -1173,6 +1178,12 @@ export function initCanvas(container, options = {}) {
   }
 
   function onPointerDown(event) {
+    const dismiss = dismissing.has(event.pointerId);
+    dismissing.clear(); // never left over to swallow a later tap
+    if (dismiss) {
+      swallow(event);
+      return;
+    }
     if (playbackInput || swallowed.size > 0) {
       // A primary pointer means no other finger is down, so anything
       // still listed lost its pointerup somewhere: start fresh.
@@ -1911,6 +1922,13 @@ export function initCanvas(container, options = {}) {
     // instead of drawing; see `swallow` above.
     setPlaybackInput(on) {
       playbackInput = on === true;
+    },
+
+    // This touch only closes a menu: it and any finger joining it do
+    // nothing on the canvas until every finger is up. Call before the
+    // canvas area hears the pointerdown (ui.js: document, capture).
+    dismissTouch(pointerId) {
+      dismissing.add(pointerId);
     },
 
     // Calls listener() when a touch lands while playback input is on.

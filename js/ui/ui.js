@@ -21,7 +21,7 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 import { createTransport } from '../timeline/transport.js';
 import { createReferenceBar } from './reference-bar.js';
 import { createImageMenu } from './image-menu.js';
-import { createSoundMenu } from './sound-menu.js';
+import { createSoundPanel } from './sound-panel.js';
 import { createOnionBadge } from './onion-badge.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
@@ -46,8 +46,9 @@ import { createOnionBadge } from './onion-badge.js';
 //   onPaletteRemove(index) } — hex is the current color).
 // options.images: the top bar's Image menu intents ({ onImage,
 //   onUseOnAllFrames, onToggleImages }, see image-menu.js).
-// options.sound: the top bar's Sound menu intents ({ onButton,
-//   onImport, onDelete }, see sound-menu.js; step 5).
+// options.sound: the Sound button's panel intents ({ onImport,
+//   onDelete, onChange(clip), onPlayingTouch }, see sound-panel.js;
+//   step 5).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
 //   fires when she taps any other control while adjusting.
@@ -59,8 +60,8 @@ import { createOnionBadge } from './onion-badge.js';
 //
 // Returns { canvas, layers (the panel), frames (the strip), transport
 // (render(state)), onion (the badge: render(settings)), images
-// (the top bar's Image menu: render(state)), sound (the Sound menu:
-// render(state)), pickAudio(onFile),
+// (the top bar's Image menu: render(state)), sound (the sound panel:
+// render(state), setPlayhead(index)), pickAudio(onFile),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
 // setAdjustBusy(busy) (the adjust bar's controls off while a photo is
@@ -100,6 +101,30 @@ export function initUI(container, options = {}) {
   // Keep it dark — the status bar's text is white (black-translucent).
   // Undo/redo for now; Share and the rest of the planned top bar land
   // with their steps.
+  // A tap on the canvas while a menu or popover is open only closes it
+  // (Procreate's way) — no stroke, fill or pick; fingers joining it are
+  // ignored too (canvas.js dismissTouch). Registered before the menus'
+  // own tap-outside listeners, so it sees them still open. Panels she
+  // works with open (layers, sound) don't count; controls inside the
+  // canvas area (sound panel, onion badge) handle their own taps.
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !canvasArea.contains(target)) return;
+    if (target.closest('.pp-sound-panel, .pp-onion-badge')) return;
+    if (!anyMenuOpen()) return;
+    canvasApi.dismissTouch(event.pointerId);
+  }, { signal, capture: true });
+
+  function anyMenuOpen() {
+    return pickerOpen
+      || settingsPanel.isOpen
+      || imageMenu.isMenuOpen
+      || layersPanel.isMenuOpen
+      || frameStrip.isMenuOpen
+      || onionBadge.isMenuOpen
+      || transport.isMenuOpen;
+  }
+
   const topBar = document.createElement('div');
   topBar.className = 'pp-top-bar';
   const undoBtn = createIconButton('Undo', UNDO_ICON, onUndo);
@@ -113,12 +138,8 @@ export function initUI(container, options = {}) {
   const imageMenu = createImageMenu({
     onImage: () => {}, onUseOnAllFrames: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
   }, { container: shell, signal });
-  // Sound (step 5): beside Image.
-  const soundMenu = createSoundMenu({
-    onImport: () => {}, onDelete: () => {}, ...soundCallbacks,
-  }, { container: shell, signal });
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
-  topBar.append(undoBtn, redoBtn, topBarSpacer, soundMenu.button, imageMenu.button, layersBtn);
+  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';
@@ -161,6 +182,18 @@ export function initUI(container, options = {}) {
     onToggle: () => {}, onChange: () => {}, ...onionCallbacks,
   }, { signal });
   canvasArea.appendChild(onionBadge.element);
+  // Sound (step 5): the button beside Image opens the sound panel (5b)
+  // over the bottom of the canvas area, its track lined up with the
+  // tiles. While it's open the onion badge and "Getting ready" sit
+  // above it, and the layers panel stops short of it.
+  const soundPanel = createSoundPanel({
+    onImport: () => {}, onDelete: () => {}, onChange: () => {}, ...soundCallbacks,
+    onOpenChange: (open) => {
+      canvasArea.classList.toggle('has-sound-panel', open);
+      fitLayersPanel();
+    },
+  }, { container: canvasArea, timeline: frameStrip.timeline, signal });
+  imageMenu.button.before(soundPanel.button);
   const stage = document.createElement('div');
   stage.className = 'pp-stage';
   stage.append(canvasArea, frameStrip.element);
@@ -466,6 +499,19 @@ export function initUI(container, options = {}) {
   document.addEventListener('pointerdown', commitOnOutsideTap, { signal, capture: true });
   document.addEventListener('click', commitOnOutsideTap, { signal, capture: true });
 
+  // With the sound panel open, the layers panel ends above it.
+  function fitLayersPanel() {
+    if (!soundPanel.isOpen) {
+      layersPanel.element.style.maxHeight = '';
+      return;
+    }
+    const room = soundPanel.element.getBoundingClientRect().top - body.getBoundingClientRect().top - 16;
+    layersPanel.element.style.maxHeight = `${Math.max(120, room)}px`;
+  }
+  const bodyResize = new ResizeObserver(() => fitLayersPanel());
+  bodyResize.observe(body);
+  signal.addEventListener('abort', () => bodyResize.disconnect());
+
   if (layersPanelOpen) {
     layersPanel.setOpen(true, { notify: false });
     layersBtn.classList.add('is-active');
@@ -486,7 +532,7 @@ export function initUI(container, options = {}) {
     transport,
     onion: onionBadge,
     images: imageMenu,
-    sound: soundMenu,
+    sound: soundPanel,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),

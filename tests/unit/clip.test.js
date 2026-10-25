@@ -16,6 +16,12 @@ import {
   timeAtFrame,
   clipPlacement,
   sameClips,
+  minClipSeconds,
+  clipVisibleEnd,
+  moveClip,
+  trimClipStart,
+  trimClipEnd,
+  slipClip,
 } from '../../js/audio/clip.js';
 
 const good = { id: 'c1', blobRef: 'a1', trimStart: 0, trimEnd: 4, offset: 0 };
@@ -106,4 +112,93 @@ test('sameClips', () => {
   assert.equal(sameClips([good], [{ ...good, trimEnd: 3 }]), false);
   const { offset, ...noOffset } = good;
   assert.equal(sameClips([good], [noOffset]), true);
+});
+
+// --- 5b: editing in the sound panel ---
+
+// A 10 s clip of a 60 s file, starting 2 s in, in a 4 s animation at
+// 12 fps (one frame = 1/12 s).
+const fps = 12;
+const minLength = minClipSeconds(fps);
+const length = 4;
+const duration = 60;
+const clip = { id: 'c1', blobRef: 'a1', trimStart: 5, trimEnd: 15, offset: 2 };
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
+
+test('minClipSeconds is one frame', () => {
+  near(minClipSeconds(12), 1 / 12);
+  assert.equal(minClipSeconds(0), 0);
+});
+
+test('clipVisibleEnd: its own end, or the animation\'s', () => {
+  assert.equal(clipVisibleEnd(clip, length), 4);
+  assert.equal(clipVisibleEnd({ ...clip, trimEnd: 6 }, length), 3);
+});
+
+test('moveClip: later moves only the offset, never past one frame before the end', () => {
+  assert.deepEqual(moveClip(clip, 1, { minLength, length }), { ...clip, offset: 3 });
+  near(moveClip(clip, 10, { minLength, length }).offset, length - minLength);
+});
+
+test('moveClip: earlier than frame 1 slides the sound\'s start under it', () => {
+  const moved = moveClip(clip, -3, { minLength, length });
+  assert.equal(moved.offset, 0);
+  assert.equal(moved.trimStart, 6); // 1 s past frame 1
+  assert.equal(moved.trimEnd, 15); // the end stays put in the file
+  // ...never past one frame before its end.
+  near(moveClip(clip, -100, { minLength, length }).trimStart, 15 - minLength);
+});
+
+test('moveClip: moving back within one drag gives the start back', () => {
+  assert.deepEqual(moveClip(clip, 0, { minLength, length }), clip);
+});
+
+test('trimClipStart: the rest stays where it is in time', () => {
+  const later = trimClipStart(clip, 0.5, { minLength, length });
+  assert.equal(later.trimStart, 5.5);
+  assert.equal(later.offset, 2.5);
+  assert.equal(later.trimEnd, 15);
+});
+
+test('trimClipStart: earlier is limited by frame 1 and by the file\'s start', () => {
+  assert.deepEqual(trimClipStart(clip, -5, { minLength, length }), { ...clip, trimStart: 3, offset: 0 });
+  const early = { ...clip, trimStart: 1 };
+  assert.deepEqual(trimClipStart(early, -5, { minLength, length }), { ...early, trimStart: 0, offset: 1 });
+});
+
+test('trimClipStart: later stops a frame before the animation\'s end when the clip runs past it', () => {
+  const t = trimClipStart(clip, 10, { minLength, length });
+  near(t.offset, length - minLength);
+});
+
+test('trimClipStart: later stops a frame before the clip\'s own end', () => {
+  const short = { ...clip, trimEnd: 6 }; // 1 s long, ends at 3 s
+  near(trimClipStart(short, 10, { minLength, length }).trimStart, 6 - minLength);
+});
+
+test('trimClipEnd: pulling it in trims the end', () => {
+  // Visible end is the animation's end (4 s); pull back 1 s.
+  const t = trimClipEnd(clip, -1, { duration, minLength, length });
+  assert.equal(t.trimEnd, 6); // plays 1 s, from 2 s to 3 s
+  near(trimClipEnd(clip, -10, { duration, minLength, length }).trimEnd, 5 + minLength);
+});
+
+test('trimClipEnd: back at the animation\'s end keeps a long end, or plays to the file\'s end', () => {
+  assert.equal(trimClipEnd(clip, 3, { duration, minLength, length }).trimEnd, 15);
+  const short = { ...clip, trimEnd: 6 };
+  assert.equal(trimClipEnd(short, 1, { duration, minLength, length }).trimEnd, duration);
+  assert.equal(trimClipEnd(short, 0.5, { duration, minLength, length }).trimEnd, 6.5);
+});
+
+test('slipClip: picks a later part of the song, same length, same place', () => {
+  const s = slipClip(clip, 20, { duration, minLength });
+  assert.deepEqual(s, { ...clip, trimStart: 25, trimEnd: 35 });
+  assert.deepEqual(slipClip(clip, 100, { duration, minLength }), { ...clip, trimStart: 50, trimEnd: 60 });
+  assert.deepEqual(slipClip(clip, -100, { duration, minLength }), { ...clip, trimStart: 0, trimEnd: 10 });
+});
+
+test('slipClip: an end at the file\'s end stays there', () => {
+  const whole = { ...clip, trimStart: 30, trimEnd: duration };
+  assert.deepEqual(slipClip(whole, -20, { duration, minLength }), { ...whole, trimStart: 10 });
+  near(slipClip(whole, 100, { duration, minLength }).trimStart, duration - minLength);
 });

@@ -729,6 +729,17 @@ device-only.
   Memos or GarageBand pieces exported to Files. Converter apps and
   sites that "rip" streams break those services' terms — not
   something to point her to.
+- **The sound panel's overview (5b scoping, October 2026).** At the
+  tiles' scale one second is ~1,100 px (16:9, 12 fps), so reaching the
+  chorus a minute into a song by dragging the clip (Flipaclip's way)
+  would take ~65,000 px, and the strip ends at the last frame anyway.
+  So the panel adds a slim overview of the whole file to pick which
+  part plays — a deliberate departure from Flipaclip. Dragging the
+  clip left past frame 1 still works too, as `trimStart` (keeping
+  `offset` ≥ 0, so no schema change). An end at the file's end stays
+  there when the window slides, so the song plays on if frames are
+  added. Edits stop playback (the project-change rule) rather than
+  rescheduling sound mid-run.
 - **Flipaclip's audio, for comparison:** import (wav, mp4, m4a, mp3),
   record by pressing and holding the mic, trim with handles, drag the
   clip to where it starts; up to 8 tracks on iOS, slicing, looping

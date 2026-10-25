@@ -367,7 +367,47 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     return size;
   }
 
-  return { element: strip, render, closeMenu, setThumbnail, setAspect, setPlayhead };
+  // The sound panel (5b) draws the waveform at the tiles' scale and
+  // scrolls with them: one frame's time spans `pitch` px (a tile and
+  // its gap), frame 1 starts at the list's left edge.
+  //   geometry(): { left, width (on screen), scrollLeft, contentWidth,
+  //     pitch } — read fresh each time (tiles follow the canvas's shape)
+  //   scrollBy(dx): scrolls the list (the panel's empty track, and
+  //     near its ends while dragging the clip)
+  //   onScroll(fn): fn() on every scroll of the list
+  const timeline = {
+    geometry() {
+      const box = list.getBoundingClientRect();
+      const gap = parseFloat(getComputedStyle(list).columnGap || '0') || 0;
+      const first = list.firstElementChild;
+      const tile = first ? first.offsetWidth : parseFloat(strip.style.getPropertyValue('--pp-tile-width')) || 64;
+      return {
+        left: box.left,
+        width: list.clientWidth,
+        scrollLeft: list.scrollLeft,
+        contentWidth: list.scrollWidth,
+        pitch: tile + gap,
+      };
+    },
+    scrollBy(dx) {
+      list.scrollLeft += dx;
+    },
+    onScroll(fn) {
+      list.addEventListener('scroll', fn, { passive: true, signal });
+    },
+  };
+
+  return {
+    element: strip,
+    render,
+    closeMenu,
+    setThumbnail,
+    setAspect,
+    setPlayhead,
+    timeline,
+    // Open, a canvas tap only closes the frame menu (ui.js).
+    get isMenuOpen() { return menu !== null; },
+  };
 }
 
 const PLUS_ICON = `

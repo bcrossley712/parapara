@@ -30,7 +30,7 @@ const APP_SHELL = [
   './js/ui/icons.js',
   './js/ui/reference-bar.js',
   './js/ui/image-menu.js',
-  './js/ui/sound-menu.js',
+  './js/ui/sound-panel.js',
   './js/ui/onion-badge.js',
   './js/ui/dev-log-view.js',
   './js/canvas/canvas.js',
@@ -61,6 +61,7 @@ const APP_SHELL = [
   './js/timeline/dev-stress.js',
   './js/audio/audio.js',
   './js/audio/clip.js',
+  './js/audio/peaks.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

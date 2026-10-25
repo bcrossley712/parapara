@@ -1,11 +1,14 @@
-// End-to-end tests for step 5a: importing a sound, saving it, delete
-// with undo/redo, and playback running on the sound. The sound file is
+// End-to-end tests for step 5: importing a sound, saving it, delete
+// with undo/redo, and playback running on the sound (5a); the sound
+// panel's trim, move and overview (5b). The sound file is
 // a WAV made here and fed through the real file chooser, so the actual
 // picker path runs. AudioBufferSourceNode.start is wrapped to see what
 // the audio clock schedules.
 //
 // Not covered here (device-only): sync by ear, Safari's output delay,
-// which files the iPad's picker offers, Silent mode.
+// which files the iPad's picker offers, Silent mode; (5b) how dragging
+// the clip feels with her stylus, the waveform scrolling smoothly with
+// the tiles.
 
 import { test, expect } from '@playwright/test';
 import { openApp, reloadApp, readDb } from './helpers.js';
@@ -54,11 +57,21 @@ async function watchSound(page) {
   });
 }
 
-async function pickSound(page, { name = 'tone.wav', mimeType = 'audio/wav', buffer = wav() } = {}) {
+const panel = (page) => page.locator('.pp-sound-panel');
+const importBtn = (page) => panel(page).getByRole('button', { name: /^(Import|Replace) sound$/ });
+
+// Opens the sound panel (the Sound button toggles it).
+async function openPanel(page) {
   await expect(soundBtn(page)).toBeEnabled();
-  await soundBtn(page).click();
+  if (await soundBtn(page).getAttribute('aria-pressed') !== 'true') await soundBtn(page).click();
+  await expect(panel(page)).toBeVisible();
+}
+
+async function pickSound(page, { name = 'tone.wav', mimeType = 'audio/wav', buffer = wav() } = {}) {
+  await openPanel(page);
+  await expect(importBtn(page)).toBeEnabled();
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('menuitem', { name: /^(Import|Replace) sound$/ }).click();
+  await importBtn(page).click();
   await (await chooser).setFiles({ name, mimeType, buffer });
 }
 
@@ -132,8 +145,8 @@ test('delete sound is undoable; the file stays for undo', async ({ page }) => {
   await importSound(page);
   const clip = await savedClip(page);
 
-  await soundBtn(page).click();
-  await page.getByRole('menuitem', { name: 'Delete sound' }).click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Delete sound' }).click();
   await expect(soundBtn(page)).not.toHaveClass(/has-sound/);
   await expect.poll(async () => (await savedProject(page)).audioClips.length).toBe(0);
   expect(await storedBlob(page, clip.blobRef)).not.toBe(null);
@@ -244,4 +257,151 @@ test('the sound picker asks for sound file extensions, not media types', async (
   const types = accept.split(',');
   for (const ext of ['.mp3', '.m4a', '.wav']) expect(types).toContain(ext);
   for (const type of types) expect(type).toMatch(/^\.[a-z0-9]+$/);
+});
+
+// --- 5b: the sound panel ---
+
+const clipBox = (page) => page.locator('.pp-sound-panel__clip');
+const startHandle = (page) => page.locator('.pp-sound-panel__handle--start');
+const endHandle = (page) => page.locator('.pp-sound-panel__handle--end');
+const overview = (page) => page.locator('.pp-sound-panel__overview');
+const track = (page) => page.locator('.pp-sound-panel__track');
+
+// One frame's width on the track: a tile and its gap.
+async function pitch(page) {
+  const [a, b] = [await tiles(page).nth(0).boundingBox(), await tiles(page).nth(1).boundingBox()];
+  return b.x - a.x;
+}
+
+// Drags from the middle of the visible part of `locator` (the track
+// clips the clip when the tiles are scrolled) by `dx` px, in steps.
+async function drag(page, locator, dx) {
+  const box = await locator.boundingBox();
+  const area = await track(page).boundingBox();
+  const left = Math.max(box.x, area.x);
+  const right = Math.min(box.x + box.width, area.x + area.width);
+  const x = (left + right) / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(x + (dx * i) / 8, y);
+  await page.mouse.up();
+}
+
+// The saved clip once it matches `check`.
+async function savedClipWhere(page, check) {
+  await expect.poll(async () => {
+    const clip = (await savedProject(page))?.audioClips?.[0];
+    return Boolean(clip && check(clip));
+  }).toBe(true);
+  return (await savedProject(page)).audioClips[0];
+}
+
+async function frames(page, count) {
+  while (await tiles(page).count() < count) await addFrame(page);
+}
+
+test('the sound panel covers the canvas, never shrinks it, and lines up with the tiles', async ({ page }) => {
+  await openApp(page);
+  await addFrame(page);
+  const area = page.locator('.pp-canvas-area');
+  const before = await area.boundingBox();
+  await openPanel(page);
+  expect(await area.boundingBox()).toEqual(before);
+  await expect(panel(page)).toContainText('No sound yet');
+  // The track starts where the tiles do, and the panel sits right above them.
+  const trackBox = await track(page).boundingBox();
+  const tileBox = await tiles(page).nth(0).boundingBox();
+  expect(Math.abs(trackBox.x - tileBox.x)).toBeLessThan(2);
+  const panelBox = await panel(page).boundingBox();
+  expect(Math.abs(panelBox.y + panelBox.height - (before.y + before.height))).toBeLessThan(2);
+  // The onion badge moves above it.
+  const badge = await page.locator('.pp-onion-badge').boundingBox();
+  expect(badge.y + badge.height).toBeLessThanOrEqual(panelBox.y);
+  // And it closes again.
+  await soundBtn(page).click();
+  await expect(panel(page)).toBeHidden();
+});
+
+test('dragging the right handle trims the end, as one undo step', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 4); // 4 frames at 12 fps = 1/3 s
+  await importSound(page, { buffer: wav(2) });
+  await expect(clipBox(page)).toBeVisible();
+  // 2 s of sound in a 1/3 s animation: it runs past the last frame.
+  await expect(clipBox(page)).toHaveClass(/runs-on/);
+
+  await drag(page, endHandle(page), -2 * await pitch(page));
+  const trimmed = await savedClipWhere(page, (c) => c.trimEnd < 1);
+  expect(trimmed.trimEnd).toBeCloseTo(2 / 12, 2);
+  expect(trimmed.trimStart).toBe(0);
+  await expect(clipBox(page)).not.toHaveClass(/runs-on/);
+
+  await undoBtn(page).click();
+  await savedClipWhere(page, (c) => c.trimEnd > 1.9);
+});
+
+test('moving the clip, then past frame 1, and playback uses the edit', async ({ page }) => {
+  await watchSound(page);
+  await openApp(page);
+  await frames(page, 12); // 1 s
+  // From frame 1, so the strip isn't scrolled: a drag ending near the
+  // track's left end would scroll it (and move the clip further).
+  await tiles(page).nth(0).click();
+  await expect(tiles(page).nth(0)).toHaveClass(/is-current/);
+  await importSound(page, { buffer: wav(0.5) });
+  await expect(clipBox(page)).toBeVisible();
+  const step = await pitch(page);
+
+  await drag(page, clipBox(page), 3 * step);
+  const moved = await savedClipWhere(page, (c) => c.offset > 0);
+  expect(moved.offset).toBeCloseTo(3 / 12, 2);
+  expect(moved.trimStart).toBe(0);
+
+  // 6 frames back: 3 to frame 1, 3 more slide the sound's start under it.
+  await drag(page, clipBox(page), -6 * step);
+  const slid = await savedClipWhere(page, (c) => c.trimStart > 0);
+  expect(slid.offset).toBe(0);
+  expect(slid.trimStart).toBeCloseTo(3 / 12, 2);
+  expect(slid.trimEnd).toBeCloseTo(0.5, 2);
+
+  // Play from frame 1: the sound starts from the trimmed point.
+  await playBtn(page).click();
+  await expect.poll(() => page.evaluate(() => window.__soundStarts.length)).toBeGreaterThan(0);
+  const [first] = await page.evaluate(() => window.__soundStarts);
+  expect(first.offset).toBeCloseTo(3 / 12, 2);
+  expect(first.duration).toBeCloseTo(0.5 - 3 / 12, 2);
+  await playBtn(page).click();
+});
+
+test('a tap on the overview picks a later part of the song, in the same place', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 4);
+  await importSound(page, { buffer: wav(2) });
+  await expect(overview(page)).toBeVisible();
+  await expect(page.locator('.pp-sound-panel__window')).toBeVisible();
+  const box = await overview(page).boundingBox();
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  const slipped = await savedClipWhere(page, (c) => c.trimStart > 0);
+  expect(slipped.trimStart).toBeGreaterThan(1.4);
+  expect(slipped.trimStart).toBeLessThan(1.6);
+  expect(slipped.trimEnd).toBeCloseTo(2, 2); // still plays to the song's end
+  expect(slipped.offset).toBe(0);
+});
+
+test('touching the track while playing only stops playback', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 12);
+  await importSound(page, { buffer: wav(0.5) });
+  await expect(clipBox(page)).toBeVisible();
+  const clip = await savedClip(page);
+
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await expect(page.locator('.pp-sound-panel__playhead')).toBeVisible();
+  await drag(page, clipBox(page), 3 * await pitch(page));
+  await expect(page.locator('.pp-playback')).toBeHidden();
+  await expect(page.locator('.pp-sound-panel__playhead')).toBeHidden();
+  const after = (await savedProject(page)).audioClips[0];
+  expect(after.offset).toBe(clip.offset);
 });

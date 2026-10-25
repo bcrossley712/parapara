@@ -100,7 +100,13 @@ export function createImageMenu(callbacks, { container, signal } = {}) {
   }
 
   render({});
-  return { button, render, closeMenu };
+  return {
+    button,
+    render,
+    closeMenu,
+    // Open menus make a canvas tap only close them (ui.js).
+    get isMenuOpen() { return menu !== null; },
+  };
 }
 
 // A framed picture: sun and hills.

@@ -113,7 +113,14 @@ export function createTransport(callbacks, { signal } = {}) {
     statusElement.textContent = total > 0 ? `Getting ready… ${ready} of ${total}` : 'Getting ready…';
   }
 
-  return { element, statusElement, render, closePanel: () => setPanelOpen(false) };
+  return {
+    element,
+    statusElement,
+    render,
+    closePanel: () => setPanelOpen(false),
+    // The fps panel: open, a canvas tap only closes it (ui.js).
+    get isMenuOpen() { return panel.isConnected; },
+  };
 }
 
 function button(label, icon, onClick) {
