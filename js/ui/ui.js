@@ -395,9 +395,15 @@ export function initUI(container, options = {}) {
   // other way into Files. Same rules: hidden, and pickAudio() must be
   // called inside a tap. Whether the file is sound the iPad can play is
   // decided by decoding it, not by `accept`.
+  //
+  // `accept` lists extensions, never `audio/*`: iOS treats `audio/*`
+  // like `video/*` and shows Photo Library / Take Video / Choose File
+  // (seen on her iPad); a list of plain extensions should open Files
+  // directly. Files with other extensions are greyed out in the picker
+  // — add one here if she needs it and Safari can decode it.
   const audioInput = document.createElement('input');
   audioInput.type = 'file';
-  audioInput.accept = 'audio/*';
+  audioInput.accept = SOUND_FILE_TYPES;
   audioInput.className = 'pp-file-input pp-file-input--audio';
   audioInput.hidden = true;
   shell.appendChild(audioInput);
@@ -566,6 +572,11 @@ function createToast(id, message, buttonLabel) {
   toast.append(text, btn);
   return toast;
 }
+
+// The sound picker's `accept` (step 5): extensions only, so iOS opens
+// Files instead of its photo/video menu. Covers mp3, AAC/m4a (Voice
+// Memos, iTunes, Amazon), WAV, AIFF and CAF (GarageBand).
+export const SOUND_FILE_TYPES = '.mp3,.m4a,.aac,.wav,.aif,.aiff,.caf';
 
 // Undo/redo arrows: a curved shaft and a head, mirrored for redo.
 const UNDO_ICON = `

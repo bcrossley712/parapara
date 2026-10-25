@@ -233,3 +233,15 @@ test('without sound, playback schedules no sound at all', async ({ page }) => {
   await playBtn(page).click();
   expect(await page.evaluate(() => window.__soundStarts.length)).toBe(0);
 });
+
+// iOS treats `audio/*` (or any image/video type) as media and shows
+// Photo Library / Take Video / Choose File; plain sound extensions
+// should open Files directly. Only the iPad shows which menu appears —
+// this keeps the accept list from drifting back.
+test('the sound picker asks for sound file extensions, not media types', async ({ page }) => {
+  await openApp(page);
+  const accept = await page.locator('.pp-file-input--audio').getAttribute('accept');
+  const types = accept.split(',');
+  for (const ext of ['.mp3', '.m4a', '.wav']) expect(types).toContain(ext);
+  for (const type of types) expect(type).toMatch(/^\.[a-z0-9]+$/);
+});

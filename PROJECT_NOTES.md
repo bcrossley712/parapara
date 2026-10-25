@@ -84,9 +84,12 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **No native browser dialogs or pickers** (`confirm()`, `alert()`,
   `<input type="color">`, date inputs) — custom-styled only. Range
   inputs are fine. **Two exceptions:** image import uses
-  `<input type="file" accept="image/*">` and sound import (step 5)
-  `accept="audio/*"`, because iPadOS offers no other way into Photos
-  or Files.
+  `<input type="file" accept="image/*">` and sound import (step 5) a
+  file input too, because iPadOS offers no other way into Photos or
+  Files. **The sound input's `accept` lists extensions
+  (`SOUND_FILE_TYPES` in `ui.js`), never `audio/*`** — iOS treats
+  `audio/*` like video and shows Photo Library / Take Video / Choose
+  File (seen on her iPad); extensions should open Files directly.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
@@ -143,7 +146,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   reasoning, step 6's export, and where her songs can come from are in
   [design notes](docs/DESIGN_NOTES.md#planned-features).
   - **5a: built, not yet confirmed on the iPad.** Check: the Sound
-    button's picker opens Files and offers her mp3/m4a/wav files;
+    button's picker opens Files directly (no Photo Library / Take
+    Video menu — first try showed it, fixed by listing extensions)
+    and offers her mp3/m4a/wav files;
     an import plays in time with the animation, from frame 1 and from
     a later frame, and loops without a gap or drift; the sound starts
     on the first Play after opening (iOS's tap rule); fps and loop
