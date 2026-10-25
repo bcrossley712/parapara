@@ -53,6 +53,7 @@ import {
   createProjectRecord,
   ensureBitmapRefs,
   saveImageBlob,
+  saveAudioBlob,
   newId,
 } from './storage/storage.js';
 import {
@@ -100,6 +101,8 @@ import { sanitizeFps } from './timeline/clock.js';
 import { createPlaybackFrames } from './canvas/playback-frames.js';
 import { createOnionView } from './canvas/onion-view.js';
 import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
+import { createAudio } from './audio/audio.js';
+import { sanitizeAudioClips, newClip, checkImportSize, MAX_CLIP_SECONDS } from './audio/clip.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
@@ -464,6 +467,9 @@ function mountEditor(session, { canSave }) {
   // Onion skin (4c): older projects have none (missing = off, the
   // defaults); bad fields fall back one by one.
   project.onionSkin = sanitizeOnion(project.onionSkin);
+  // Sound (step 5): older projects have none; an unusable clip record
+  // is dropped (its file stays until the sweep), never a failed open.
+  project.audioClips = sanitizeAudioClips(project.audioClips);
 
   // Activity log (dev only): a frame as "f3#1a2b" (its position, then
   // the end of its id, which never changes), a layer or blob id short.
@@ -556,6 +562,22 @@ function mountEditor(session, { canSave }) {
       },
       onUseOnAllFrames: afterPlayback(() => useImageOnAllFrames()),
       onToggleImages: afterPlayback(() => toggleImages()),
+    },
+    sound: {
+      // Like Image: the file picker must open inside the tap (iOS), so a
+      // tap on the button while playing only stops playback.
+      onButton: () => {
+        if (playback.active || landing) {
+          stopPlayback();
+          return false;
+        }
+        return true;
+      },
+      onImport: () => {
+        if (!canAct() || adjust) return;
+        ui.pickAudio((file) => importSound(file));
+      },
+      onDelete: afterPlayback(() => deleteSound()),
     },
     reference: {
       onOpacityInput: (opacity) => {
@@ -718,7 +740,14 @@ function mountEditor(session, { canSave }) {
   // The move to the frame playback stopped on, while it runs.
   let landing = null;
 
+  // Sound (step 5): the project's clip, decoded, and the audio clock
+  // playback runs on when there is one (audio/audio.js). Decoding is
+  // async; until it's done, Play shows "Getting ready".
+  const audio = createAudio();
+  let soundLoading = null; // promise while the clip is being decoded
+
   const playback = createPlayback({
+    clock: audio.clock,
     decode: (id) => {
       const frame = session.frames.find((f) => f.id === id);
       return frame ? playbackFrames.decode(frame, { hidden: project.referenceHidden === true }) : null;
@@ -728,7 +757,7 @@ function mountEditor(session, { canSave }) {
       playbackFrames.draw(canvasApi.getPlaybackContext(), value);
       strip.setPlayhead(id);
     },
-    pending: () => frameCache.pendingCount,
+    pending: () => frameCache.pendingCount + (soundLoading ? 1 : 0),
     prepare: () => frameCache.rush(),
     onChange: (status) => {
       playStatus = status;
@@ -774,7 +803,10 @@ function mountEditor(session, { canSave }) {
     const index = project.frames.indexOf(session.frame.id);
     // Without loop, playing from the last frame starts over.
     const startIndex = !project.loop && index === project.frames.length - 1 ? 0 : index;
-    devLog.add('play', { from: tag(project.frames[startIndex]), fps: project.fps, loop: project.loop });
+    devLog.add('play', { from: tag(project.frames[startIndex]), fps: project.fps, loop: project.loop, sound: audio.loadedRef ? 'on' : 'off' });
+    // iOS starts sound only from inside a tap: ask now, before getting
+    // ready (the audio clock holds the first frame until it starts).
+    audio.unlock();
     playback.start({ ids: project.frames, startIndex, fps: project.fps, loop: project.loop });
   }
 
@@ -924,6 +956,7 @@ function mountEditor(session, { canSave }) {
       hidden: project.referenceHidden === true,
       busy,
     });
+    ui.sound.render({ has: project.audioClips.length > 0, busy });
     // Whatever changed, the cache and tiles catch up (cheap when
     // nothing they depend on did).
     frameCache.setSignature(layerSignature(project.layers));
@@ -1194,6 +1227,8 @@ function mountEditor(session, { canSave }) {
   //   'image-all'     { frameId, before, after }  (3b) Use on all
   //                   frames: before = { [frameId]: image } for each
   //                   frame it changed, after = the image they got
+  //   'audio'         { before, after }  (step 5) project.audioClips
+  //                   lists; the sound files stay in storage
   // Adding and deleting are the same two operations run in opposite
   // directions: detach (pixels stay in storage under the frames' old
   // refs, which the record keeps) and attach (put the layer and refs
@@ -1349,6 +1384,9 @@ function mountEditor(session, { canSave }) {
         return entry;
       case 'image-all':
         exclusive(() => applyImageAll(entry, undoing));
+        return entry;
+      case 'audio':
+        exclusive(() => setClips(undoing ? entry.before : entry.after));
         return entry;
       default:
         throw new Error(`Unknown history entry type ${entry.type}`);
@@ -1693,6 +1731,129 @@ function mountEditor(session, { canSave }) {
     decoded.bitmap?.close?.();
   }
 
+  // --- sound (step 5) ---
+  //
+  // One clip per project (project.audioClips; rules in audio/clip.js).
+  // Its file is stored exactly as picked (saveAudioBlob) before the
+  // project points at it, then decoded for playback. Import (Replace)
+  // and Delete are one 'audio' undo entry each; the file stays in
+  // storage for undo, and the sweep clears it once nothing points at
+  // it. Only the current clip's decoded sound is kept in memory.
+
+  let soundBuffer = { ref: null, buffer: null };
+
+  // Puts the project's clip on the audio engine, decoding its file
+  // first unless it's the one already decoded. A file that's missing
+  // or won't decode is skipped with a banner — never a failed open —
+  // and its record is kept.
+  function loadSound() {
+    const clip = project.audioClips[0] ?? null;
+    if (!clip) {
+      soundBuffer = { ref: null, buffer: null };
+      audio.setClip(null, null);
+      return Promise.resolve();
+    }
+    if (soundBuffer.ref === clip.blobRef) {
+      audio.setClip(clip, soundBuffer.buffer);
+      return Promise.resolve();
+    }
+    audio.setClip(null, null);
+    const loading = (async () => {
+      try {
+        const blob = await readBitmap(clip.blobRef);
+        if (!blob) throw new Error('The sound file is missing');
+        const decoded = audio.keepFirst(await audio.decode(await blob.arrayBuffer()), MAX_CLIP_SECONDS);
+        // Changed while decoding (undo, another import): that one wins.
+        if (project.audioClips[0]?.blobRef !== clip.blobRef) return;
+        soundBuffer = { ref: clip.blobRef, buffer: decoded };
+        audio.setClip(project.audioClips[0], decoded);
+      } catch (err) {
+        console.warn('Parapara! could not load the sound:', err);
+        devLog.add('sound-failed', { sound: short(clip.blobRef), error: String(err?.message ?? err) });
+        showBanner("This animation's sound couldn't be played.");
+      }
+    })();
+    soundLoading = loading;
+    loading.finally(() => {
+      if (soundLoading === loading) soundLoading = null;
+    });
+    return loading;
+  }
+
+  // The project's clips are now `clips`: saved, shown on the button,
+  // and loaded for playback. Resolves once the sound is ready.
+  function setClips(clips) {
+    project.audioClips = clips;
+    scheduleProjectSave();
+    refreshPanel();
+    return loadSound();
+  }
+
+  // A picked file becomes the project's sound (replacing any). Size is
+  // checked before reading; it's accepted only if this device can
+  // decode it — so playback (and step 6's export) can always read what
+  // was stored. A file longer than MAX_CLIP_SECONDS keeps only its
+  // start (the whole file is stored).
+  function importSound(file) {
+    if (busy) return;
+    const size = checkImportSize(file.size);
+    if (size === 'too-big') {
+      showBanner('That sound file is too big. Sound files can be up to 20 MB.');
+      return;
+    }
+    if (size === 'empty') {
+      showNotice("That sound couldn't be opened. Try a different file.");
+      return;
+    }
+    exclusive(async () => {
+      let bytes;
+      let decoded;
+      try {
+        bytes = await file.arrayBuffer();
+        // Decoding may detach the buffer it's given: decode a copy and
+        // store the original bytes.
+        decoded = await audio.decode(bytes.slice(0));
+      } catch (err) {
+        console.warn('Parapara! could not read the picked sound:', err);
+        devLog.add('sound-refused', { type: file.type || '?', bytes: file.size });
+        showNotice("That sound couldn't be opened. Try a different file.");
+        return;
+      }
+      const blob = new Blob([bytes], { type: soundType(file) });
+      const blobRef = newId();
+      if (canSave) {
+        try {
+          await saveAudioBlob(project.id, blobRef, blob);
+        } catch (err) {
+          console.error('Parapara! saving a sound failed:', err);
+          showNotice("That sound couldn't be added. The iPad may be out of space.");
+          return;
+        }
+      } else {
+        heldBitmaps.set(blobRef, blob);
+      }
+      const { clip, clipped } = newClip({ id: newId(), blobRef, duration: decoded.duration });
+      soundBuffer = { ref: blobRef, buffer: audio.keepFirst(decoded, MAX_CLIP_SECONDS) };
+      const before = project.audioClips;
+      await setClips([clip]);
+      history.push({ type: 'audio', before, after: project.audioClips, bytes: 0 });
+      devLog.add('sound', { sound: short(blobRef), type: blob.type, bytes: blob.size, seconds: Math.round(decoded.duration) });
+      showBanner(clipped
+        ? 'Sound added. Only its first 3 minutes are used.'
+        : 'Sound added. Press Play to hear it with your animation.');
+    });
+  }
+
+  // Delete sound (Sound menu). Undoable; the file stays for undo.
+  function deleteSound() {
+    if (!canAct() || adjust || project.audioClips.length === 0) return;
+    const before = project.audioClips;
+    setClips([]);
+    history.push({ type: 'audio', before, after: [], bytes: 0 });
+    devLog.add('sound-deleted');
+    showBanner('Sound deleted.');
+  }
+
   // Use on all frames (3b, Image menu): this frame's image — photo and
   // placement — onto every frame, as one undo step. Each frame then
   // keeps its own copy of the placement, so nudging one later doesn't
@@ -2025,6 +2186,9 @@ function mountEditor(session, { canSave }) {
   flushEditor = flush;
   checkEditor = checkCanvases;
 
+  // The project's sound decodes in the background; Play waits for it.
+  loadSound();
+
   // The Gallery button. Waits out nothing: a tap while a layer or
   // frame change or a stroke is in progress is ignored, like other
   // buttons. If some of her drawing couldn't be saved, she's asked
@@ -2066,6 +2230,7 @@ function mountEditor(session, { canSave }) {
     flushEditor = null;
     checkEditor = null;
     playback.destroy();
+    audio.destroy();
     playbackFrames.destroy();
     onionView.destroy();
     frameCache.destroy();
@@ -2092,6 +2257,17 @@ async function decodeReference(frame, read, currentKey) {
     console.warn('Parapara! could not load a frame image:', err);
     return null;
   }
+}
+
+// The MIME type to store a picked sound file under. iOS usually says;
+// when it doesn't, the extension decides. The bytes are never changed.
+function soundType(file) {
+  if (file.type) return file.type;
+  const ext = /\.([a-z0-9]+)$/i.exec(file.name ?? '')?.[1]?.toLowerCase();
+  return {
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac',
+    wav: 'audio/wav', aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf',
+  }[ext] ?? 'application/octet-stream';
 }
 
 // Same placement and same stored image (or both none).

@@ -20,8 +20,13 @@
 //     loop ends on the last frame (onEnd).
 //   - Changing fps or loop while playing takes effect from the frame
 //     showing, with no jump.
-//   - `now` is the clock seam: step 5 swaps in the audio clip's
-//     position without touching the loop.
+//   - The time comes from a clock (step 5): the wall clock, or the
+//     audio clock when the project has sound, so the frames follow
+//     what she hears. The clock is told where each run starts (the
+//     frame's time, with fps, frame count and loop) — at the start,
+//     and again whenever a run re-anchors (fps or loop changed) — and
+//     stopped when playback halts. Its now() is the time since that
+//     start, in ms; the loop counts beats from it exactly as before.
 
 import { beatAtTime, frameAtBeat } from './clock.js';
 
@@ -39,6 +44,9 @@ export const DECODE_AHEAD = 6;
 //   'playing'; ready/total count flattened frames while preparing.
 // onEnd(frameId): without loop, playback reached the end; it has
 //   stopped, and frameId is the last frame.
+// clock: { start({ position, fps, frameCount, loop }), now(), stop() }
+//   — position in seconds of animation time; now() in ms since start.
+//   Defaults to the wall clock built on `now` (tests pass `now`).
 export function createPlayback({
   decode,
   release = () => {},
@@ -48,6 +56,7 @@ export function createPlayback({
   onChange = () => {},
   onEnd = () => {},
   now = () => performance.now(),
+  clock = wallClock(now),
   requestFrame = (fn) => requestAnimationFrame(fn),
   cancelFrame = (id) => cancelAnimationFrame(id),
   ahead = DECODE_AHEAD,
@@ -58,7 +67,6 @@ export function createPlayback({
   let start = 0;       // frame index the current run started from
   let fps = 12;
   let loop = true;
-  let t0 = 0;          // when beat 0 of the current run began
   let lastBeat = -1;   // the last beat handled
   let shownId = null;  // the frame last drawn this run
   let request = null;
@@ -120,7 +128,14 @@ export function createPlayback({
     ring.clear();
   }
 
+  // Beat 0 of a new run is frame `start`: the clock starts from that
+  // frame's time.
+  function startClock() {
+    clock.start({ position: start / fps, fps, frameCount: frameIds.length, loop });
+  }
+
   function halt() {
+    if (state === 'playing') clock.stop();
     if (request !== null) cancelFrame(request);
     request = null;
     clearRing();
@@ -148,12 +163,12 @@ export function createPlayback({
         return;
       }
       state = 'playing';
-      t0 = now();
+      startClock();
       lastBeat = -1;
       report();
     }
 
-    const beat = beatAtTime(now() - t0, fps);
+    const beat = beatAtTime(clock.now(), fps);
     if (beat !== lastBeat) {
       const { index, ended } = frameFor(beat);
       if (ended) {
@@ -176,9 +191,11 @@ export function createPlayback({
 
   // Makes the frame showing beat 0 of a new run, so new fps/loop
   // settings take effect from here with no jump. Decoded beats ahead
-  // keep their frames; only their beat numbers move.
+  // keep their frames; only their beat numbers move. The caller
+  // applies the new setting and then restarts the clock (startClock),
+  // so the clock hears the new fps/loop. Returns whether it re-anchored.
   function reanchor() {
-    if (state !== 'playing' || lastBeat < 0) return;
+    if (state !== 'playing' || lastBeat < 0) return false;
     const { index } = frameFor(lastBeat);
     const shift = lastBeat;
     const entries = [...ring.entries()];
@@ -191,8 +208,8 @@ export function createPlayback({
       }
     }
     start = index;
-    t0 = now();
     lastBeat = 0;
+    return true;
   }
 
   return {
@@ -223,14 +240,16 @@ export function createPlayback({
 
     setFps(next) {
       if (next === fps) return;
-      reanchor();
+      const moved = reanchor();
       fps = next;
+      if (moved) startClock();
     },
 
     setLoop(next) {
       if (next === loop) return;
-      reanchor();
+      const moved = reanchor();
       loop = next;
+      if (moved) startClock();
     },
 
     // 'idle' | 'preparing' | 'playing'
@@ -249,10 +268,22 @@ export function createPlayback({
     },
 
     destroy() {
+      if (state === 'playing') clock.stop();
       if (request !== null) cancelFrame(request);
       request = null;
       clearRing();
       state = 'idle';
     },
+  };
+}
+
+// The wall clock: time since start(), from `now` (ms). Ignores where
+// the run starts — beats count from 0 either way.
+export function wallClock(now = () => performance.now()) {
+  let t0 = 0;
+  return {
+    start() { t0 = now(); },
+    now: () => now() - t0,
+    stop() {},
   };
 }

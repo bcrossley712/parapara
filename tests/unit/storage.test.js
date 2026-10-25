@@ -455,3 +455,31 @@ test('recent colors round-trip, and are null before anything is saved', async ()
 test('a new project starts with an empty palette', () => {
   assert.deepEqual(storage.createProjectRecord().palette, []);
 });
+
+// Step 5: the sound file is kept byte for byte with its type, and the
+// launch sweep keeps it while a clip points at it.
+test('a sound file round-trips with its type and survives the sweep while a clip uses it', async () => {
+  await storage.initStorage();
+  const { project, frames } = await storage.createProject();
+  const bytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]);
+  await storage.saveAudioBlob(project.id, 'sound-1', new Blob([bytes], { type: 'audio/mp4' }));
+  const back = await storage.loadLayerBitmap('sound-1');
+  assert.equal(back.type, 'audio/mp4');
+  assert.deepEqual(new Uint8Array(await back.arrayBuffer()), bytes);
+
+  const withClip = { ...project, audioClips: [{ id: 'c', blobRef: 'sound-1', trimStart: 0, trimEnd: 1, offset: 0 }] };
+  assert.equal(await storage.deleteUnreferencedBlobs(project.id, L.referencedBlobIds(withClip, frames)), 0);
+  assert.notEqual(await storage.loadLayerBitmap('sound-1'), null);
+
+  // Once no clip points at it (deleted, and the undo history is gone).
+  const without = { ...project, audioClips: [] };
+  assert.equal(await storage.deleteUnreferencedBlobs(project.id, L.referencedBlobIds(without, frames)), 1);
+  assert.equal(await storage.loadLayerBitmap('sound-1'), null);
+});
+
+test('a sound file without a type is refused, not stored as a PNG', async () => {
+  await storage.initStorage();
+  const { project } = await storage.createProject();
+  await assert.rejects(storage.saveAudioBlob(project.id, 'sound-2', new Blob([new Uint8Array([1])])));
+  assert.equal(await storage.loadLayerBitmap('sound-2'), null);
+});

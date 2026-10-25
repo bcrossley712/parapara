@@ -677,6 +677,18 @@ export function saveImageBlob(projectId, blobRef, blob) {
   return saveLayerBitmap(projectId, blobRef, blob);
 }
 
+// The project's sound file (step 5): the bytes exactly as recorded or
+// imported, never re-encoded, under its own id, which
+// project.audioClips[n].blobRef points at. Same rules as an image:
+// save it before the project record points at it; the sweep keeps it
+// while a clip does (mapBlobRefs). `blob.type` must be set (the bitmap
+// path would call an untyped blob a PNG). Read back with
+// loadLayerBitmap.
+export async function saveAudioBlob(projectId, blobRef, blob) {
+  if (!blob.type) throw new Error('A sound file needs its MIME type');
+  return saveLayerBitmap(projectId, blobRef, blob);
+}
+
 // Test-only: drop the cached connection so a test can start from a
 // fresh database. Not used by the app.
 export function _resetForTests() {

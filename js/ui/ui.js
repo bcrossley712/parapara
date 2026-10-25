@@ -21,6 +21,7 @@ import { createFrameStrip } from '../timeline/frame-strip.js';
 import { createTransport } from '../timeline/transport.js';
 import { createReferenceBar } from './reference-bar.js';
 import { createImageMenu } from './image-menu.js';
+import { createSoundMenu } from './sound-menu.js';
 import { createOnionBadge } from './onion-badge.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
@@ -45,6 +46,8 @@ import { createOnionBadge } from './onion-badge.js';
 //   onPaletteRemove(index) } — hex is the current color).
 // options.images: the top bar's Image menu intents ({ onImage,
 //   onUseOnAllFrames, onToggleImages }, see image-menu.js).
+// options.sound: the top bar's Sound menu intents ({ onButton,
+//   onImport, onDelete }, see sound-menu.js; step 5).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
 //   fires when she taps any other control while adjusting.
@@ -56,7 +59,8 @@ import { createOnionBadge } from './onion-badge.js';
 //
 // Returns { canvas, layers (the panel), frames (the strip), transport
 // (render(state)), onion (the badge: render(settings)), images
-// (the top bar's Image menu: render(state)),
+// (the top bar's Image menu: render(state)), sound (the Sound menu:
+// render(state)), pickAudio(onFile),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
 // setAdjustBusy(busy) (the adjust bar's controls off while a photo is
@@ -77,6 +81,7 @@ export function initUI(container, options = {}) {
     colors: colorCallbacks = {},
     reference: referenceCallbacks = {},
     images: imagesCallbacks = {},
+    sound: soundCallbacks = {},
     onion: onionCallbacks = {},
     onGallery = null,
   } = options;
@@ -108,8 +113,12 @@ export function initUI(container, options = {}) {
   const imageMenu = createImageMenu({
     onImage: () => {}, onUseOnAllFrames: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
   }, { container: shell, signal });
+  // Sound (step 5): beside Image.
+  const soundMenu = createSoundMenu({
+    onImport: () => {}, onDelete: () => {}, ...soundCallbacks,
+  }, { container: shell, signal });
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
-  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn);
+  topBar.append(undoBtn, redoBtn, topBarSpacer, soundMenu.button, imageMenu.button, layersBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';
@@ -382,6 +391,30 @@ export function initUI(container, options = {}) {
     fileInput.click();
   }
 
+  // The sound picker (step 5): the second native picker — iPadOS has no
+  // other way into Files. Same rules: hidden, and pickAudio() must be
+  // called inside a tap. Whether the file is sound the iPad can play is
+  // decided by decoding it, not by `accept`.
+  const audioInput = document.createElement('input');
+  audioInput.type = 'file';
+  audioInput.accept = 'audio/*';
+  audioInput.className = 'pp-file-input pp-file-input--audio';
+  audioInput.hidden = true;
+  shell.appendChild(audioInput);
+  let onAudioPicked = null;
+  audioInput.addEventListener('change', () => {
+    const file = audioInput.files?.[0] ?? null;
+    const handler = onAudioPicked;
+    onAudioPicked = null;
+    audioInput.value = '';
+    if (file && handler) handler(file);
+  });
+  function pickAudio(onFile) {
+    onAudioPicked = onFile;
+    audioInput.value = '';
+    audioInput.click();
+  }
+
   const referenceBar = createReferenceBar({
     onOpacityInput: () => {}, onFlip: () => {}, onReplace: () => {}, onDelete: () => {},
     onDone: () => {},
@@ -447,10 +480,12 @@ export function initUI(container, options = {}) {
     transport,
     onion: onionBadge,
     images: imageMenu,
+    sound: soundMenu,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),
     pickImage,
+    pickAudio,
     setAdjusting,
     setAdjustBusy: (busy) => referenceBar.setBusy(busy),
     destroy,

@@ -1526,16 +1526,21 @@ html, body {
 }
 
 /* Top bar Image button (js/ui/image-menu.js): a dot when this frame
-   has an image. The menu hangs below it, positioned in JS. */
-.pp-image-btn {
+   has an image. The menu hangs below it, positioned in JS. The Sound
+   button (js/ui/sound-menu.js, step 5) looks the same: a dot when the
+   project has sound. */
+.pp-image-btn,
+.pp-sound-btn {
   position: relative;
 }
 
-.pp-image-btn__icon {
+.pp-image-btn__icon,
+.pp-sound-btn__icon {
   display: flex;
 }
 
-.pp-image-btn__dot {
+.pp-image-btn__dot,
+.pp-sound-btn__dot {
   position: absolute;
   top: 6px;
   right: 7px;
@@ -1546,16 +1551,19 @@ html, body {
   box-shadow: 0 0 0 2px var(--pp-ink-light);
 }
 
-.pp-image-btn.is-active .pp-image-btn__dot {
+.pp-image-btn.is-active .pp-image-btn__dot,
+.pp-sound-btn.is-active .pp-sound-btn__dot {
   background: var(--pp-ink);
   box-shadow: none;
 }
 
-.pp-image-btn__dot[hidden] {
+.pp-image-btn__dot[hidden],
+.pp-sound-btn__dot[hidden] {
   display: none;
 }
 
-.pp-image-menu {
+.pp-image-menu,
+.pp-sound-menu {
   position: absolute;
   z-index: 20;
   display: flex;

@@ -719,6 +719,16 @@ device-only.
   in Safari 27.0.1, so on her iPad for a while). Workaround: build the
   2-byte AAC AudioSpecificConfig ourselves and ignore the encoder's.
   Only a real exported file played on a phone proves it.
+- **Where her songs can come from (5a scoping).** Streaming apps
+  (Apple Music, Spotify, Amazon Music) keep even "downloaded" songs
+  encrypted inside the app, so no app outside them — native or web —
+  can import those. What works: songs bought as downloads (Amazon's
+  and Bandcamp's purchases are plain MP3 files; iTunes Store
+  purchases are plain files too but are easiest to get at from a
+  computer), free/royalty-free music and sound sites, her own Voice
+  Memos or GarageBand pieces exported to Files. Converter apps and
+  sites that "rip" streams break those services' terms — not
+  something to point her to.
 - **Flipaclip's audio, for comparison:** import (wav, mp4, m4a, mp3),
   record by pressing and holding the mic, trim with handles, drag the
   clip to where it starts; up to 8 tracks on iOS, slicing, looping

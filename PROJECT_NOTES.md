@@ -83,9 +83,10 @@ icon, manifest `name`/`short_name`, and repo copy.
 **Standing constraints**
 - **No native browser dialogs or pickers** (`confirm()`, `alert()`,
   `<input type="color">`, date inputs) — custom-styled only. Range
-  inputs are fine. **One exception:** image import uses
-  `<input type="file" accept="image/*">`, because iPadOS offers no
-  other way into Photos.
+  inputs are fine. **Two exceptions:** image import uses
+  `<input type="file" accept="image/*">` and sound import (step 5)
+  `accept="audio/*"`, because iPadOS offers no other way into Photos
+  or Files.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
@@ -135,49 +136,43 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **A layer encode that never finishes fails the save after 15 s**
   instead of locking the editor (see Don't break these); if the log
   shows `save-failed … timed out`, get the log.
-- **Now: step 5 — audio.** Decided (the reasoning, and what it means
-  for step 6, is in [design notes](docs/DESIGN_NOTES.md#planned-features)):
-  - **One clip:** record or import, non-destructive trim, and an
-    `offset` (seconds, missing = 0) for where it starts in the
-    animation. Seconds, not frames: the clock is time.
-  - **Stored as recorded or imported, never re-encoded:** recordings
-    in whatever Safari's MediaRecorder gives by default (AAC in MP4);
-    imports (wav, mp3, m4a, aac) as their original bytes, accepted
-    only if a test decode works on the iPad. A blob in `blobs`
-    (ArrayBuffer + MIME), added to `mapBlobRefs`. No DB version bump.
-  - **Caps:** 3 minutes per clip (it's held decoded, ~23 MB a minute);
-    WAV accepted under a size cap (it's ~10 MB a minute).
-  - **The animation's length wins:** audio past frames ÷ fps is cut,
-    in playback and export. **Audio edits are undoable** (small
-    `'audio'` records like `'image'`; blobs stay for the sweep).
-    **Nothing new remembered** app-wide.
-  - **Clock:** `AudioContext.currentTime` (corrected for output
-    latency) through playback's `now` seam; wall clock with no clip.
-    "Getting ready" waits for the clip to decode.
+- **Now: step 5 — audio**, in three parts, each confirmed on the iPad
+  before the next: **5a** import, storage and playback in sync · **5b**
+  the sound panel, waveform and trim · **5c** hold-to-record while
+  playing. What's built is under Architecture → Sound; the format
+  reasoning, step 6's export, and where her songs can come from are in
+  [design notes](docs/DESIGN_NOTES.md#planned-features).
+  - **5a: built, not yet confirmed on the iPad.** Check: the Sound
+    button's picker opens Files and offers her mp3/m4a/wav files;
+    an import plays in time with the animation, from frame 1 and from
+    a later frame, and loops without a gap or drift; the sound starts
+    on the first Play after opening (iOS's tap rule); fps and loop
+    changes while playing; hiding the app stops it; Silent mode
+    (decide then whether to set the audio session to "playback"); a
+    song over 3 minutes (only its start is used); what reopening a
+    project with sound feels like (decoding adds to "Getting ready").
+    Tell her up front: songs from Spotify/Apple Music/Amazon Music
+    streams can't be imported — bought downloads can.
   - **Her choices:** **hold to record** (Flipaclip; let go to stop);
     **the animation plays while she records**, so she can time her
     voice to it; **the waveform shows only in the sound panel** —
     the canvas keeps its full height (no lane under the tiles).
-  - **Recording:** starts from the frame she's on (`offset` = that
-    frame's time); plays without looping and stops picture and
-    recording at the last frame, even with loop on. A new recording
-    or import **replaces** the clip (undoable); the old one is silent
+  - **5b — sound panel:** the Sound button opens it instead of 5a's
+    menu. It slides up over the bottom of the canvas, just above the
+    tiles (covers, never shrinks it, like the layers panel): the
+    waveform at the tiles' scale, scrolling with them; trim handles on
+    its ends; drag its middle to move `offset`; hold-to-record, Import,
+    Delete. Play works with it open (a line moves across the
+    waveform); sound plays open or closed.
+  - **5c — recording:** starts from the frame she's on (`offset` =
+    that frame's time); plays without looping and stops picture and
+    recording at the last frame, even with loop on. Stored in
+    MediaRecorder's default (AAC in MP4), never re-encoded. A new
+    recording **replaces** the clip (undoable); the old one is silent
     while she records. A hold under ~0.5 s records nothing ("Hold to
     record" banner). The first hold asks for the mic, which interrupts
     it — a banner says to hold again. Mic delay: measured on the iPad
     and corrected once in code, no setting.
-  - **Sound panel:** a **Sound** button in the top bar (by Image and
-    Layers), with a dot when the project has sound. The panel slides
-    up over the bottom of the canvas, just above the tiles (covers,
-    never shrinks it, like the layers panel): the waveform at the
-    tiles' scale, scrolling with them; trim handles on its ends; drag
-    its middle to move `offset`; hold-to-record, Import, Delete. Play
-    works with it open (a line moves across the waveform); sound
-    plays open or closed.
-  - **Parts, each confirmed on the iPad before the next:** **5a**
-    storage, import and playback in sync (no mic yet) · **5b** the
-    sound panel, waveform and trim · **5c** hold-to-record while
-    playing.
   - **Out unless she asks** (Flipaclip has them): more tracks,
     slicing, looping past the end, volume, a sound library, scrubbing
     sound while stepping frames.
@@ -231,6 +226,10 @@ icon, manifest `name`/`short_name`, and repo copy.
     so a bigger range makes precise sizes harder to pick; bigger sizes
     need a different size control (or eraser presets) when this is
     built.
+- **Frame-cache encode timeout?** The cache flattens with `toBlob`
+  (`encodePNG`); a `toBlob` that never calls back (seen on the sandbox
+  build) would keep "Getting ready" up forever. Same fix as
+  `exportPNG`'s if the log ever shows it; not done yet.
 - **Small screens (phones) aren't workable** — seen on his Android
   phone, 4b build. The layout is sized for the iPad and nothing
   scrolls or reflows. **Landscape:** the rail runs out of height, so
@@ -578,10 +577,37 @@ Short rules; reasoning in the linked sections.
     reloaded from storage onto a fresh canvas (`recoverLayers`, one at
     a time, waits for a quiet moment) with a notice. Strokes since the
     last save are lost; the drawing isn't.
+- **Sound (5a)** ([why](docs/DESIGN_NOTES.md#planned-features)):
+  - **One clip** in `project.audioClips` (rules pure in
+    `audio/clip.js`; bad records dropped on open, never a failed
+    open): `trimStart`/`trimEnd` pick the part of the file, `offset`
+    where it starts in the animation — all seconds. 5a always makes
+    0 / file length / 0.
+  - **The file is stored exactly as picked, never re-encoded**
+    (`saveAudioBlob`: ArrayBuffer + its MIME type, before the project
+    points at it), and accepted only if it decodes here — so playback
+    and step 6's export can always read it. Over **20 MB** refused
+    before reading; longer than **3 min**, only the first 3 min are
+    decoded and used (banner). Only the current clip's decoded sound
+    is in memory.
+  - **The audio clock** (`audio/audio.js`) drives playback when
+    there's a clip: playback hands it each run's start (frame time,
+    fps, frame count, loop) and stops it; its time is the
+    AudioContext's minus the output delay, so frames follow what she
+    hears. It schedules the clip on that clock — this pass at once,
+    each loop pass ~1 s ahead — so loops are seamless and never drift.
+    **The animation's length wins:** only the part inside frames ÷
+    fps plays. No clip, or a context that doesn't start within 1 s:
+    the wall clock, silently.
+  - **Sound button** (top bar, before Image): a dot when there's
+    sound; 5a's menu = Import (Replace) sound, Delete sound. A tap
+    while playing only stops (the picker must open inside the tap,
+    like Image). Import/Replace/Delete are one `'audio'` undo entry
+    each (`{ before, after }` clip lists); files stay in storage for
+    undo and the sweep.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  one audio clip as
-  `audioClips: []`, non-destructive trim (step 5's decisions are under
-  Current state); export to video + Web Share,
+  the sound panel and recording (5b, 5c — under Current state);
+  export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota (with step 6).
 
@@ -660,9 +686,15 @@ Each is here because breaking it caused (or would cause) a real bug.
   strip, and a tile replaced between pointerdown and pointerup never
   gets its click. Sliders commit on pointerdown, since they never
   click. Disabled controls don't commit.
-- **The picker opens inside the tap:** `ui.pickImage()` must run
-  synchronously from a click (Image menu item, Replace). An `await`
-  before it and iOS won't open the picker.
+- **The picker opens inside the tap:** `ui.pickImage()` and
+  `ui.pickAudio()` (5a) must run synchronously from a click (Image
+  menu item, Replace, Import sound). An `await` before it and iOS
+  won't open the picker. Likewise **`audio.unlock()` runs
+  synchronously in the Play tap** — iOS starts sound only from one.
+- **The Sound and Image buttons have separate class names**
+  (`.pp-sound-btn…`, `.pp-image-btn…`; shared rules list both). Tests
+  find the Image button by class — sharing one broke every reference
+  test (5a).
 - Fill's region comes from the visible-layer composite, its pixels go
   to the active layer only — never write the composite back.
 - `toCanvasPoint` is computed analytically from viewport state, never
@@ -703,7 +735,8 @@ Each is here because breaking it caused (or would cause) a real bug.
   (`thumbnailBlobId`) is derived, not a field; both handle it
   separately.
 - `savedDrawingBytes` in the e2e helpers skips `thumb-` blobs — keep
-  that if thumbnail ids change.
+  that if thumbnail ids change. Sound files and photos count in it; skip
+  them too if a sound/photo test ever uses it.
 - Tool-settings validation lives in `canvas.js`
   (`sanitizeToolSettings`); bad fields fall back individually.
 
@@ -808,6 +841,7 @@ Each is here because breaking it caused (or would cause) a real bug.
         reference-bar.js  adjust-image bar that replaces the rail (UI only)
         image-menu.js     top-bar Image button + menu, state dot/slash
                           (UI only)
+        sound-menu.js     top-bar Sound button + 5a's menu (UI only)
         onion-badge.js    onion skin's badge + settings panel (UI only)
                           (4c)
         color-picker.js   custom HSV picker + eyedropper button,
@@ -833,7 +867,12 @@ Each is here because breaking it caused (or would cause) a real bug.
                           label (UI only) (4b)
         onion.js          pure onion-skin rules: settings defaults and
                           clean-up, which frames are ghosts (4c)
-      export/ audio/      placeholders for later steps
+      audio/
+        clip.js           pure sound rules: clip clean-up, import caps,
+                          where the clip lands in the animation (5a)
+        audio.js          AudioContext, decode, the audio clock
+                          playback runs on (5a)
+      export/             placeholder for step 6
     icons/                app icon set
     tests/unit/, tests/e2e/      see Testing
     docs/DESIGN_NOTES.md  reasoning and lessons
@@ -882,8 +921,8 @@ bitmap. Planned fields are marked. Extend additively.
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, blobRef, trimStart, trimEnd, offset } ]
-                                              // planned (step 5): one clip; seconds;
-                                              // offset = where it starts, missing = 0
+                                              // 5a; one clip; seconds; offset = where it
+                                              // starts, missing = 0; missing = [] (sanitizeAudioClips)
     }
 
     frame = {
@@ -896,7 +935,8 @@ bitmap. Planned fields are marked. Extend additively.
 
 **IndexedDB stores** (`parapara`, version 2): `projects`, `frames`
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
-type, buffer }` — layer bitmaps and the gallery thumbnail
+type, buffer }` — layer bitmaps, reference images, the sound file
+(5a, its own MIME type) and the gallery thumbnail
 `thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
 `uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor' }`;
 `recentColors` = `['#rrggbb', …]` newest first).
@@ -996,6 +1036,11 @@ got there.
   - **Images in e2e:** make the test image in the page (a canvas →
     PNG buffer) and feed it through `page.waitForEvent('filechooser')`
     so the real picker path runs (`reference.spec.js`).
+  - **Sound in e2e** (`sound.spec.js`): a WAV built in Node, fed
+    through the file chooser; `AudioBufferSourceNode.start` wrapped to
+    see what the audio clock schedules. Headless Chromium runs the
+    AudioContext after the Play click. Blobs come back from
+    `page.evaluate` as byte arrays (ArrayBuffers don't survive it).
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo
@@ -1014,4 +1059,6 @@ got there.
   a frame switch, whether iPadOS's real lost canvas behaves like
   the simulations in `canvas-loss.spec.js`, and (4d) the long-press
   feel, the strip letting go of its scroll once a tile lifts, and no
-  callout on a held tile.
+  callout on a held tile; (5a) sound in sync by ear, Safari's output
+  delay, which files the picker offers, Silent mode, and sound
+  starting on the first Play after opening.

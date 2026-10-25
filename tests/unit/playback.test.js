@@ -209,3 +209,94 @@ test('a frame that will not decode shows blank instead of stopping', async () =>
   assert.deepEqual(t.shown, ['a', 'b', 'c']);
   assert.equal(t.playback.state, 'playing');
 });
+
+// Step 5: the clock (the audio clock when there's sound) is told where
+// each run starts and is stopped when playback halts; its time drives
+// the frames.
+function recordingClock() {
+  let time = 0;
+  const calls = [];
+  return {
+    calls,
+    set(ms) { time = ms; },
+    clock: {
+      start: (opts) => { calls.push(['start', opts]); time = 0; },
+      now: () => time,
+      stop: () => calls.push(['stop']),
+    },
+  };
+}
+
+test('the clock starts from the first frame\'s time, once playing', async () => {
+  const c = recordingClock();
+  const t = setup({ clock: c.clock });
+  t.playback.start({ ids: IDS, startIndex: 2, fps: 10, loop: true });
+  await t.frameAt(0);
+  assert.deepEqual(c.calls, [], 'not while getting ready');
+  await t.frameAt(0);
+  assert.deepEqual(c.calls, [['start', { position: 0.2, fps: 10, frameCount: 4, loop: true }]]);
+  assert.deepEqual(t.shown, ['c']);
+});
+
+test('frames follow the clock\'s time, not the refresh timer', async () => {
+  const c = recordingClock();
+  const t = setup({ clock: c.clock });
+  t.playback.start({ ids: IDS, fps: 10 });
+  await t.frameAt(0);
+  await t.frameAt(0);
+  // The refresh timer says 1000 ms, but the sound has only reached 150.
+  c.set(150);
+  await t.frameAt(1000);
+  assert.deepEqual(t.shown, ['a', 'b']);
+});
+
+test('changing fps or loop restarts the clock from the frame showing', async () => {
+  const c = recordingClock();
+  const t = setup({ clock: c.clock });
+  t.playback.start({ ids: IDS, fps: 10, loop: true });
+  await t.frameAt(0);
+  await t.frameAt(0);
+  c.set(100);
+  await t.frameAt(100); // showing 'b' (index 1)
+  t.playback.setFps(5);
+  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: true }]);
+  t.playback.setLoop(false);
+  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: false }]);
+  c.set(200);
+  await t.frameAt(200);
+  assert.deepEqual(t.shown, ['a', 'b', 'c']);
+});
+
+test('changing fps while getting ready doesn\'t start the clock early', async () => {
+  const c = recordingClock();
+  const t = setup({ clock: c.clock, pendingFrames: 1 });
+  t.playback.start({ ids: IDS, fps: 10 });
+  await t.frameAt(0);
+  t.playback.setFps(20);
+  assert.deepEqual(c.calls, []);
+  t.setPending(0);
+  await t.frameAt(0);
+  await t.frameAt(0);
+  assert.deepEqual(c.calls, [['start', { position: 0, fps: 20, frameCount: 4, loop: true }]]);
+});
+
+test('stopping, ending, or tearing down stops the clock', async () => {
+  for (const how of ['stop', 'end', 'destroy']) {
+    const c = recordingClock();
+    const t = setup({ clock: c.clock });
+    t.playback.start({ ids: IDS, fps: 10, loop: how !== 'end' });
+    await t.frameAt(0);
+    await t.frameAt(0);
+    if (how === 'stop') t.playback.stop();
+    if (how === 'destroy') t.playback.destroy();
+    if (how === 'end') { c.set(400); await t.frameAt(400); }
+    assert.deepEqual(c.calls.at(-1), ['stop'], how);
+  }
+  // Stopped while getting ready: it never started, so nothing to stop.
+  const c = recordingClock();
+  const t = setup({ clock: c.clock, pendingFrames: 1 });
+  t.playback.start({ ids: IDS, fps: 10 });
+  await t.frameAt(0);
+  t.playback.stop();
+  assert.deepEqual(c.calls, []);
+});
