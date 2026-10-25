@@ -5,9 +5,9 @@ The *why* behind decisions, and lessons from things that went wrong.
 `PROJECT_NOTES.md` is the required read and points here.
 
 Rules a future conversation must follow live in `PROJECT_NOTES.md`
-only; this file explains them. If the two ever disagree,
-`PROJECT_NOTES.md` wins — fix this file. Play-by-play history belongs
-in git commits, not here.
+(global) and [`ARCHITECTURE.md`](ARCHITECTURE.md) (per area); this
+file only explains them. If they disagree, the rule files win — fix
+this file. Play-by-play history belongs in git commits, not here.
 
 Sections: [Process lessons](#process-lessons) ·
 [Stack](#stack) · [Drawing engine](#drawing-engine) ·
@@ -545,7 +545,7 @@ Sections: [Process lessons](#process-lessons) ·
     the iPad, iOS drew ↕ as a blue emoji next to a plain ↔. Desktop
     Chromium showed both as text, so tests never caught it. Now both
     are one SVG arrow, the vertical one rotated (rule in
-    PROJECT_NOTES "Layout").
+    PROJECT_NOTES.md → Global rules).
   - **No frame-strip marker.** The wireframe had one, but her apps
     don't badge frames. In Flipaclip and Procreate's Animation Assist
     the photo is part of the frame, so the thumbnail shows it. Step 4's

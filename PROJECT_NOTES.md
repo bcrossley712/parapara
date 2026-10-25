@@ -1,22 +1,27 @@
 # Project Notes — Parapara!
 
-**Required reading before any work.** Current state, rules, and where
-things live. The reasoning behind decisions and lessons from past
-mistakes are in [`docs/DESIGN_NOTES.md`](docs/DESIGN_NOTES.md) — read
-the relevant section when working in that area (links below).
+**Required reading before any work.** Who this is for, how we work,
+current state, global rules, schema and testing. Three files:
 
-**Keeping these notes healthy:** anything a future conversation *must
-follow* goes here, as a short rule with a one-line reason. Longer
-reasoning and lessons go in `docs/DESIGN_NOTES.md`. Play-by-play
-history goes in git commits, nowhere else. If the two files disagree,
-this one wins.
+- **`PROJECT_NOTES.md`** (this file) — read in full, every
+  conversation.
+- **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — how each area
+  works and its don't-break rules. **Before editing a file, read its
+  area's section** (index under [Areas](#areas)).
+- **[`docs/DESIGN_NOTES.md`](docs/DESIGN_NOTES.md)** — the *why* and
+  lessons learned; read the relevant section when a decision needs
+  revisiting.
 
-**Architecture entries stay small:** only what a future step must
-respect — data shapes, invariants, and decisions she made — about 10
-lines per feature. UI specifics (button order, preset lists, exact
-numbers that aren't her decisions) go in code comments. Each step's
-conversation trims its own entry before handing off, so these notes
-don't need a cleanup pass after every step.
+**Keeping these notes healthy:**
+- Rules a conversation must follow live here or in ARCHITECTURE.md,
+  as short rules with a one-line reason. Reasoning goes in
+  DESIGN_NOTES.md. Play-by-play history goes in git commits, nowhere
+  else. If files disagree, this one wins, then ARCHITECTURE.md.
+- **This file stays around 600 lines.** Current state holds only
+  what's in progress, what to check on the iPad, and what's next — a
+  finished step collapses to one line. How a feature works goes in its
+  ARCHITECTURE.md section (rules, data shapes and her decisions; UI
+  specifics belong in code comments).
 
 ## What this is
 
@@ -103,7 +108,7 @@ icon, manifest `name`/`short_name`, and repo copy.
   blocks delete), the reference image (3a: Image button, HEIC from
   Photos, large photos, adjusting by stylus all checked) and reference
   across frames (3b: Use on all frames, new frames inheriting, Flip ↔ /
-  ↕). How each works is under Architecture; she mostly undoes with the
+  ↕). How each works is in docs/ARCHITECTURE.md; she mostly undoes with the
   buttons, not gestures. The color picker's layout is a first try —
   adjust if she wants it different.
 - **Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
@@ -114,7 +119,7 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Step 4: done and confirmed on the iPad** — 4a frame cache and
   tile pictures, 4b playback + transport, 4c onion skin, 4d frame
   delete/reorder and the layer menu with Copy / Paste. How each works
-  is under Architecture (Frame cache and playback, Playback, Onion
+  is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Frame cache and playback, Playback, Onion
   skin, Frame strip editing, Layer menu); 4a's measurements are in
   [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
   Onion skin: she's happy with the colors and 40% for now; if she
@@ -130,19 +135,19 @@ icon, manifest `name`/`short_name`, and repo copy.
   since, but little use yet** — keep the activity log in and keep
   checking it. iOS emptied a layer's canvas while she drew (storage
   still held every frame); before the guard, her next stroke saved
-  blank over the drawing. The guard is under Architecture → Lost
+  blank over the drawing. The guard is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Lost
   canvases. Cause (likely memory) unknown: **if the log shows
   `load-renewed`, `load-broken`, `save-refused`, `check-failed`,
   `hold-refused` or `recover`, get the log** — it says when and how
   often, and now also `canvases=<full-size>/<all>` (in the page;
   offscreen ones aren't counted), `play=` and `onion=`.
 - **A layer encode that never finishes fails the save after 15 s**
-  instead of locking the editor (see Don't break these); if the log
+  instead of locking the editor (see docs/ARCHITECTURE.md → Saving and storage); if the log
   shows `save-failed … timed out`, get the log.
 - **Now: step 5 — audio**, in three parts, each confirmed on the iPad
   before the next: **5a** import, storage and playback in sync · **5b**
   the sound panel, waveform and trim · **5c** hold-to-record while
-  playing. What's built is under Architecture → Sound; the format
+  playing. What's built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Sound; the format
   reasoning, step 6's export, and where her songs can come from are in
   [design notes](docs/DESIGN_NOTES.md#planned-features).
   - **5a: built, not yet confirmed on the iPad** (her iPad had no
@@ -164,7 +169,7 @@ icon, manifest `name`/`short_name`, and repo copy.
     voice to it; **the waveform shows only in the sound panel** —
     the canvas keeps its full height (no lane under the tiles).
   - **5b: built, not yet confirmed on the iPad** (how it works:
-    Architecture → Sound). Check: the track lines up with the tiles and
+    docs/ARCHITECTURE.md → Sound). Check: the track lines up with the tiles and
     scrolls with them smoothly; dragging a handle or the clip with her
     stylus (handles big enough? edge scrolling too fast or slow?);
     picking a part of a long song on the overview; the playhead line
@@ -298,9 +303,10 @@ on the right, over the canvas (doesn't shrink it), opened from a
 top-bar button. Sound panel (step 5): slides up over the bottom of the
 canvas above the frame tiles, opened from a top-bar Sound button.
 
-## Architecture
+## Architecture (core)
 
-Short rules; reasoning in the linked sections.
+Applies to the whole app. How each area works is in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — see [Areas](#areas).
 
 - **Stack:** vanilla JS, native ES modules, no framework, no bundler.
   Nothing from npm ships; npm is test tooling only. CI tests, copies
@@ -320,494 +326,24 @@ Short rules; reasoning in the linked sections.
   is the glue.
 - **Schema:** the thing to get right. Extend additively (new optional
   fields), never restructure. See [Schema](#schema).
-- **Storage:** IndexedDB, fully client-side. Layer bitmaps as PNG.
-  Autosave after a stroke ends, never mid-stroke. Requests
-  `navigator.storage.persist()`. ([why](docs/DESIGN_NOTES.md#storage))
-- **Layers** ([why](docs/DESIGN_NOTES.md#layers-and-undo)):
-  - **Shared across the whole animation, Flipaclip-style:** the
-    project owns the layer list and properties (name, order, visible,
-    opacity, locked); each frame holds only its own pixels per layer.
-    Hide/rename/add applies to every frame.
-  - v1 = add/delete, reorder, visibility, opacity, lock, rename,
-    thumbnails (in memory, refreshed when an edit commits); no blend
-    modes/groups/masks. Cap **8 per project** (`MAX_LAYERS` in
-    `layers.js`). The reference image is separate from layers.
-  - A new layer goes directly above the active one, becomes active,
-    and is named "Layer N". The last layer can't be deleted; after a
-    delete the layer below becomes active. No delete confirm (undoable).
-  - **Locked or hidden active layer:** strokes, fill and Clear are
-    refused with a notice; a touch on it can still become a gesture.
-    **Lock also blocks Delete** (2e) — lock protects the layer, not
-    just its pixels. Rename, move, opacity and Duplicate stay allowed.
-    The menu items stay tappable; the banner says why. Merge down
-    (later) must respect lock too.
-  - **Layer menu (4d)** ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
-    tapping the **active** layer's row opens it (another row just
-    selects). Items: Copy, Paste, Rename, Duplicate, Clear, Delete;
-    Flip H/V and merge down join later. The footer keeps only opacity.
-  - **Clear** (layer menu; 2e): the active layer on this frame only,
-    undoable. Replaced the gear menu's dev "Clear drawing".
-  - **Frames:** add frame inserts a blank frame *after* the current
-    one, with a slot for every layer, and moves onto it. Tapping the
-    current frame's tile opens the frame menu (Duplicate, Delete —
-    4d). Moving to
-    another frame saves the current one first, then reads the next
-    one's layers from storage; a layer that can't be saved (or saving
-    is off) is held in memory by bitmapRef until it can be.
-  - **Rendering:** one `<canvas>` per layer stacked in a wrapper
-    (`.pp-canvas`) that carries the view transform; visibility/opacity
-    are CSS. Input is heard on the whole canvas area, so gestures work
-    with fingers off the page and a stroke can start off it. Only the
-    open frame's layers are in memory; changing frames reuses the same
-    layer canvases.
-  - **Fill reads every visible layer** (composited at opacity) and
-    writes only the active one, so color fills up to line art on
-    another layer. **Smudge reads and writes the active layer only.**
-- **Undo/redo** ([why](docs/DESIGN_NOTES.md#layers-and-undo)):
-  - Raster snapshots, not replayable commands.
-  - One project-wide history (entries tagged with `frameId`; undo jumps
-    to that frame), **in memory only, never saved**.
-  - Entries store only what changed — usually one layer cropped to the
-    stroke's bounds — and hold **one patch at a time** (undo swaps in
-    "before" and keeps "after"; redo the reverse).
-  - Caps: **30 steps and ~150 MB**, oldest dropped first. **The byte
-    budget counts undo and redo together.**
-  - Capture uses **one committed copy of the active layer only** (never
-    one per layer); it follows the active layer — a layer switch
-    resyncs it. The same copy reverts a touch that became a gesture.
-  - Layer structure changes are undoable on the same stack (new entry
-    `type`s alongside `'pixels'`): add, delete, reorder, opacity, add
-    frame, `'frame-delete'` and `'frame-move'` (4d), `'image'` (3a),
-    and `'image-all'` (3b, Use on all frames:
-    keeps each changed frame's old image; undo jumps to the frame it
-    was applied from). **Visibility, lock and Hide images are
-    not undoable** (view state, as in Photoshop). Rename isn't either. An entry for another frame moves
-    to that frame first. Undoing an add frame takes the frame out (its
-    record is deleted, its pixels stay in storage for redo).
-  - **Removing a layer** (delete, or undoing an add) saves its pixels
-    first and leaves them in storage under the frames' old refs, which
-    the entry keeps; bringing it back reloads them. Undo never holds a
-    removed layer's pixels in memory (unless they couldn't be saved).
-  - Anything async (layer add/remove, frame loads) runs one at a time;
-    meanwhile undo/redo, panel actions and new touches are ignored.
-  - `history.js` and `layers.js` are pure; `canvas.js` exposes the
-    seams; `main.js` glues.
-- **Copying (2e)** — copy frame (frame menu), copy layer (layer
-  menu's Duplicate), duplicate project (gallery ⋯):
-  - Record builders in `layers.js` are pure and return `pairs` of
-    [fromBlob, toBlob]; **pixels are copied before anything points at
-    the new refs**, one blob in memory at a time.
-  - In the editor, the open frame is saved first, so a copy matches
-    what she sees (unsaved pixels included).
-  - Copy frame: whole record, new bitmapRefs, `frame.image` shared.
-    Copy layer: "<name> copy", unlocked, directly above, active; counts
-    toward the cap. Both undo as plain `'frame-add'` / `'layer-add'`.
-  - Duplicate project: "<name> copy", new ids for project, frames and
-    every blob (thumbnail → `thumb-<newId>`), layer ids kept; first in
-    the gallery; she stays on the gallery. One transaction.
-- **Colors (2e)** — all in the color picker (UI in `color-picker.js`,
-  list rules in `storage/colors.js`):
-  - **Eyedropper** samples what she sees (`readVisible`, over white),
-    is a one-shot mode, not one of `TOOLS`, never saved, and works on
-    locked/hidden layers. A second finger makes it a gesture.
-  - **Recent colors:** app-wide, 8, added when a draw or fill
-    *commits* (not on picker moves or picks); `meta.recentColors`.
-  - **Palette:** per project, 10, saved on the project record; edits
-    aren't undoable (as in Procreate).
-- **Gestures — match Sketchbook defaults**
-  ([why](docs/DESIGN_NOTES.md#gestures)): three-finger tap = undo;
-  three-finger swipe left/right = undo/redo; two-finger double-tap =
-  reset view; two-finger single tap does nothing; two-finger drag/pinch/twist =
-  pan/zoom/rotate; visible undo/redo buttons too. Later, with a brush
-  library: three-finger swipe up = color, down = brushes.
-- **Tool settings** (tool, color, per-tool sizes) are remembered
-  app-wide, not per project, and carry from one project into the next.
-  Per project: the open frame and active layer. App-wide: whether the
-  layers panel was open, which screen she was on, and the last
-  project. The view (pan/zoom/rotation) resets on launch and on every
-  open.
-- **Menus vs the canvas** (after 5b, Procreate's way): a touch on the
-  canvas while a menu or popover is open (color picker, Image, layer,
-  frame, onion settings, fps, gear) only closes it — no stroke, fill or
-  pick, and fingers joining it are ignored until all are up (the
-  playback-stop swallow). Panels she works with open (layers, sound)
-  don't count. Taps on other controls still act and close the menu.
-- **Messages:** information that isn't a problem (locked/hidden
-  layer, layer cap) is a fading banner that never blocks touches
-  (`showBanner`); real problems (couldn't save) are a toast that waits
-  for OK (`showNotice`).
-- **Projects and screens** ([why](docs/DESIGN_NOTES.md#gallery)):
-  - The gallery or one project in the editor, never both. `main.js`
-    routes: `mountEditor(session)` builds the editor; its Gallery
-    button runs `close()`, which flushes, redraws the thumbnail, then
-    `ui.destroy()` → `canvas.destroy()`. No page reload.
-  - **Launch reopens where she left off** (`uiState.screen` +
-    `lastProjectId`), like Procreate/Sketchbook. Installs from before
-    2d have no `screen` and open the editor. No projects → the empty
-    gallery (no auto-created project).
-  - **Load before switching:** a project is fully loaded (including
-    decoding frame layers) before the gallery is torn down; if it
-    fails, she stays on the gallery with a notice.
-  - Undo history is per open project and is dropped on close.
-  - New project: one tap, named "Animation N" (one past the highest);
-    size/fps defaults, no setup dialog. Rename doesn't bump
-    `updatedAt`; drawing does (`saveLayerBitmap`), so newest-first
-    means most recently drawn on.
-  - **Thumbnail = frame 1**, visible layers at their opacity over
-    white, 480 px wide PNG (`canvas/thumbnail.js`, drawn from saved
-    bitmaps). Redrawn on close and on hide when something in frame 1
-    changed; the gallery draws any that are missing.
-  - Delete is a custom confirm and not undoable; it removes the
-    project, frames and blobs in one transaction.
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
-- **Updates:** a new version waits for the user (toast or gear menu),
-  never swaps silently. Every reload the app causes flushes unsaved
-  work first. ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
-- **Reference image (3a)** ([why](docs/DESIGN_NOTES.md#reference-image)):
-  - A separate, non-destructive image under every layer — never drawn
-    on, not one of the 8 layers. `frame.image` (see Schema); frames may
-    share one blob. Placement math is pure (`canvas/transform.js`);
-    display and import live in `canvas/reference.js`.
-  - Controls: the top-bar **Image** button (`ui/image-menu.js`) —
-    Add/Adjust image, **Use on all frames** (3b; shown when this frame
-    has one and there are other frames), and project-wide **Hide
-    images** (`referenceHidden`, view state, not undoable). Adjust
-    mode swaps the rail for a bar (opacity, Flip ↔, Flip ↕, Replace,
-    Delete, Done); in it two fingers transform the image, not the
-    view; undo/redo are off. No frame-strip marker.
-  - **Flip (3b):** `flipX`/`flipY` booleans (missing = false), never a
-    negative scale (`sanitizePlacement` would reset it to a fresh
-    fit). Flips as seen on screen, whatever the rotation
-    (`flipPlacement`: toggles the flag, negates rotation). Part of the
-    adjust session's one undo step. Everything draws through
-    `placementMatrix`, so view, `readVisible`, thumbnail, and later
-    onion skin/export all get it.
-  - **Use on all frames (3b):** copies this frame's image record
-    (photo + placement + flips) onto every frame as one `'image-all'`
-    entry; frames keep their own placement afterward. A custom confirm
-    only when another frame has a *different* photo (blank frames and
-    a re-placed copy of the same photo don't ask). Banner says how
-    many frames. Rules are pure in `timeline/frames.js`
-    (`imageForAllFrames`).
-  - **New frames inherit (3b):** add frame copies the current frame's
-    image when every frame has the same photo — including a project
-    with one frame — else starts blank (`inheritedImage`). No schema
-    flag. Copy frame already shares the image.
-  - **While a picked photo is being prepared (Replace), the adjust
-    bar's controls are disabled** and an outside tap doesn't commit
-    (`onDone` ignored while busy). Otherwise Done commits the old
-    photo and the new one reopens adjust mode a moment later.
-  - One adjust session = one `'image'` undo entry (small records;
-    blobs stay in storage for the sweep). Leaving the app commits too.
-    **The commit queues its frame save on `frameSaves`; `flush()` and
-    `close()` must wait on it.**
-  - **A missing or undecodable image is skipped, never a failed load**
-    (a failed load turns saving off — see Don't break these).
-  - Import: fit, centered, 50% opacity; long side ≤ the canvas's;
-    JPEG 0.7 unless pixels are actually transparent (then PNG). Space
-    wins over sharpness — her iPad runs near full.
-  - Everything that shows "the frame" includes it via one path:
-    `readVisible`, the thumbnail, and later export; Hide images drops
-    it from all of them. **Onion-skin ghosts never include it** (4c;
-    a ghosted photo is busy).
-- **Frame cache and playback (4a)**
-  ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
-  - **One `renderFrame`** (`canvas/render-frame.js`) flattens a frame
-    for the gallery thumbnail, tiles, the cache, and later onion skin
-    and export. Nothing else composites frames.
-  - **The cache** (`timeline/frame-cache.js`): each frame flattened at
-    **full size, layers only (transparent), as PNG, in memory only**.
-    Paper and the reference image are added when shown, so Hide images
-    and image edits never invalidate it. **Tiles show the frame's photo**
-    (unless Hide images is on) — that's how she sees which frames have
-    one; there's no separate marker. Playback decodes a small ring
-    just ahead of the playhead — never every frame at once.
-  - **Freshness:** an entry is stale when the *layer signature*
-    (visible layers' ids + opacity, in order) or the frame's *content
-    version* (bumped by commit, undo/redo, Clear, copy) changes. A
-    signature change marks every frame stale at once, cheaply.
-  - **Rebuild** runs in the background ~300 ms after changes settle,
-    nearest the current frame first, one frame at a time, never
-    mid-stroke; a result that went stale while building is dropped.
-    Stale tiles stay up until replaced. Rebuilt on every project open.
-  - **Clock** (`timeline/clock.js`): one animation loop asks a clock for
-    elapsed time; `frameAtTime` picks the frame. Late frames are
-    skipped, never slowed — aim at where the playhead will be, keep the
-    last good frame up. Step 5 swaps in the audio clock without
-    touching the loop.
-- **Playback (4b)** ([why](docs/DESIGN_NOTES.md#playback-and-the-frame-cache)):
-  - **Transport** (`timeline/transport.js`): prev / play / next, loop
-    toggle, fps. **fps 1–30, default 12; loop on by default.** Saved on
-    the project, apply at once (even mid-play), **not undoable**.
-  - **Play** starts on her current frame; it never starts early — if
-    frames still need flattening it shows "Getting ready" (the cache is
-    rushed). A frame whose flatten failed doesn't hold it up.
-  - **The loop** (`timeline/playback.js`, pure): frame from elapsed
-    time, a small decoded ring ahead, late frames skipped. The picture
-    is one canvas above the layers, at her current zoom/pan/rotation,
-    existing only while playing.
-  - **Stopping lands her on the frame that was showing** (a normal
-    frame load); loop off stops on the last frame.
-  - **While playing she can't draw:** a touch stops playback and is
-    swallowed until every finger is up. **Anything that changes the
-    project stops playback, lands, then acts** (`afterPlayback` in
-    `main.js`). Settings (tool, color, size, fps, loop) don't stop it.
-    **The Image button only stops** — iOS won't open the photo picker
-    after a wait. Hiding the app stops it.
-- **Onion skin (4c)** ([why](docs/DESIGN_NOTES.md#onion-skin)):
-  - **Ghosts** are neighbors' cached pictures (layers only — **never
-    the photo**, hidden layers out), tinted one color, on one canvas
-    over the photo and under every layer. Previous red, next green,
-    further ones fainter. **No wrap-around**, even with loop. Rules
-    pure in `timeline/onion.js`; drawing in `canvas/onion-view.js`.
-  - **Defaults (convention, not yet checked with her):** off; 1 before,
-    1 after (0–3 each); 40% (10–80%). **Saved per project
-    (`project.onionSkin`), not undoable**; bad fields fall back one by
-    one.
-  - A ghost not flattened yet is left out; a stale one shows until
-    rebuilt. **Hidden while playing and landing.** The toggle and its
-    settings are a badge on the canvas (`ui/onion-badge.js`); a
-    setting, so it doesn't stop playback.
-  - **Left out unless she asks:** wrap-around, active-layer-only
-    ghosts, keyframe-only onion, per-frame ghost toggles.
-- **Frame strip editing (4d)** — delete and reorder on the strip;
-  copy/paste in the layer menu:
-  - **Delete:** frame menu, no confirm (undoable), not on the last
-    frame. `'frame-delete'` is `'frame-add'` run backwards; pixels stay
-    in storage under the frame's refs for undo.
-  - **Reorder:** long-press a tile and drag; she stays on her frame.
-    Only `project.frames` changes; `'frame-move'` keeps `from`/`to`.
-  - **Copy / Paste:** Copy takes the active layer's drawing on this
-    frame (after `checkLayer` — a lost canvas would copy blank). Paste
-    goes **on top** in **whichever layer is active** — her choice,
-    never a new layer. One `'pixels'` undo entry; lock/hide refuse it.
-    Clipboard lives in memory, open project only.
-  - All three can change frame 1, so they mark the gallery thumbnail
-    stale.
-- **Lost canvases (after 4c)** ([why](docs/DESIGN_NOTES.md#lost-canvases))
-  — iOS can empty a layer canvas without telling the page; saving it
-  would write blank over her drawing.
-  - **Ink maps** (`canvas/ink-map.js`, pure): a 1/8-scale grid of
-    which cells have paint, per layer; edits mark the cells they touch.
-    **Lost = ink gone from cells she didn't edit** (≥ 8 cells and ≥ half
-    of them), so erasing — even everything — never trips it. A canvas
-    losing only a few cells isn't caught (on purpose: no noise trips).
-  - **On every load** (`loadFrame`, `setLayerImage` → `fillSurface`):
-    the map comes from the decoded image; if the canvas doesn't hold
-    it, the canvas element is swapped for a fresh one (and the
-    committed copy too) and drawn again — a banner says so. Still not
-    holding it → `broken`: painting refused, notice to reopen the app.
-  - **Before every save** and when the app comes back into view
-    (`checkLayer`): a lost layer isn't saved (or held in memory); it's
-    reloaded from storage onto a fresh canvas (`recoverLayers`, one at
-    a time, waits for a quiet moment) with a notice. Strokes since the
-    last save are lost; the drawing isn't.
-- **Sound (5a, 5b)** ([why](docs/DESIGN_NOTES.md#planned-features)):
-  - **One clip** in `project.audioClips` (rules pure in
-    `audio/clip.js`; bad records dropped on open, never a failed
-    open): `trimStart`/`trimEnd` pick the part of the file, `offset`
-    where it starts in the animation — all seconds. 5a always makes
-    0 / file length / 0.
-  - **The file is stored exactly as picked, never re-encoded**
-    (`saveAudioBlob`: ArrayBuffer + its MIME type, before the project
-    points at it), and accepted only if it decodes here — so playback
-    and step 6's export can always read it. Over **20 MB** refused
-    before reading; longer than **3 min**, only the first 3 min are
-    decoded and used (banner). Only the current clip's decoded sound
-    is in memory.
-  - **The audio clock** (`audio/audio.js`) drives playback when
-    there's a clip: playback hands it each run's start (frame time,
-    fps, frame count, loop) and stops it; its time is the
-    AudioContext's minus the output delay, so frames follow what she
-    hears. It schedules the clip on that clock — this pass at once,
-    each loop pass ~1 s ahead — so loops are seamless and never drift.
-    **The animation's length wins:** only the part inside frames ÷
-    fps plays. No clip, or a context that doesn't start within 1 s:
-    the wall clock, silently.
-  - **Sound button** (top bar, before Image; a dot when there's
-    sound) toggles the **sound panel** (5b, `ui/sound-panel.js`) over
-    the canvas area's bottom, above the tiles — covers, never shrinks;
-    not remembered across launches. Import while playing only stops
-    (picker inside the tap). Import/Replace/Delete and each trim/move
-    drag are one `'audio'` undo entry (`{ before, after }` clip lists);
-    files stay in storage for undo and the sweep.
-  - **Panel (5b):** a track at the tiles' scale (one frame = a tile +
-    its gap, `strip.timeline`), scrolling with them: drag the clip to
-    move it — left past frame 1 grows `trimStart` (offset stays ≥ 0);
-    handles trim; an end pulled back to the animation's end plays to
-    the file's end. Above it, an **overview of the whole file** (not
-    in Flipaclip — she can't reach a song's middle at tile scale): drag
-    or tap it to pick which part plays (`slipClip`). Rules pure in
-    `audio/clip.js`; no snapping; min length one frame. A touch on the
-    track or overview while playing only stops. While open, the onion
-    badge and "Getting ready" sit above it and the layers panel ends
-    above it. Peaks (`audio/peaks.js`) are worked out when the panel
-    first shows a sound.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
   recording (5c — under Current state);
   export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota (with step 6).
 
-## Don't break these
+## Global rules
 
-Each is here because breaking it caused (or would cause) a real bug.
+Rules any change can run into, whatever area it's in. Area-specific
+rules are in each area's **Don't break** in `docs/ARCHITECTURE.md`.
 
-**Canvas** ([why](docs/DESIGN_NOTES.md#gestures))
-- The wrapper's (`.pp-canvas`) `transform-origin` is `0 0`, set in JS
-  where it's created — the gesture math depends on it. The transform
-  goes on the wrapper, never on a layer canvas.
-- Layer canvases are `pointer-events: none`; pointer listeners and
-  capture belong to the canvas area (`.pp-canvas-area`), never the
-  page or a layer — fingers off the page must still count.
-- **Anything that changes a frame's pixels must `frameCache.touch`
-  that frame** (`main.js`): `markUnsaved` and `swapPixels` do. A
-  change to what layers show goes through `layerSignature`, picked up
-  in `refreshPanel`. Miss one and that frame's tile (and later its
-  playback) shows old pixels until something else touches it.
-- **The cache holds layers only** — no paper, no reference image.
-  Paper and photo are added when it's shown (`drawFlattened`), so Hide
-  images and image edits never invalidate it.
-- **The open frame flattens from its live canvases, synchronously**
-  (`layerSource` in `renderFrame`); others from storage. An await in
-  the live path would let a stroke land halfway through.
-- **Autosave exports every unsaved layer in the same tick and saves
-  each to the ref of the frame it was exported from** (`session.frame`
-  captured before any await). Reading the ref after awaiting the
-  encode could put one frame's pixels under another frame's ref.
-- **`canvasApi.getLayerImage` is read-only** — drawing into it skips
-  undo and saving.
-- **`exportPNG` gives up after `EXPORT_TIMEOUT_MS` (15 s)** with a
-  `TimeoutError` (step 5). Every save and frame switch waits on it, so
-  a `toBlob` that never calls back would otherwise lock the editor
-  with no message. Autosave shows its own notice for it (not "out of
-  space"); the layer stays unsaved and the next edit retries.
-- **Every change to a layer's pixels marks its ink map** — through
-  `notifyChange`, `swapRegion`, `revertUncommitted` (`noteEdit`), or
-  a full refill through `fillSurface` (loads, `setLayerImage`). A new
-  pixel path that skips this makes the save guard refuse her own edit
-  (or miss a lost canvas).
-- **Never save or hold a layer whose `checkLayer` fails** (autosave's
-  save, `leaveFrame`). Any new path that writes layer pixels to
-  storage from the live canvas goes through it too.
-- **Layer canvas elements can be replaced** (`renewSurface`) — never
-  keep a reference to a `.pp-layer` element or its context across
-  calls; ask `canvasApi` each time. Same for the committed copy.
-- **`readVisible(rect)` (`canvas.js`) is the one "what she sees"
-  sampler** for fill and the eyedropper. The reference image (3a) is
-  in it, under the layers, when showing (its single-layer fast path
-  is skipped then). The onion skin's ghosts and the playback picture
-  must stay out (they aren't her drawing).
-- **The ghost canvas (`.pp-onion`) sits right after the reference
-  holder and before every layer** (`reference.element.after(...)`;
-  `applyLayers` appends layers after it). It isn't a `.pp-layer` —
-  tests count those.
-- **The onion badge stops its own pointer events** (`onion-badge.js`).
-  It's inside the canvas area, whose pointerdown takes the pointer for
-  a stroke: without the stop, the badge's buttons never get a click
-  (and a tap during playback would stop it).
-- **The playback picture (`.pp-playback`) stays the wrapper's last
-  child** — `applyLayers` re-appends it after the layers.
-- **The playback swallow runs before the `inputBlocked` check** in
-  `onPointerDown`, and swallowed pointers are handled first in move
-  and up. Otherwise a stop that lands on the same frame (no frame
-  load, so no input block) lets the stop tap draw, and a finger
-  joining it would start a stroke. A primary pointer with nothing
-  playing clears stale entries.
-- **The reference holder (`.pp-reference`) stays the wrapper's first
-  child** (`prepend`; `applyLayers` appends layers after it), so it's
-  under every layer. It and its image keep `transform-origin: 0 0`,
-  and the holder is rescaled in `fitStack`. Otherwise the image drifts
-  from where fill and the eyedropper think it is.
-- **Adjust mode commits on outside taps in the capture phase, on
-  `click` for buttons** (`ui.js`). The commit re-renders the frame
-  strip, and a tile replaced between pointerdown and pointerup never
-  gets its click. Sliders commit on pointerdown, since they never
-  click. Disabled controls don't commit.
 - **The picker opens inside the tap:** `ui.pickImage()` and
   `ui.pickAudio()` (5a) must run synchronously from a click (Image
   menu item, Replace, Import sound). An `await` before it and iOS
   won't open the picker. Likewise **`audio.unlock()` runs
   synchronously in the Play tap** — iOS starts sound only from one.
-- **The sound panel stops its own pointer events** (like the onion
-  badge) — it's inside the canvas area, which would take a touch on it
-  for a stroke or a playback stop. **Its waveform canvases are only as
-  wide as the track**, redrawn on scroll — never one canvas the length
-  of the song (iOS canvas limits and memory).
-- **The menu-dismiss listener in `ui.js` is registered before any
-  menu is created** (document, capture): it must see the menu still
-  open, and menus close themselves in their own capture listeners. It
-  marks the touch with `canvasApi.dismissTouch(id)`, which the canvas's
-  pointerdown consumes and clears every time — a leftover id would
-  swallow the next mouse tap (a mouse's id never changes). A new menu
-  needs an `isMenuOpen` getter added to `anyMenuOpen()`.
-- **The Sound and Image buttons have separate class names**
-  (`.pp-sound-btn…`, `.pp-image-btn…`; shared rules list both). Tests
-  find the Image button by class — sharing one broke every reference
-  test (5a).
-- Fill's region comes from the visible-layer composite, its pixels go
-  to the active layer only — never write the composite back.
-- `toCanvasPoint` is computed analytically from viewport state, never
-  from `getBoundingClientRect()` (wrong once rotated). Every tool
-  routes through it.
-- Rotation accumulates frame to frame (`shortestAngleDelta`), never
-  diffed against the start angle.
-- **A layer's context keeps the last stroke's blending mode** — erase
-  leaves `destination-out` set. Anything that draws onto a layer
-  outside a stroke (paste, 4d) sets `source-over` and alpha 1 itself
-  inside `save()`/`restore()`, or it erases instead (the robot test
-  caught this).
-- Fill applies immediately but is a gesture candidate like draw/erase:
-  a second finger in the window reverts it from the committed copy. It
-  commits on pointerup.
-- Every paint operation marks the dirty rect (`stamp()`, smudge step,
-  fill bounds) — a mark outside it won't be undoable or revertible.
-- Anything that replaces layer pixels outside a stroke (`setImage`,
-  `swapRegion`, `clear`) must also update the committed copy.
-- No `willReadFrequently: true` on the main canvas context.
-
-**Storage** ([why](docs/DESIGN_NOTES.md#storage))
-- Store/index changes need a `DB_VERSION` bump and a *new* upgrade
-  branch — never edit an existing branch.
-- Bitmaps stored as ArrayBuffer + MIME type, not Blob.
-- Don't await non-IndexedDB work inside `withTransaction` (it
-  auto-commits early).
-- Never save over work that failed to load: opening a project that
-  fails leaves her on the gallery; if the database can't open at all,
-  the editor runs on an unsaved in-memory project with no Gallery
-  button.
-- **The sweep (on every project open) deletes every blob of the
-  project not listed by `referencedBlobIds` (`layers.js`).** Both it
-  and duplicate project walk refs through **`mapBlobRefs`** — the one
-  list of where blob refs live. Any new kind of blob reference (step 3
-  images, step 5 audio) must be added there, or the sweep deletes it
-  and a duplicate shares it with the original. The thumbnail
-  (`thumbnailBlobId`) is derived, not a field; both handle it
-  separately.
-- `savedDrawingBytes` in the e2e helpers skips `thumb-` blobs — keep
-  that if thumbnail ids change. Sound files and photos count in it; skip
-  them too if a sound/photo test ever uses it.
-- Tool-settings validation lives in `canvas.js`
-  (`sanitizeToolSettings`); bad fields fall back individually.
-
-**Layout, PWA, updates** ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
-- `#app` is `position: fixed; inset: 0`; each screen's shell inside it
-  is `position: absolute; inset: 0` — never `vh`/`dvh` units for
-  full-screen layout without testing on the iPad.
-- Safe-area padding needs `viewport-fit=cover`,
-  `black-translucent`, and global `box-sizing: border-box` — keep all
-  three.
-- **Anything at the top edge stays dark**, including `theme-color`,
-  the manifest's `theme_color`/`background_color`, and the `html, body`
-  background — iPadOS restyles the status bar from them.
-  ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
-- **`#app` is the one fixed box at the top edge, and it's never
-  replaced** — screens inside it are absolute, not fixed, and swap
-  with no empty moment (load the next screen's data first). No
-  `backdrop-filter`, gradient or see-through bar at the top. Otherwise
-  iPadOS 26 blurs the top of the app until relaunch.
-  ([why](docs/DESIGN_NOTES.md#pwa-layout-and-updates))
 - Text inputs ≥ 16px font.
 - **No arrow or symbol characters as icons in labels** (↔, ↕, ✓, ★ …)
   — iOS may draw them as color emoji (↕ did, in 3b's flip button),
@@ -815,130 +351,41 @@ Each is here because breaking it caused (or would cause) a real bug.
   `currentColor`.
 - Layouts must tolerate wider text than desktop Chromium shows — no
   `nowrap` on content that could grow.
-- **Names she types wrap but clamp at two lines** (layer rows, gallery
-  cards) and have a length cap (`MAX_LAYER_NAME` 40 in `layers.js`,
-  `MAX_PROJECT_NAME` 60 in `storage.js`) that copies keep to too
-  (`copyName`) — an unclamped name grew the row without limit.
-- The canvas re-measures via `ResizeObserver` on the canvas area, not
-  window resize.
-- **Anything an editor screen hooks up outside its own elements**
-  (document listeners, observers) must be undone by `destroy()` —
-  `ui.js` and `gallery.js` route document listeners through an
-  `AbortController`. `canvas.destroy()` shrinks every canvas to 0×0 so
-  iOS frees that memory before the next project loads.
-- Screen switches save `uiState` immediately, not debounced, so
-  closing the app straight after still reopens the right screen.
 - `sw.js` `APP_SHELL` lists every module reachable from `main.js`
   (a test enforces this). Pre-cache uses `cache: 'reload'`.
 - **Shared origin:** all of the account's GitHub Pages projects share
   `bcrossley712.github.io`. Only ever touch `parapara-` caches and
   this scope's service-worker registration.
-- First install must not reload the page (`clients.claim()` fires
-  `controllerchange` then too).
+- **Schema and storage:** extend the schema additively; store/index
+  changes need a `DB_VERSION` bump and a *new* upgrade branch. Any new
+  kind of blob reference must be added to `mapBlobRefs` (`layers.js`)
+  or the launch sweep deletes it (Saving and storage).
+- **Anything that changes layer pixels** — a new tool, flip, merge
+  down — must mark the ink map and dirty rect (Canvas and drawing)
+  and `frameCache.touch` the frame (Frames, playback and onion skin).
 
-## Where things live
+## Areas
 
-    index.html, manifest.json, style.css
-    sw.js                 service worker; VERSION stamped by CI
-    js/
-      main.js             entry + glue: screen routing (gallery ↔ editor),
-                          storage ↔ canvas ↔ ui, autosave, thumbnails,
-                          updater ↔ toast/gear
-      updater.js          SW registration, update checks/apply, version,
-                          fresh reload — no UI
-      canvas/
-        canvas.js         input dispatch, tools, viewport, layer surfaces,
-                          committed copy; its returned API is the only
-                          way other modules touch the canvas
-        render-frame.js   renderFrame: the one "frame, flattened" rule
-                          (gallery thumbnail, cache, tiles; later onion
-                          skin, export); drawFlattened, loadReference
-        frame-tiles.js    frame strip pictures: cached layers over
-                          paper + the frame's photo (4a-ii)
-        playback-frames.js  playback's decode (cached layers + photo,
-                          shared by blobRef) and draw (4b)
-        onion-view.js     onion skin's ghosts: decode cached pictures,
-                          tint, draw onto the ghost canvas (4c)
-        thumbnail.js      frame-1 gallery thumbnail from saved bitmaps
-                          (reference image first, unless hidden)
-        reference.js      reference image: on-screen view, drawReference,
-                          prepareImport (3a)
-        transform.js      pure placement math for the reference image
-        brush.js          brush-tip seam: stamp(ctx, point, size)
-        gestures.js       pure pan/zoom/rotate math + tap/swipe classifiers
-        region.js         pure dirty-rect helpers; inkBounds (4d copy)
-        ink-map.js        pure lost-canvas rule: ink maps, edited cells,
-                          looksLost (after 4c)
-      storage/
-        storage.js        IndexedDB wrapper + schema factories
-        autosave.js       save timing only (debounce, no overlap, flush)
-        history.js        undo/redo stack, caps, byte budget (in memory)
-        layers.js         pure layer-list + bitmap-slot ops, MAX_LAYERS,
-                          mapBlobRefs / referencedBlobIds (launch
-                          sweep), copy record builders
-        colors.js         pure recents/palette list ops, MAX_RECENTS,
-                          MAX_PALETTE, saved-list validation
-        dev-log.js        DEV ONLY: activity log, 300 lines in
-                          localStorage, written at most once a second
-                          and on hide
-      ui/
-        ui.js             editor: top bar (Gallery, undo/redo, Image, Layers),
-                          tool rail, toasts/banners, DOM glue, destroy
-        gallery.js        gallery screen (UI only; intents via callbacks)
-        confirm-dialog.js custom modal: showConfirm / showPrompt
-        icons.js          icons shared by both screens
-        layers-panel.js   layers panel + layer menu (4d) (UI only;
-                          intents via callbacks)
-        reference-bar.js  adjust-image bar that replaces the rail (UI only)
-        image-menu.js     top-bar Image button + menu, state dot/slash
-                          (UI only)
-        sound-panel.js    top-bar Sound button + the sound panel: track,
-                          overview, trim/move drags (UI only) (5b)
-        onion-badge.js    onion skin's badge + settings panel (UI only)
-                          (4c)
-        color-picker.js   custom HSV picker + eyedropper button,
-                          recents row, palette grid (UI only)
-        dev-log-view.js   DEV ONLY: the activity log dialog (Copy, Clear)
-        settings-panel.js gear menu (dev section is temporary);
-                          attachSettingsMenu for either screen
-      timeline/
-        frames.js         pure frame-order ops (insert/remove/move);
-                          reference image across frames (3b)
-        frame-strip.js    frame strip + frame menu, long-press drag to
-                          reorder (4d); `timeline` geometry/scroll for
-                          the sound panel (5b) (UI only)
-        clock.js          pure elapsed time → frame (beatAtTime,
-                          frameAtBeat, frameAtTime); fps rules
-                          (sanitizeFps, MIN/MAX/DEFAULT_FPS, presets)
-        frame-cache.js    pure flattened-frame cache bookkeeping:
-                          layerSignature, freshness, rebuild order (4a-ii)
-        dev-stress.js     DEV ONLY: playback speed + frame memory tests
-                          (4a-i)
-        playback.js       pure playback loop: getting ready, decode ring,
-                          skip late frames, fps/loop re-anchor (4b)
-        transport.js      transport row + fps panel + "Getting ready"
-                          label (UI only) (4b)
-        onion.js          pure onion-skin rules: settings defaults and
-                          clean-up, which frames are ghosts (4c)
-      audio/
-        clip.js           pure sound rules: clip clean-up, import caps,
-                          where the clip lands in the animation (5a);
-                          move/trim/slip rules (5b)
-        peaks.js          pure waveform peaks from decoded samples (5b)
-        audio.js          AudioContext, decode, the audio clock
-                          playback runs on (5a)
-      export/             placeholder for step 6
-    icons/                app icon set
-    tests/unit/, tests/e2e/      see Testing
-    docs/DESIGN_NOTES.md  reasoning and lessons
-    package.json, playwright.config.js   test tooling only
+**Before editing a file, read its area's section** in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (Files, How it works,
+Don't break, Testing tips, iPad-only checks).
 
-**Notable constants:** `MAX_BRUSH_SIZE` (60) and `DEFAULT_COLOR` are
-exported from `canvas.js` as the single source of truth. Autosave
-debounce 500 ms (drawing), 300 ms (settings). Gesture thresholds in
-`gestures.js`: 150 ms / 8 px window; zoom 0.25–8× (fit = 1×); double-tap gap
-350 ms; third finger joins within 200 ms; three-finger tap ≤ 350 ms /
-20 px; swipe ≥ 60 px, mostly horizontal. Undo caps in `history.js`.
+| Area | Main files |
+|---|---|
+| [Canvas and drawing](docs/ARCHITECTURE.md#canvas-and-drawing) | `canvas/canvas.js`, `brush.js`, `gestures.js`, `region.js`, `ink-map.js` |
+| [Layers, undo and copying](docs/ARCHITECTURE.md#layers-undo-and-copying) | `storage/layers.js`, `history.js`, `ui/layers-panel.js` |
+| [Saving and storage](docs/ARCHITECTURE.md#saving-and-storage) | `storage/storage.js`, `autosave.js`, `dev-log.js` |
+| [Frames, playback and onion skin](docs/ARCHITECTURE.md#frames-playback-and-onion-skin) | `timeline/*`, `canvas/render-frame.js`, `frame-tiles.js`, `playback-frames.js`, `onion-view.js`, `thumbnail.js`, `ui/onion-badge.js` |
+| [Reference image](docs/ARCHITECTURE.md#reference-image) | `canvas/reference.js`, `transform.js`, `ui/image-menu.js`, `reference-bar.js` |
+| [Sound](docs/ARCHITECTURE.md#sound) | `audio/*`, `ui/sound-panel.js` |
+| [Colors and tool settings](docs/ARCHITECTURE.md#colors-and-tool-settings) | `ui/color-picker.js`, `storage/colors.js` |
+| [Editor UI, menus and screens](docs/ARCHITECTURE.md#editor-ui-menus-and-screens) | `ui/ui.js`, `gallery.js`, `confirm-dialog.js`, `icons.js`, `settings-panel.js`, `dev-log-view.js` |
+| [PWA, layout and updates](docs/ARCHITECTURE.md#pwa-layout-and-updates) | `index.html`, `manifest.json`, `style.css`, `sw.js`, `updater.js` |
+
+`main.js` is the glue between areas — read the section for whatever
+it's wiring. `export/` is a placeholder for step 6. Tests: `tests/unit/`,
+`tests/e2e/` (see Testing). Test tooling: `package.json`,
+`playwright.config.js`.
 
 **Dev-only, remove before calling the app done:** the gear menu's
 Developer section (Fresh reload, and from 2c a fill-all-layers
@@ -1006,13 +453,22 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 
 ## Testing
 
-**Run tests before handing off any change; add tests for new logic.**
+**Add tests for new logic. Run them in three tiers — not the full
+suite after every small change:**
+1. **While working:** `npm run test:unit` (seconds) plus only the e2e
+   spec files for the area being changed, e.g.
+   `npx playwright test sound` (the area's Testing tips are in
+   ARCHITECTURE.md). Stress-run a timing spec once it passes.
+2. **Once, before handing off for a push:** the full suite — a change
+   in one area can break another (5b's menu change broke the robot
+   test). Sandbox failures may be the known `toBlob` stall (below).
+3. **On every push:** CI runs everything on 4 workers and blocks the
+   deploy on any failure — the real gate.
 
-**Hand-off checklist, every step:** tests pass (stress-run any timing
-spec) → this step's Architecture entry trimmed to the size rule at the
-top (≈10 lines; UI specifics in code comments) → Current state says
-what's built and what to check on the iPad, with no story of how it
-got there.
+**Hand-off checklist, every step:** full suite passes → the area
+section in ARCHITECTURE.md is updated (rules and decisions only) →
+Current state here says what's built and what to check on the iPad,
+with no story of how it got there.
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
   `npm run test:e2e` (~3.2 min), or `npm test`.
@@ -1073,8 +529,6 @@ got there.
   - Each test gets its own browser context (own IndexedDB), so tests
     must not depend on order or on each other. ~3.2 min after the
     lost-canvas guard.
-  - **Find the gear button with `exact: true`** (`name: 'Settings'`)
-    — "Onion skin settings" matches a loose lookup too.
   - **The robot test** (`hunt.spec.js`): seeded random use with a
     model; checks every mark on screen and after a reload. **When it
     fails in the sandbox, read the message:** a timeout can be the
@@ -1089,21 +543,6 @@ got there.
     `HUNT_SEED=<n>` to rerun a failure (the log is attached).
     `canvas-loss.spec.js` simulates the lost canvas (cleared, or
     ignoring `drawImage`).
-  - **Layer actions in e2e** go through the layer menu: `helpers.js`
-    `layerMenu(page, item)` / `openLayerMenu` / `layerMenuItem`; wait
-    for the panel to settle with `layersSettled` (the opacity slider is
-    off while busy).
-  - **Images in e2e:** make the test image in the page (a canvas →
-    PNG buffer) and feed it through `page.waitForEvent('filechooser')`
-    so the real picker path runs (`reference.spec.js`).
-  - **Sound in e2e** (`sound.spec.js`): a WAV built in Node, fed
-    through the file chooser; `AudioBufferSourceNode.start` wrapped to
-    see what the audio clock schedules. Headless Chromium runs the
-    AudioContext after the Play click. Blobs come back from
-    `page.evaluate` as byte arrays (ArrayBuffers don't survive it).
-    Panel drags (5b) grab the clip's *visible* part (the track clips
-    it when scrolled) and start from frame 1 — a drag ending near the
-    track's left end edge-scrolls and moves the clip further.
 - **CI:** test → build → deploy; a failing test stops the deploy.
   Failure reports are kept 7 days as a workflow artifact.
 - **Published site = app files only.** The build job copies the repo
@@ -1111,20 +550,5 @@ got there.
   folder to that exclude list** in `deploy.yml`.
 - **Device-only (say so at handoff):** iOS storage eviction, stylus
   feel, iPadOS gesture conflicts, Safari-only rendering, iOS
-  suspend/relaunch behavior, gallery touch scrolling, canvas memory
-  release between projects, the iPadOS 26 top-edge blur (desktop
-  Chromium never draws it), long-press feel, the photo picker (Photos
-  vs Files, HEIC arriving as JPEG), memory with large imported photos,
-  adjusting and flipping an image by finger and stylus, playback
-  smoothness at 24–30 fps with real line art, the stop tap with her
-  stylus, the moment of frame loading after a stop, how the onion
-  ghosts read over her real line art, and how soon they appear after
-  a frame switch, whether iPadOS's real lost canvas behaves like
-  the simulations in `canvas-loss.spec.js`, and (4d) the long-press
-  feel, the strip letting go of its scroll once a tile lifts, and no
-  callout on a held tile; (5a) sound in sync by ear, Safari's output
-  delay, which files the picker offers, Silent mode, and sound
-  starting on the first Play after opening; a canvas tap closing a menu
-  without drawing, with her stylus; (5b) dragging the clip and
-  handles with her stylus, the track scrolling smoothly with the
-  tiles, and memory/pause with a long song's waveform.
+  suspend/relaunch behavior — plus each area's **iPad-only checks** in
+  ARCHITECTURE.md for the areas a change touched.
