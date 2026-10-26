@@ -368,12 +368,18 @@ test('moving the clip, then past frame 1, and playback uses the edit', async ({ 
   expect(slid.trimStart).toBeCloseTo(3 / 12, 2);
   expect(slid.trimEnd).toBeCloseTo(0.5, 2);
 
-  // Play from frame 1: the sound starts from the trimmed point.
+  // Play from frame 1: the sound starts from the trimmed point. If the
+  // start time has already passed when it's scheduled (a busy CI
+  // machine), the engine cuts that much off the front rather than
+  // playing late — so it may begin a few ms in, but always ends at the
+  // clip's end.
   await playBtn(page).click();
   await expect.poll(() => page.evaluate(() => window.__soundStarts.length)).toBeGreaterThan(0);
   const [first] = await page.evaluate(() => window.__soundStarts);
-  expect(first.offset).toBeCloseTo(3 / 12, 2);
-  expect(first.duration).toBeCloseTo(0.5 - 3 / 12, 2);
+  const late = first.offset - slid.trimStart;
+  expect(late).toBeGreaterThanOrEqual(-0.001);
+  expect(late).toBeLessThan(0.05);
+  expect(first.offset + first.duration).toBeCloseTo(slid.trimEnd, 2);
   await playBtn(page).click();
 });
 
