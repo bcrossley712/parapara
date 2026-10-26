@@ -150,48 +150,80 @@ icon, manifest `name`/`short_name`, and repo copy.
   playing. What's built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Sound; the format
   reasoning, step 6's export, and where her songs can come from are in
   [design notes](docs/DESIGN_NOTES.md#planned-features).
-  - **5a: built, not yet confirmed on the iPad** (her iPad had no
-    sound files yet — Voice Memos → Share → Save to Files makes an m4a
-    to test with). Check: the panel's Import opens Files directly (no Photo Library / Take
-    Video menu — first try showed it, fixed by listing extensions)
-    and offers her mp3/m4a/wav files;
-    an import plays in time with the animation, from frame 1 and from
-    a later frame, and loops without a gap or drift; the sound starts
-    on the first Play after opening (iOS's tap rule); fps and loop
-    changes while playing; hiding the app stops it; Silent mode
-    (decide then whether to set the audio session to "playback"); a
-    song over 3 minutes (only its start is used); what reopening a
-    project with sound feels like (decoding adds to "Getting ready").
-    Tell her up front: songs from Spotify/Apple Music/Amazon Music
-    streams can't be imported — bought downloads can.
+  - **5a: import confirmed on the iPad; sound was silent — she was in
+    Silent mode.** Fixed (after 5b): the audio session is set to
+    "playback", so sound plays in Silent mode like her apps'; Play
+    pressed while a project's sound is still loading now starts it too;
+    the log says whether each Play's sound started (`sound-start`,
+    `sound-silent`, `sound-unlock-failed`; `play` lists `ctx=` and
+    `session=`). **Not yet confirmed on the iPad.** Check: sound plays
+    with Silent on; in time with the animation, from frame 1 and from a
+    later frame, looping without a gap or drift; the first Play after
+    opening a project with sound (also Play pressed during "Getting
+    ready"); fps and loop changes while playing; hiding the app stops
+    it; a song over 3 minutes (only its start is used). If sound is
+    missing, get the log. Tell her up front: songs from Spotify/Apple
+    Music/Amazon Music streams can't be imported — bought downloads can.
   - **Her choices:** **hold to record** (Flipaclip; let go to stop);
     **the animation plays while she records**, so she can time her
     voice to it; **the waveform shows only in the sound panel** —
-    the canvas keeps its full height (no lane under the tiles).
-  - **5b: built, not yet confirmed on the iPad** (how it works:
-    docs/ARCHITECTURE.md → Sound). Check: the track lines up with the tiles and
-    scrolls with them smoothly; dragging a handle or the clip with her
-    stylus (handles big enough? edge scrolling too fast or slow?);
-    picking a part of a long song on the overview; the playhead line
-    while playing; a touch on the panel while playing only stops; the
-    onion badge above the panel; memory with a 3-minute song open
-    (the waveform is worked out when the panel first opens — any
-    pause?). Ask her whether the panel should reopen by itself next
-    launch (it doesn't).
-  - **5c — recording:** starts from the frame she's on (`offset` =
-    that frame's time); plays without looping and stops picture and
-    recording at the last frame, even with loop on. Stored in
-    MediaRecorder's default (AAC in MP4), never re-encoded. A new
-    recording **replaces** the clip (undoable); the old one is silent
-    while she records. A hold under ~0.5 s records nothing ("Hold to
-    record" banner). The first hold asks for the mic, which interrupts
-    it — a banner says to hold again. Mic delay: measured on the iPad
-    and corrected once in code, no setting.
-  - **Out unless she asks** (Flipaclip has them): more tracks,
-    slicing, looping past the end, volume, a sound library, scrubbing
-    sound while stepping frames.
+    the canvas keeps its full height (no lane under the tiles);
+    **she records over music** (after 5b's first iPad check).
+  - **5b: built, not yet confirmed on the iPad** — waiting on sound
+    (how it works: docs/ARCHITECTURE.md → Sound). Check: the track
+    lines up with the tiles and scrolls with them smoothly; dragging a
+    handle or the clip with her stylus (handles big enough? edge
+    scrolling too fast or slow?); picking a part of a long song on the
+    overview; the playhead line while playing; a touch on the panel
+    while playing only stops; the onion badge above the panel; memory
+    with a 3-minute song open (the waveform is worked out when the
+    panel first opens — any pause?). Ask her whether the panel should
+    reopen by itself next launch (it doesn't).
+  - **5c: built, not yet confirmed on the iPad** — Music and Voice
+    rows, hold-to-record over music; how it works and her choices are in
+    docs/ARCHITECTURE.md → Sound (countdown 3 s, headphones tip, confirm
+    before replacing an older Voice, take kept on any interruption). Also
+    fixed with it: the panel's waveform could be missing right after
+    opening (`ui.js` didn't pass `onOpenChange` on). **First, run gear →
+    Developer → Mic delay test** a few times (speaker, volume up, no
+    headphones, quiet room) and send the log's `mic-delay` lines — the
+    number goes into `MIC_DELAY_SECONDS` once. Check: the first hold asks
+    for the mic and the banner says to hold again; the countdown and the
+    hold with her finger and stylus (no callout or text selection on the
+    held button); letting go during the countdown; recording from a later
+    frame, playing to the last frame; music audible while recording
+    (volume? speaker or earpiece?); the voice lining up with the
+    animation on playback; with headphones vs without (does the song get
+    into the voice?); AirPods; Silent mode; the headphones tip and
+    "Don't show again"; replacing an older voice asks; Delete on each
+    row; the panel's height with one and two rows. If anything's off,
+    get the log (`rec-*`, `recorded`, `mic-delay`).
+  - **Out unless she asks** (Flipaclip has them): more than two rows,
+    slicing, looping past the end, volume (song vs voice balance is the
+    likely ask), a sound library, scrubbing sound while stepping
+    frames.
   - **Device-only:** mic permission in the installed app (iOS may ask
-    every launch), whether Silent mode mutes it, recording latency.
+    every launch), recording latency, the echo with and without
+    headphones, playback volume and routing while the mic is on,
+    AirPods dropping to call quality while recording.
+- **Lost canvas seen again (log from 2026-10-25, before 5c) — look
+  into it after 5c.** She keeps getting "This frame's drawing stopped
+  showing…". The log: 16 s into a new one-layer project (just after
+  closing another), `copy-renewed` (undo's committed copy emptied),
+  then 0.8 s later `save-refused … had=1327 lost=976 canvases=1/4` →
+  `recover`. The guard worked; only the stroke drawn on the blank
+  canvas was lost. Two canvases emptied within a second points at iOS
+  memory pressure. Leads: the undo history's ~150 MB in memory, what a
+  closed project leaves behind, the frame cache's in-memory PNGs. Ask
+  for more logs; note what she did just before each.
+- **Layers panel → a menu that closes itself (her request, Procreate's
+  way) — after 5c.** Opens from the top-bar button as now; a canvas
+  tap only closes it (joins "a canvas tap with a menu open only closes
+  it" — `anyMenuOpen`); not reopened at launch (`uiState.layersPanelOpen`
+  retired). Decide when building: picking a layer keeps it open
+  (Procreate) unless she wants otherwise; a canvas tap mid-rename keeps
+  the typed name. The collapse-to-thumbnails version (Flipaclip) was
+  offered and not chosen.
 - **A canvas tap with a menu open only closes it (after 5b): built,
   not yet confirmed on the iPad.** Check with her stylus and fingers:
   open the color picker (and the Image, layer, frame, onion, fps and
@@ -329,7 +361,6 @@ Applies to the whole app. How each area works is in
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  recording (5c — under Current state);
   export to video + Web Share,
   then share links and Krita import via Worker + R2; storage warning at
   ~80% quota (with step 6).
@@ -391,7 +422,9 @@ it's wiring. `export/` is a placeholder for step 6. Tests: `tests/unit/`,
 Developer section (Fresh reload, and from 2c a fill-all-layers
 memory stress test; from 4a-i the Playback speed and Frame memory
 tests — `timeline/dev-stress.js`, its import and launch call in
-`main.js`, its `sw.js` entry and its `.pp-dev-report` CSS); after 4b,
+`main.js`, its `sw.js` entry and its `.pp-dev-report` CSS); from 5c the
+**Mic delay test** (its button in `settings-panel.js`, `micDelayTest`
+in `ui.js` and `main.js`, `devMicDelayTest`); after 4b,
 the **Activity log** — `storage/dev-log.js`, `ui/dev-log-view.js`,
 their `sw.js` entries, `tests/unit/dev-log.test.js`,
 `tests/e2e/dev-log.spec.js`, the `devLog.add` calls, `guardContext`
@@ -422,9 +455,10 @@ bitmap. Planned fields are marked. Extend additively.
       referenceHidden: false,                 // 3a, Hide images; missing = false
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
-      audioClips: [ { id, blobRef, trimStart, trimEnd, offset } ]
-                                              // 5a; one clip; seconds; offset = where it
-                                              // starts, missing = 0; missing = [] (sanitizeAudioClips)
+      audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset } ]
+                                              // 5a; seconds; offset = where it starts, missing = 0;
+                                              // 5c: kind 'music' | 'voice' (missing = 'music'), at most
+                                              // one of each, Music first; missing = [] (sanitizeAudioClips)
     }
 
     frame = {
@@ -440,7 +474,8 @@ bitmap. Planned fields are marked. Extend additively.
 type, buffer }` — layer bitmaps, reference images, the sound file
 (5a, its own MIME type) and the gallery thumbnail
 `thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
-`uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor' }`;
+`uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor',
+hideHeadphonesTip }` (5c; missing = false);
 `recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to

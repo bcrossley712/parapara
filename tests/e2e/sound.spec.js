@@ -261,11 +261,13 @@ test('the sound picker asks for sound file extensions, not media types', async (
 
 // --- 5b: the sound panel ---
 
-const clipBox = (page) => page.locator('.pp-sound-panel__clip');
-const startHandle = (page) => page.locator('.pp-sound-panel__handle--start');
-const endHandle = (page) => page.locator('.pp-sound-panel__handle--end');
+// 5c: two rows; these are the Music row's.
+const musicRow = (page) => page.locator('.pp-sound-panel__row--music');
+const clipBox = (page) => musicRow(page).locator('.pp-sound-panel__clip');
+const startHandle = (page) => musicRow(page).locator('.pp-sound-panel__handle--start');
+const endHandle = (page) => musicRow(page).locator('.pp-sound-panel__handle--end');
 const overview = (page) => page.locator('.pp-sound-panel__overview');
-const track = (page) => page.locator('.pp-sound-panel__track');
+const track = (page) => musicRow(page).locator('.pp-sound-panel__track');
 
 // One frame's width on the track: a tile and its gap.
 async function pitch(page) {
@@ -308,7 +310,8 @@ test('the sound panel covers the canvas, never shrinks it, and lines up with the
   const before = await area.boundingBox();
   await openPanel(page);
   expect(await area.boundingBox()).toEqual(before);
-  await expect(panel(page)).toContainText('No sound yet');
+  await expect(panel(page)).toContainText('No music yet');
+  await expect(panel(page)).toContainText('No voice yet');
   // The track starts where the tiles do, and the panel sits right above them.
   const trackBox = await track(page).boundingBox();
   const tileBox = await tiles(page).nth(0).boundingBox();
@@ -398,10 +401,10 @@ test('touching the track while playing only stops playback', async ({ page }) =>
 
   await playBtn(page).click();
   await expect(page.locator('.pp-playback')).toBeVisible();
-  await expect(page.locator('.pp-sound-panel__playhead')).toBeVisible();
+  await expect(musicRow(page).locator('.pp-sound-panel__playhead')).toBeVisible();
   await drag(page, clipBox(page), 3 * await pitch(page));
   await expect(page.locator('.pp-playback')).toBeHidden();
-  await expect(page.locator('.pp-sound-panel__playhead')).toBeHidden();
+  await expect(musicRow(page).locator('.pp-sound-panel__playhead')).toBeHidden();
   const after = (await savedProject(page)).audioClips[0];
   expect(after.offset).toBe(clip.offset);
 });

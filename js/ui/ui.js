@@ -23,6 +23,7 @@ import { createReferenceBar } from './reference-bar.js';
 import { createImageMenu } from './image-menu.js';
 import { createSoundPanel } from './sound-panel.js';
 import { createOnionBadge } from './onion-badge.js';
+import { createCountdown } from './countdown.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -47,7 +48,8 @@ import { createOnionBadge } from './onion-badge.js';
 // options.images: the top bar's Image menu intents ({ onImage,
 //   onUseOnAllFrames, onToggleImages }, see image-menu.js).
 // options.sound: the Sound button's panel intents ({ onImport,
-//   onDelete, onChange(clip), onPlayingTouch }, see sound-panel.js;
+//   onDelete(kind), onChange(kind, clip), onMicDown, onMicUp,
+//   onPlayingTouch, onOpenChange }, see sound-panel.js;
 //   step 5).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
@@ -191,8 +193,11 @@ export function initUI(container, options = {}) {
     onOpenChange: (open) => {
       canvasArea.classList.toggle('has-sound-panel', open);
       fitLayersPanel();
+      soundCallbacks.onOpenChange?.(open);
     },
   }, { container: canvasArea, timeline: frameStrip.timeline, signal });
+  // The countdown before recording (5c), over the canvas.
+  const countdown = createCountdown(canvasArea);
   imageMenu.button.before(soundPanel.button);
   const stage = document.createElement('div');
   stage.className = 'pp-stage';
@@ -352,6 +357,7 @@ export function initUI(container, options = {}) {
       fillAllLayers: appActions.fillAllLayers ?? (() => {}),
       playbackSpeedTest: appActions.playbackSpeedTest ?? (() => {}),
       frameMemoryTest: appActions.frameMemoryTest ?? (() => {}),
+      micDelayTest: appActions.micDelayTest, // dev only (5c)
       showActivityLog: appActions.showActivityLog, // dev only (after 4b)
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },
@@ -533,6 +539,7 @@ export function initUI(container, options = {}) {
     onion: onionBadge,
     images: imageMenu,
     sound: soundPanel,
+    countdown,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),

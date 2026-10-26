@@ -31,6 +31,7 @@ export function createSettingsPanel(actions) {
     fillAllLayers,     // () => void, optional (editor only)
     playbackSpeedTest, // () => void, optional (editor only)
     frameMemoryTest,   // () => void, optional (editor only)
+    micDelayTest,      // () => void, optional (editor only; 5c)
     showActivityLog,   // () => void, optional
   } = actions;
 
@@ -81,6 +82,14 @@ export function createSettingsPanel(actions) {
   memoryHint.className = 'pp-settings__hint';
   memoryHint.textContent = 'Holds more and more frames until the iPad says no. May reload the app; your drawing is saved first.';
 
+  // 5c: measures how late a heard sound lands in a recording, for
+  // MIC_DELAY_SECONDS in audio/clip.js. Must run inside the tap (it
+  // starts the sound).
+  const micBtn = makeButton('Mic delay test');
+  const micHint = document.createElement('div');
+  micHint.className = 'pp-settings__hint';
+  micHint.textContent = 'Plays a click and records it. Speaker on, volume up, no headphones, quiet room. Run it a few times.';
+
   const logBtn = makeButton('Activity log');
   const logHint = document.createElement('div');
   logHint.className = 'pp-settings__hint';
@@ -91,6 +100,7 @@ export function createSettingsPanel(actions) {
   if (fillAllLayers) panel.append(fillBtn, fillHint);
   if (playbackSpeedTest) panel.append(speedBtn, speedHint);
   if (frameMemoryTest) panel.append(memoryBtn, memoryHint);
+  if (micDelayTest) panel.append(micBtn, micHint);
 
   let open = false;
   let busy = false;
@@ -156,6 +166,11 @@ export function createSettingsPanel(actions) {
 
   memoryBtn.addEventListener('click', () => {
     frameMemoryTest();
+    setOpen(false);
+  });
+
+  micBtn.addEventListener('click', () => {
+    micDelayTest();
     setOpen(false);
   });
 

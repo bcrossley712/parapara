@@ -234,8 +234,17 @@ test('the clock starts from the first frame\'s time, once playing', async () => 
   await t.frameAt(0);
   assert.deepEqual(c.calls, [], 'not while getting ready');
   await t.frameAt(0);
-  assert.deepEqual(c.calls, [['start', { position: 0.2, fps: 10, frameCount: 4, loop: true }]]);
+  assert.deepEqual(c.calls, [['start', { position: 0.2, fps: 10, frameCount: 4, loop: true, skip: [] }]]);
   assert.deepEqual(t.shown, ['c']);
+});
+
+test('skip (the Voice while recording) is passed to the clock', async () => {
+  const c = recordingClock();
+  const t = setup({ clock: c.clock });
+  t.playback.start({ ids: IDS, fps: 10, loop: false, skip: ['voice'] });
+  await t.frameAt(0);
+  await t.frameAt(0);
+  assert.deepEqual(c.calls, [['start', { position: 0, fps: 10, frameCount: 4, loop: false, skip: ['voice'] }]]);
 });
 
 test('frames follow the clock\'s time, not the refresh timer', async () => {
@@ -259,9 +268,9 @@ test('changing fps or loop restarts the clock from the frame showing', async () 
   c.set(100);
   await t.frameAt(100); // showing 'b' (index 1)
   t.playback.setFps(5);
-  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: true }]);
+  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: true, skip: [] }]);
   t.playback.setLoop(false);
-  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: false }]);
+  assert.deepEqual(c.calls.at(-1), ['start', { position: 0.2, fps: 5, frameCount: 4, loop: false, skip: [] }]);
   c.set(200);
   await t.frameAt(200);
   assert.deepEqual(t.shown, ['a', 'b', 'c']);
@@ -277,7 +286,7 @@ test('changing fps while getting ready doesn\'t start the clock early', async ()
   t.setPending(0);
   await t.frameAt(0);
   await t.frameAt(0);
-  assert.deepEqual(c.calls, [['start', { position: 0, fps: 20, frameCount: 4, loop: true }]]);
+  assert.deepEqual(c.calls, [['start', { position: 0, fps: 20, frameCount: 4, loop: true, skip: [] }]]);
 });
 
 test('stopping, ending, or tearing down stops the clock', async () => {

@@ -44,8 +44,10 @@ export const DECODE_AHEAD = 6;
 //   'playing'; ready/total count flattened frames while preparing.
 // onEnd(frameId): without loop, playback reached the end; it has
 //   stopped, and frameId is the last frame.
-// clock: { start({ position, fps, frameCount, loop }), now(), stop() }
-//   — position in seconds of animation time; now() in ms since start.
+// clock: { start({ position, fps, frameCount, loop, skip }), now(), stop() }
+//   — position in seconds of animation time; now() in ms since start;
+//   skip: sound kinds to leave out of the run (5c: the Voice while she
+//   records). The wall clock ignores everything but the start.
 //   Defaults to the wall clock built on `now` (tests pass `now`).
 export function createPlayback({
   decode,
@@ -67,6 +69,7 @@ export function createPlayback({
   let start = 0;       // frame index the current run started from
   let fps = 12;
   let loop = true;
+  let skip = [];       // sound kinds the clock leaves out (start's `skip`)
   let lastBeat = -1;   // the last beat handled
   let shownId = null;  // the frame last drawn this run
   let request = null;
@@ -131,7 +134,7 @@ export function createPlayback({
   // Beat 0 of a new run is frame `start`: the clock starts from that
   // frame's time.
   function startClock() {
-    clock.start({ position: start / fps, fps, frameCount: frameIds.length, loop });
+    clock.start({ position: start / fps, fps, frameCount: frameIds.length, loop, skip });
   }
 
   function halt() {
@@ -214,12 +217,14 @@ export function createPlayback({
 
   return {
     // Gets ready, then plays `ids` (timeline order) from startIndex.
-    start({ ids, startIndex = 0, fps: nextFps, loop: nextLoop = true }) {
+    // skip: sound kinds left out of this run (passed to the clock).
+    start({ ids, startIndex = 0, fps: nextFps, loop: nextLoop = true, skip: nextSkip = [] }) {
       if (state !== 'idle' || ids.length === 0) return false;
       frameIds = [...ids];
       start = Math.min(Math.max(0, startIndex), ids.length - 1);
       fps = nextFps;
       loop = nextLoop;
+      skip = [...nextSkip];
       shownId = null;
       lastBeat = -1;
       state = 'preparing';

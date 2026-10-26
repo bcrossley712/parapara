@@ -22,6 +22,10 @@ import {
   trimClipStart,
   trimClipEnd,
   slipClip,
+  CLIP_KINDS,
+  clipOfKind,
+  withClip,
+  recordedClip,
 } from '../../js/audio/clip.js';
 
 const good = { id: 'c1', blobRef: 'a1', trimStart: 0, trimEnd: 4, offset: 0 };
@@ -32,8 +36,9 @@ test('sanitizeAudioClips: missing or not an array gives none', () => {
   assert.deepEqual(sanitizeAudioClips({}), []);
 });
 
-test('sanitizeAudioClips: a good clip is kept as is', () => {
-  assert.deepEqual(sanitizeAudioClips([good]), [good]);
+test('sanitizeAudioClips: a good clip is kept, as Music when it has no kind (5a/5b)', () => {
+  assert.deepEqual(sanitizeAudioClips([good]), [{ ...good, kind: 'music' }]);
+  assert.deepEqual(sanitizeAudioClips([{ ...good, kind: 'odd' }]), [{ ...good, kind: 'music' }]);
 });
 
 test('sanitizeAudioClips: a missing or bad offset becomes 0', () => {
@@ -52,9 +57,47 @@ test('sanitizeAudioClips: unusable clips are dropped, not the project', () => {
   assert.deepEqual(sanitizeAudioClips([null, 'x', { ...good, trimEnd: -2 }]), []);
 });
 
-test('sanitizeAudioClips: one clip at most; the first usable one wins', () => {
+test('sanitizeAudioClips: one clip of each kind at most; the first usable one wins', () => {
   const second = { ...good, id: 'c2', blobRef: 'a2' };
-  assert.deepEqual(sanitizeAudioClips([{ bad: true }, good, second]), [good]);
+  assert.deepEqual(sanitizeAudioClips([{ bad: true }, good, second]), [{ ...good, kind: 'music' }]);
+});
+
+test('sanitizeAudioClips: a Music and a Voice clip are both kept, Music first', () => {
+  const voice = { ...good, id: 'v', blobRef: 'av', kind: 'voice' };
+  const out = sanitizeAudioClips([voice, good, { ...voice, id: 'v2' }]);
+  assert.deepEqual(out.map((c) => c.id), ['c1', 'v']);
+  assert.deepEqual(out.map((c) => c.kind), CLIP_KINDS);
+});
+
+test('clipOfKind and withClip set one row and leave the other alone', () => {
+  const music = { ...good, kind: 'music' };
+  const voice = { ...good, id: 'v', kind: 'voice' };
+  assert.equal(clipOfKind([music, voice], 'voice'), voice);
+  assert.equal(clipOfKind([music], 'voice'), null);
+  assert.equal(clipOfKind([good], 'music'), good); // no kind = Music
+  assert.deepEqual(withClip([music], 'voice', voice), [music, voice]);
+  assert.deepEqual(withClip([voice], 'music', music), [music, voice]);
+  assert.deepEqual(withClip([music, voice], 'voice', null), [music]);
+  const newVoice = { ...voice, id: 'v2' };
+  assert.deepEqual(withClip([music, voice], 'voice', newVoice), [music, newVoice]);
+});
+
+test('recordedClip: the lead-in and mic delay are cut, placed where the take began', () => {
+  assert.deepEqual(
+    recordedClip({ id: 'r', blobRef: 'b', duration: 5, leadIn: 0.4, offset: 0.5, micDelay: 0.1 }),
+    { id: 'r', kind: 'voice', blobRef: 'b', trimStart: 0.5, trimEnd: 5, offset: 0.5 },
+  );
+});
+
+test('recordedClip: nothing usable left gives null', () => {
+  assert.equal(recordedClip({ id: 'r', blobRef: 'b', duration: 0.3, leadIn: 0.3, offset: 0, micDelay: 0 }), null);
+  assert.equal(recordedClip({ id: 'r', blobRef: 'b', duration: 0.5, leadIn: 0.45, offset: 0, minLength: 1 / 12, micDelay: 0 }), null);
+  assert.equal(recordedClip({ id: 'r', blobRef: 'b', duration: 0, leadIn: 0, offset: 0 }), null);
+});
+
+test('recordedClip: a take longer than the cap keeps the cap', () => {
+  const clip = recordedClip({ id: 'r', blobRef: 'b', duration: MAX_CLIP_SECONDS + 10, leadIn: 1, offset: 0, micDelay: 0 });
+  assert.equal(clip.trimEnd - clip.trimStart, MAX_CLIP_SECONDS);
 });
 
 test('sanitizeAudioClips: a trim longer than the cap is cut to it', () => {
@@ -64,7 +107,7 @@ test('sanitizeAudioClips: a trim longer than the cap is cut to it', () => {
 
 test('newClip: the whole file, from the start, up to the cap', () => {
   assert.deepEqual(newClip({ id: 'c', blobRef: 'b', duration: 12.5 }), {
-    clip: { id: 'c', blobRef: 'b', trimStart: 0, trimEnd: 12.5, offset: 0 },
+    clip: { id: 'c', kind: 'music', blobRef: 'b', trimStart: 0, trimEnd: 12.5, offset: 0 },
     clipped: false,
   });
   const long = newClip({ id: 'c', blobRef: 'b', duration: 240 });

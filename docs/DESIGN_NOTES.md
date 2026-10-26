@@ -740,6 +740,37 @@ device-only.
   there when the window slides, so the song plays on if frames are
   added. Edits stop playback (the project-change rule) rather than
   rescheduling sound mid-run.
+- **Recording (5c scoping, October 2026).** She wants to **record over
+  music**, so a recording can't replace the song: two fixed rows,
+  Music (import) and Voice (mic), rather than Flipaclip's free tracks —
+  it also answers "what happens to my song if I record?" (nothing).
+  - **The countdown (3 s) departs from Flipaclip**, which records on the
+    press. Asked for by him; it also catches accidental presses (a
+    brush lets go before anything is kept) and hides the mic's start-up
+    time, since the mic opens during it.
+  - **Echo cancellation off**, so her voice sounds natural rather than
+    like a phone call; the cost is that without headphones the speaker's
+    music gets into the voice (and would play twice on export) — hence
+    the headphones tip. If she never uses headphones, revisit (turning
+    it on is one constraint in `recorder.js`).
+  - **The mic opens per hold**, not while the panel is open: a stream
+    kept open shows iOS's mic dot and can switch its audio to call mode
+    (quieter, maybe the earpiece).
+  - **Sync:** the recorder starts first, then the picture; the stretch
+    between (measured on `performance.now()`) is cut with `trimStart`,
+    so no schema change. What's left — speaker to mic to file — is one
+    constant measured on her iPad by the dev Mic delay test, which runs
+    the same path (a click heard at a known wall time, found in the
+    recorded file).
+  - **Replacing a Voice asks** only when it predates the panel's
+    opening: undo isn't stored, so a closed project's voice is otherwise
+    gone for good; retakes in one sitting flow freely.
+  - **A take is kept however it ends** (let go, last frame, a stray
+    touch, the app hidden) — throwing a performance away is worse than
+    an extra undo.
+  - **Lifting the drawing above the panel** (her view moving up while
+    it's open) was offered and not built; slim empty rows keep the panel
+    near 5b's height instead.
 - **Flipaclip's audio, for comparison:** import (wav, mp4, m4a, mp3),
   record by pressing and holding the mic, trim with handles, drag the
   clip to where it starts; up to 8 tracks on iOS, slicing, looping

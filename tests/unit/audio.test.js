@@ -41,13 +41,19 @@ function fakeContext({ state = 'running', outputLatency = 0 } = {}) {
 const round = (n) => Math.round(n * 1000) / 1000;
 const clip = (fields = {}) => ({ id: 'c', blobRef: 'b', trimStart: 0, trimEnd: 4, offset: 0, ...fields });
 
-function setup({ ctxOptions, clipFields, duration = 4 } = {}) {
+function setup({ ctxOptions, clipFields, duration = 4, audioSession = null } = {}) {
   const ctx = fakeContext(ctxOptions);
   let wall = 0;
-  const audio = createAudio({ createContext: () => ctx, wallNow: () => wall });
+  const events = [];
+  const audio = createAudio({
+    createContext: () => ctx,
+    wallNow: () => wall,
+    audioSession,
+    onEvent: (name, detail) => events.push([name, detail]),
+  });
   const buffer = ctx.createBuffer(1, Math.round(duration * 100), 100);
-  audio.setClip(clip(clipFields), buffer);
-  return { ctx, audio, setWall: (ms) => { wall = ms; } };
+  audio.setClips([{ clip: clip(clipFields), buffer }]);
+  return { ctx, audio, events, setWall: (ms) => { wall = ms; } };
 }
 
 test('no clip: the wall clock, and nothing is scheduled', () => {
@@ -178,9 +184,82 @@ test('unlock resumes a suspended context, only when there is sound', () => {
   const { ctx, audio } = setup({ ctxOptions: { state: 'suspended' } });
   audio.unlock();
   assert.equal(ctx.resumes, 1);
-  audio.setClip(null, null);
+  audio.setClips([]);
   audio.unlock();
   assert.equal(ctx.resumes, 1);
+});
+
+test('unlock also starts the context for a sound still loading (Play while opening)', () => {
+  const ctx = fakeContext({ state: 'suspended' });
+  let made = 0;
+  const audio = createAudio({ createContext: () => { made += 1; return ctx; }, wallNow: () => 0, audioSession: null });
+  // Nothing decoded yet, so no context exists until the tap asks.
+  audio.unlock({ expectSound: true });
+  assert.equal(made, 1);
+  assert.equal(ctx.resumes, 1);
+});
+
+test('the audio session is set to playback, so Silent mode does not mute it', async () => {
+  const session = { type: 'auto' };
+  const { audio } = setup({ ctxOptions: { state: 'suspended' }, audioSession: session });
+  assert.equal(session.type, 'auto'); // nothing until sound is used
+  await audio.decode(new ArrayBuffer(8)); // creates the context
+  assert.equal(session.type, 'playback');
+  session.type = 'auto'; // something else changed it
+  audio.unlock();
+  assert.equal(session.type, 'playback');
+  assert.deepEqual(audio.debugState, { ctx: 'suspended', session: 'playback' });
+});
+
+test('an audio session that refuses the type does not stop the sound', async () => {
+  const session = { get type() { return 'auto'; }, set type(_) { throw new Error('nope'); } };
+  const { ctx, audio } = setup({ audioSession: session });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    await audio.decode(new ArrayBuffer(8));
+    audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(audio.clock.mode, 'audio');
+  assert.equal(ctx.started.length, 1);
+});
+
+test('the log hears when a run\'s sound starts, once', () => {
+  const { ctx, audio, events, setWall } = setup({ ctxOptions: { state: 'suspended' } });
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  setWall(120);
+  audio.clock.now();
+  assert.deepEqual(events, []);
+  ctx.state = 'running';
+  audio.clock.now();
+  audio.clock.now();
+  assert.deepEqual(events, [['sound-start', { waitedMs: 120 }]]);
+});
+
+test('the log hears a sound that never started', () => {
+  const { audio, events, setWall } = setup({ ctxOptions: { state: 'suspended' } });
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  setWall(1);
+  audio.clock.now();
+  setWall(2 + START_TIMEOUT_MS);
+  audio.clock.now();
+  assert.deepEqual(events, [['sound-silent', { reason: 'did-not-start', state: 'suspended' }]]);
+});
+
+test('the log hears a resume that fails', async () => {
+  const { ctx, audio, events } = setup({ ctxOptions: { state: 'suspended' } });
+  ctx.resume = () => Promise.reject(new Error('not allowed'));
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    audio.unlock();
+    await new Promise((r) => setTimeout(r, 0));
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(events, [['sound-unlock-failed', { error: 'not allowed' }]]);
 });
 
 test('decode rejects what the device can\'t play', async () => {
@@ -213,5 +292,59 @@ test('destroy closes the context', async () => {
   await audio.decode(new ArrayBuffer(8)); // creates it
   audio.destroy();
   assert.equal(ctx.closed, true);
-  assert.equal(audio.loadedRef, null);
+  assert.equal(audio.hasSound, false);
+});
+
+test('Music and Voice play together, each where its clip says', () => {
+  const { ctx, audio } = setup();
+  const voiceBuffer = ctx.createBuffer(1, 200, 100); // 2 s
+  audio.setClips([
+    { clip: clip({ kind: 'music' }), buffer: ctx.createBuffer(1, 400, 100) },
+    { clip: clip({ id: 'v', kind: 'voice', trimStart: 0.5, trimEnd: 2, offset: 1 }), buffer: voiceBuffer },
+  ]);
+  audio.clock.start({ position: 0, fps: 10, frameCount: 40, loop: false });
+  assert.deepEqual(ctx.started, [[0, 0, 4], [1, 0.5, 1.5]]);
+});
+
+test('skip leaves the Voice out of a run (recording), the Music still plays', () => {
+  const { ctx, audio } = setup();
+  audio.setClips([
+    { clip: clip({ kind: 'music' }), buffer: ctx.createBuffer(1, 400, 100) },
+    { clip: clip({ id: 'v', kind: 'voice' }), buffer: ctx.createBuffer(1, 400, 100) },
+  ]);
+  audio.clock.start({ position: 0, fps: 10, frameCount: 40, loop: false, skip: ['voice'] });
+  assert.deepEqual(ctx.started, [[0, 0, 4]]);
+  assert.equal(audio.clock.mode, 'audio');
+});
+
+test('only a skipped Voice: the run is on the wall clock, silently', () => {
+  const { ctx, audio } = setup();
+  audio.setClips([{ clip: clip({ kind: 'voice' }), buffer: ctx.createBuffer(1, 400, 100) }]);
+  audio.clock.start({ position: 0, fps: 10, frameCount: 40, loop: false, skip: ['voice'] });
+  assert.deepEqual(ctx.started, []);
+  assert.equal(audio.clock.mode, 'wall');
+});
+
+test('with loop, each pass queues both clips', () => {
+  const { ctx, audio } = setup();
+  audio.setClips([
+    { clip: clip({ kind: 'music', trimEnd: 1 }), buffer: ctx.createBuffer(1, 400, 100) },
+    { clip: clip({ id: 'v', kind: 'voice', trimEnd: 1, offset: 0.5 }), buffer: ctx.createBuffer(1, 400, 100) },
+  ]);
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20, loop: true });
+  ctx.currentTime = 2 - LOOKAHEAD + 0.01;
+  audio.clock.now();
+  assert.deepEqual(ctx.started, [[0, 0, 1], [0.5, 0, 1], [2, 0, 1], [2.5, 0, 1]]);
+});
+
+test('recording switches the audio session to play-and-record, and back', async () => {
+  const session = { type: 'auto' };
+  const { audio } = setup({ audioSession: session });
+  await audio.decode(new ArrayBuffer(8));
+  audio.setRecording(true);
+  assert.equal(session.type, 'play-and-record');
+  audio.unlock(); // a tap while recording keeps it
+  assert.equal(session.type, 'play-and-record');
+  audio.setRecording(false);
+  assert.equal(session.type, 'playback');
 });

@@ -1781,21 +1781,28 @@ html, body {
   opacity: 0.7;
 }
 
-/* Sound panel (js/ui/sound-panel.js, 5b): over the bottom of the canvas
-   area, just above the frame tiles. The side column sits over the
-   transport; the overview and track line up with the tiles' list
-   (--pp-sound-track-left/-width, set in JS). */
+/* Sound panel (js/ui/sound-panel.js, 5b; two rows in 5c): over the
+   bottom of the canvas area, just above the frame tiles. Each row's
+   side cell sits over the transport; the overview and tracks line up
+   with the tiles' list (--pp-sound-track-left/-width, set in JS). Its
+   height follows its rows: sound-panel.js copies it to the canvas
+   area's --pp-sound-panel-height for what sits above it. */
 .pp-canvas-area {
   --pp-sound-panel-height: 116px;
 }
 
 .pp-sound-panel {
+  --pp-sound-voice: #8cc4e8;   /* the Voice row's waveform */
+  --pp-sound-record: #e0574b;  /* the mic and the recording bar */
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 7;
-  height: var(--pp-sound-panel-height);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
   background: var(--pp-ink);
   border-top: 1px solid var(--pp-ink-light);
   color: var(--pp-bg);
@@ -1807,21 +1814,47 @@ html, body {
   display: none;
 }
 
-.pp-sound-panel__side {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--pp-sound-track-left, 240px);
+.pp-sound-panel__row {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 12px;
+  align-items: stretch;
+  height: 48px;
+}
+
+.pp-sound-panel__row[hidden] {
+  display: none;
+}
+
+.pp-sound-panel__row--overview {
+  height: 20px;
+}
+
+/* An empty row stays slim: just its controls and a line of text. */
+.pp-sound-panel__row.is-empty {
+  height: 40px;
+}
+
+.pp-sound-panel__side {
+  flex: 0 0 var(--pp-sound-track-left, 240px);
+  width: var(--pp-sound-track-left, 240px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+}
+
+.pp-sound-panel__label {
+  flex: 0 0 auto;
+  width: 46px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
 }
 
 .pp-sound-panel__btn {
-  min-height: 40px;
+  min-height: 36px;
   padding: 6px 12px;
   border: none;
   border-radius: 10px;
@@ -1846,43 +1879,62 @@ html, body {
   display: none;
 }
 
-.pp-sound-panel__main {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: var(--pp-sound-track-left, 240px);
-  width: var(--pp-sound-track-width, 400px);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.pp-sound-panel__btn--icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
 }
 
-.pp-sound-panel__overview,
-.pp-sound-panel__track {
-  position: relative;
-  overflow: hidden;
+/* The mic: red, held rather than tapped. */
+.pp-sound-panel__mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--pp-sound-record);
+  color: #fff;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
 
-.pp-sound-panel__overview {
-  flex: 0 0 26px;
-  border-radius: 6px;
+.pp-sound-panel__mic svg {
+  flex: 0 0 auto;
+}
+
+.pp-sound-panel__mic:active,
+.pp-sound-panel__mic.is-held {
+  background: #b8382e;
+  color: #fff;
+}
+
+.pp-sound-panel__mic.is-recording {
+  box-shadow: 0 0 0 3px rgba(224, 87, 75, 0.45);
+}
+
+.pp-sound-panel__overview,
+.pp-sound-panel__track {
+  position: relative;
+  flex: 0 0 var(--pp-sound-track-width, 400px);
+  width: var(--pp-sound-track-width, 400px);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   background: var(--pp-stage);
+}
+
+.pp-sound-panel__overview {
+  border-radius: 6px;
   cursor: pointer;
 }
 
-.pp-sound-panel__overview[hidden] {
-  display: none;
-}
-
 .pp-sound-panel__track {
-  flex: 1;
-  min-height: 0;
   border-radius: 8px;
-  background: var(--pp-stage);
 }
 
 .pp-sound-panel__overview canvas,
@@ -1918,6 +1970,11 @@ html, body {
   cursor: grab;
 }
 
+.pp-sound-panel__row--voice .pp-sound-panel__clip {
+  border-color: var(--pp-sound-voice);
+  background: rgba(140, 196, 232, 0.12);
+}
+
 .pp-sound-panel__clip[hidden] {
   display: none;
 }
@@ -1927,6 +1984,12 @@ html, body {
   border-right-style: dashed;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
+}
+
+/* While recording, the old Voice is silent: dimmed. */
+.pp-sound-panel__track.is-muted canvas,
+.pp-sound-panel__track.is-muted .pp-sound-panel__clip {
+  opacity: 0.3;
 }
 
 /* Wide enough to grab with a finger; drawn as a tab just inside each
@@ -1944,11 +2007,15 @@ html, body {
   position: absolute;
   top: 50%;
   width: 8px;
-  height: 28px;
-  margin-top: -14px;
+  height: 24px;
+  margin-top: -12px;
   border-radius: 4px;
   background: var(--pp-accent);
   pointer-events: none;
+}
+
+.pp-sound-panel__row--voice .pp-sound-panel__handle::after {
+  background: var(--pp-sound-voice);
 }
 
 .pp-sound-panel__handle--start {
@@ -1965,6 +2032,21 @@ html, body {
 
 .pp-sound-panel__handle--end::after {
   right: 4px;
+}
+
+/* The take growing while she records (5c). */
+.pp-sound-panel__recording {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 6px;
+  background: var(--pp-sound-record);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.pp-sound-panel__recording[hidden] {
+  display: none;
 }
 
 .pp-sound-panel__playhead {
@@ -1986,12 +2068,10 @@ html, body {
   inset: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  font-size: 15px;
-  text-align: center;
+  padding: 0 12px;
+  font-size: 14px;
   color: var(--pp-bg);
-  opacity: 0.8;
+  opacity: 0.75;
   pointer-events: none;
 }
 
@@ -2002,6 +2082,57 @@ html, body {
 .pp-sound-panel.is-busy .pp-sound-panel__track,
 .pp-sound-panel.is-busy .pp-sound-panel__overview {
   opacity: 0.6;
+}
+
+/* The countdown before recording (js/ui/countdown.js, 5c): big and
+   centered over the canvas, never taking touches. */
+.pp-countdown {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.pp-countdown[hidden] {
+  display: none;
+}
+
+.pp-countdown__number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 84px;
+  font-weight: 700;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.pp-countdown__number.is-pop {
+  animation: pp-countdown-pop 0.35s ease-out;
+}
+
+.pp-countdown__hint {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(58, 50, 38, 0.85);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 15px;
+}
+
+@keyframes pp-countdown-pop {
+  from { transform: scale(1.2); }
+  to { transform: scale(1); }
 }
 
 /* With the panel open, what sits at the canvas area's bottom moves up

@@ -102,7 +102,11 @@ import { createPlaybackFrames } from './canvas/playback-frames.js';
 import { createOnionView } from './canvas/onion-view.js';
 import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
-import { sanitizeAudioClips, newClip, checkImportSize, sameClips, MAX_CLIP_SECONDS } from './audio/clip.js';
+import {
+  sanitizeAudioClips, newClip, checkImportSize, sameClips, MAX_CLIP_SECONDS,
+  clipOfKind, withClip, recordedClip, timeAtFrame, minClipSeconds, COUNTDOWN_SECONDS,
+} from './audio/clip.js';
+import { createRecorder, micError } from './audio/recorder.js';
 import { computePeaks } from './audio/peaks.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
@@ -118,8 +122,9 @@ const appRoot = document.getElementById('app');
 // Tool, color and brush sizes — app-wide, not per project, so they
 // follow her from one animation into the next (see storage.js).
 let toolSettings = null;
-// { layersPanelOpen, screen: 'gallery' | 'editor' } — remembered
-// across launches.
+// { layersPanelOpen, screen: 'gallery' | 'editor', hideHeadphonesTip }
+// — remembered across launches. hideHeadphonesTip (5c): she chose
+// "Don't show again" on the headphones popup.
 let uiState = {};
 // The last colors she drew or filled with, newest first — app-wide
 // (colors.js), shown in every project's color picker.
@@ -134,6 +139,9 @@ let storageWorks = false;
 let flushEditor = null;
 // The open editor's canvas check (lost canvases, after 4c), or null.
 let checkEditor = null;
+// The open editor's "the app was hidden" hook (5c: ends a recording),
+// or null.
+let hideEditor = null;
 
 // Same save-timing rules as the drawing (autosave.js). Failures are
 // only logged: losing a color choice or a panel state isn't worth
@@ -198,8 +206,10 @@ function showNotice(message) {
 // backup for an actual unload.
 document.addEventListener('visibilitychange', () => {
   devLog.add('app', document.visibilityState);
-  if (document.visibilityState === 'hidden') flushAll();
-  else checkEditor?.();
+  if (document.visibilityState === 'hidden') {
+    hideEditor?.();
+    flushAll();
+  } else checkEditor?.();
 });
 window.addEventListener('pagehide', () => flushAll());
 
@@ -242,10 +252,11 @@ async function launch() {
       // Installs from before the gallery have no screen saved; they
       // were always in the editor.
       screen: saved?.screen === 'gallery' ? 'gallery' : 'editor',
+      hideHeadphonesTip: saved?.hideHeadphonesTip === true,
     };
   } catch (err) {
     console.warn('Parapara! could not load UI state:', err);
-    uiState = { layersPanelOpen: false, screen: 'editor' };
+    uiState = { layersPanelOpen: false, screen: 'editor', hideHeadphonesTip: false };
   }
 
   if (uiState.screen === 'editor') {
@@ -501,6 +512,7 @@ function mountEditor(session, { canSave }) {
       fillAllLayers: afterPlayback(() => devFillAllLayers()),
       playbackSpeedTest: afterPlayback(() => devPlaybackSpeedTest()),
       frameMemoryTest: afterPlayback(() => devFrameMemoryTest()),
+      micDelayTest: () => devMicDelayTest(), // inside the tap: starts sound
     },
     // Anything that changes the project stops playback first and runs
     // once she's on the frame that was showing (afterPlayback, 4b).
@@ -577,10 +589,21 @@ function mountEditor(session, { canSave }) {
         if (!canAct() || adjust) return;
         ui.pickAudio((file) => importSound(file));
       },
-      onDelete: afterPlayback(() => deleteSound()),
-      onChange: (clip) => changeClip(clip),
+      onDelete: afterPlayback((kind) => deleteSound(kind)),
+      onChange: (kind, clip) => changeClip(kind, clip),
+      // 5c: hold to record. Runs inside the press (iOS sound rules).
+      onMicDown: () => onMicDown(),
+      onMicUp: (detail) => onMicUp(detail),
       onPlayingTouch: () => stopPlayback(),
-      onOpenChange: () => renderSound(),
+      onOpenChange: (open) => {
+        // What the panel remembers lasts one opening: a Voice recorded
+        // before it was opened asks before it's replaced, and the
+        // headphones tip shows again.
+        voiceOkRef = null;
+        headphonesTipShown = false;
+        if (!open) interruptTake();
+        renderSound();
+      },
     },
     reference: {
       onOpacityInput: (opacity) => {
@@ -746,13 +769,26 @@ function mountEditor(session, { canSave }) {
   // Sound (step 5): the project's clip, decoded, and the audio clock
   // playback runs on when there is one (audio/audio.js). Decoding is
   // async; until it's done, Play shows "Getting ready".
-  const audio = createAudio();
-  let soundLoading = null; // promise while the clip is being decoded
-  // The current clip's decoded sound (only that one is kept), and the
-  // waveform's peaks (audio/peaks.js), worked out the first time the
-  // panel shows this sound — never for a project whose panel stays shut.
-  let soundBuffer = { ref: null, buffer: null };
-  let soundPeaks = { ref: null, peaks: null };
+  const audio = createAudio({
+    // DEV ONLY (activity log): whether each run's sound really started.
+    onEvent: (name, detail) => devLog.add(name, detail),
+  });
+  let soundLoading = null; // promise while any clip is being decoded
+  // The current clips' decoded sound by blobRef (only theirs is kept),
+  // and their waveforms' peaks (audio/peaks.js), worked out the first
+  // time the panel shows a clip — never for a project whose panel
+  // stays shut.
+  const soundBuffers = new Map();
+  const soundPeaks = new Map();
+  const soundLoadingRefs = new Set();
+  const soundFailed = new Set(); // files that wouldn't load; not retried
+  // Recording (5c): the mic, the take in progress (see onMicDown), and
+  // what the sound panel remembers while it's open.
+  const recorder = createRecorder();
+  let take = null;
+  let micAllowed = false;      // the mic opened once this session
+  let voiceOkRef = null;       // a Voice she may replace without asking
+  let headphonesTipShown = false; // shown since the panel opened
 
   const playback = createPlayback({
     clock: audio.clock,
@@ -765,12 +801,15 @@ function mountEditor(session, { canSave }) {
       playbackFrames.draw(canvasApi.getPlaybackContext(), value);
       strip.setPlayhead(id);
       ui.sound.setPlayhead(project.frames.indexOf(id));
+      noteTakeFrame();
     },
     pending: () => frameCache.pendingCount + (soundLoading ? 1 : 0),
     prepare: () => frameCache.rush(),
     onChange: (status) => {
       playStatus = status;
-      canvasApi.setPlaybackInput(status.state !== 'idle');
+      // A recording's picture stopping (any way) ends the recording.
+      if (status.state === 'idle' && take?.phase === 'recording') endTake('stopped');
+      canvasApi.setPlaybackInput(status.state !== 'idle' || Boolean(take && take.phase !== 'finishing'));
       renderTransport();
       updateOnion();
     },
@@ -782,6 +821,7 @@ function mountEditor(session, { canSave }) {
 
   canvasApi.onPlaybackTap(() => {
     if (playback.active) devLog.add('tap-stop');
+    interruptTake();
     stopPlayback();
   });
 
@@ -802,6 +842,10 @@ function mountEditor(session, { canSave }) {
   }
 
   function togglePlay() {
+    if (take) {
+      interruptTake(); // Play during a take only ends it
+      return;
+    }
     if (playback.active) {
       stopPlayback();
       return;
@@ -814,10 +858,12 @@ function mountEditor(session, { canSave }) {
     const index = project.frames.indexOf(session.frame.id);
     // Without loop, playing from the last frame starts over.
     const startIndex = !project.loop && index === project.frames.length - 1 ? 0 : index;
-    devLog.add('play', { from: tag(project.frames[startIndex]), fps: project.fps, loop: project.loop, sound: audio.loadedRef ? 'on' : 'off' });
+    const sound = audio.hasSound ? 'on' : soundLoading ? 'loading' : 'off';
+    devLog.add('play', { from: tag(project.frames[startIndex]), fps: project.fps, loop: project.loop, sound, ...(sound === 'off' ? {} : audio.debugState) });
     // iOS starts sound only from inside a tap: ask now, before getting
-    // ready (the audio clock holds the first frame until it starts).
-    audio.unlock();
+    // ready (the audio clock holds the first frame until it starts) —
+    // even while the sound is still loading, since Play then waits for it.
+    audio.unlock({ expectSound: Boolean(soundLoading) });
     playback.start({ ids: project.frames, startIndex, fps: project.fps, loop: project.loop });
   }
 
@@ -858,6 +904,7 @@ function mountEditor(session, { canSave }) {
   // changes the project).
   function afterPlayback(action) {
     return (...args) => {
+      interruptTake();
       if (playback.active) stopPlayback();
       if (landing) landing.then(() => action(...args));
       else action(...args);
@@ -867,6 +914,10 @@ function mountEditor(session, { canSave }) {
   // Previous/next frame. While playing: stop and step from the frame
   // showing. No wrap-around.
   function stepFrame(delta) {
+    if (take) {
+      interruptTake();
+      return;
+    }
     const from = playback.active ? (playback.frameId ?? session.frame.id) : session.frame.id;
     const index = project.frames.indexOf(from) + delta;
     const target = project.frames[Math.max(0, Math.min(project.frames.length - 1, index))];
@@ -1746,52 +1797,62 @@ function mountEditor(session, { canSave }) {
 
   // --- sound (step 5) ---
   //
-  // One clip per project (project.audioClips; rules in audio/clip.js).
-  // Its file is stored exactly as picked (saveAudioBlob) before the
-  // project points at it, then decoded for playback. Import (Replace)
-  // and Delete are one 'audio' undo entry each, as is each trim or
-  // move in the sound panel (5b); the file stays in storage for undo,
-  // and the sweep clears it once nothing points at it. Only the current
-  // clip's decoded sound is kept in memory.
+  // Two rows (5c): one Music clip (imported) and one Voice clip
+  // (recorded), in project.audioClips (rules in audio/clip.js). A file
+  // is stored exactly as picked or recorded (saveAudioBlob) before the
+  // project points at it, then decoded for playback. Import (Replace),
+  // a recording, Delete and each trim or move in the sound panel are one
+  // 'audio' undo entry each (whole clip lists); files stay in storage
+  // for undo, and the sweep clears them once nothing points at them.
+  // Only the current clips' decoded sound is kept in memory.
 
-  // Puts the project's clip on the audio engine, decoding its file
-  // first unless it's the one already decoded. A file that's missing
-  // or won't decode is skipped with a banner — never a failed open —
-  // and its record is kept.
+  // Puts the project's clips on the audio engine, decoding any file not
+  // decoded yet. A file that's missing or won't decode is skipped with
+  // a banner — never a failed open — and its record is kept. Resolves
+  // once every clip's sound is ready (or has failed).
   function loadSound() {
-    const clip = project.audioClips[0] ?? null;
-    if (!clip) {
-      soundBuffer = { ref: null, buffer: null };
-      audio.setClip(null, null);
-      return Promise.resolve();
-    }
-    if (soundBuffer.ref === clip.blobRef) {
-      audio.setClip(clip, soundBuffer.buffer);
-      return Promise.resolve();
-    }
-    audio.setClip(null, null);
-    const loading = (async () => {
-      try {
-        const blob = await readBitmap(clip.blobRef);
-        if (!blob) throw new Error('The sound file is missing');
-        const decoded = audio.keepFirst(await audio.decode(await blob.arrayBuffer()), MAX_CLIP_SECONDS);
-        // Changed while decoding (undo, another import): that one wins.
-        if (project.audioClips[0]?.blobRef !== clip.blobRef) return;
-        soundBuffer = { ref: clip.blobRef, buffer: decoded };
-        audio.setClip(project.audioClips[0], decoded);
-        renderSound();
-      } catch (err) {
-        console.warn('Parapara! could not load the sound:', err);
-        devLog.add('sound-failed', { sound: short(clip.blobRef), error: String(err?.message ?? err) });
-        showBanner("This animation's sound couldn't be played.");
-      }
-    })();
+    const refs = new Set(project.audioClips.map((c) => c.blobRef));
+    for (const ref of [...soundBuffers.keys()]) if (!refs.has(ref)) soundBuffers.delete(ref);
+    for (const ref of [...soundPeaks.keys()]) if (!refs.has(ref)) soundPeaks.delete(ref);
+    applyClips();
+    const missing = project.audioClips.filter((c) => !soundBuffers.has(c.blobRef)
+      && !soundFailed.has(c.blobRef) && !soundLoadingRefs.has(c.blobRef));
+    if (missing.length === 0) return soundLoading ?? Promise.resolve();
+    const loading = Promise.all([soundLoading, ...missing.map((clip) => loadClipSound(clip))]).then(() => {});
     soundLoading = loading;
     loading.finally(() => {
       if (soundLoading === loading) soundLoading = null;
       renderSound();
     });
+    renderSound();
     return loading;
+  }
+
+  async function loadClipSound(clip) {
+    soundLoadingRefs.add(clip.blobRef);
+    try {
+      const blob = await readBitmap(clip.blobRef);
+      if (!blob) throw new Error('The sound file is missing');
+      const decoded = audio.keepFirst(await audio.decode(await blob.arrayBuffer()), MAX_CLIP_SECONDS);
+      // Gone while decoding (undo, a replace): not needed any more.
+      if (!project.audioClips.some((c) => c.blobRef === clip.blobRef)) return;
+      soundBuffers.set(clip.blobRef, decoded);
+      applyClips();
+    } catch (err) {
+      soundFailed.add(clip.blobRef);
+      console.warn('Parapara! could not load the sound:', err);
+      devLog.add('sound-failed', { sound: short(clip.blobRef), kind: clip.kind, error: String(err?.message ?? err) });
+      showBanner(clip.kind === 'voice'
+        ? "This animation's voice recording couldn't be played."
+        : "This animation's sound couldn't be played.");
+    } finally {
+      soundLoadingRefs.delete(clip.blobRef);
+    }
+  }
+
+  // The engine plays whichever clips are decoded.
+  function applyClips() {
+    audio.setClips(project.audioClips.map((clip) => ({ clip, buffer: soundBuffers.get(clip.blobRef) ?? null })));
   }
 
   // The project's clips are now `clips`: saved, shown on the button,
@@ -1803,11 +1864,11 @@ function mountEditor(session, { canSave }) {
     return loadSound();
   }
 
-  // A picked file becomes the project's sound (replacing any). Size is
-  // checked before reading; it's accepted only if this device can
-  // decode it — so playback (and step 6's export) can always read what
-  // was stored. A file longer than MAX_CLIP_SECONDS keeps only its
-  // start (the whole file is stored).
+  // A picked file becomes the Music (replacing any; the Voice is left
+  // alone). Size is checked before reading; it's accepted only if this
+  // device can decode it — so playback (and step 6's export) can always
+  // read what was stored. A file longer than MAX_CLIP_SECONDS keeps only
+  // its start (the whole file is stored).
   function importSound(file) {
     if (busy) return;
     const size = checkImportSize(file.size);
@@ -1835,21 +1896,14 @@ function mountEditor(session, { canSave }) {
       }
       const blob = new Blob([bytes], { type: soundType(file) });
       const blobRef = newId();
-      if (canSave) {
-        try {
-          await saveAudioBlob(project.id, blobRef, blob);
-        } catch (err) {
-          console.error('Parapara! saving a sound failed:', err);
-          showNotice("That sound couldn't be added. The iPad may be out of space.");
-          return;
-        }
-      } else {
-        heldBitmaps.set(blobRef, blob);
+      if (!(await storeSoundBlob(blobRef, blob))) {
+        showNotice("That sound couldn't be added. The iPad may be out of space.");
+        return;
       }
-      const { clip, clipped } = newClip({ id: newId(), blobRef, duration: decoded.duration });
-      soundBuffer = { ref: blobRef, buffer: audio.keepFirst(decoded, MAX_CLIP_SECONDS) };
+      const { clip, clipped } = newClip({ id: newId(), blobRef, duration: decoded.duration, kind: 'music' });
+      soundBuffers.set(blobRef, audio.keepFirst(decoded, MAX_CLIP_SECONDS));
       const before = project.audioClips;
-      await setClips([clip]);
+      await setClips(withClip(before, 'music', clip));
       history.push({ type: 'audio', before, after: project.audioClips, bytes: 0 });
       devLog.add('sound', { sound: short(blobRef), type: blob.type, bytes: blob.size, seconds: Math.round(decoded.duration) });
       showBanner(clipped
@@ -1858,51 +1912,467 @@ function mountEditor(session, { canSave }) {
     });
   }
 
+  // Stores a sound file before anything points at it. False if it
+  // couldn't be saved.
+  async function storeSoundBlob(blobRef, blob) {
+    if (!canSave) {
+      heldBitmaps.set(blobRef, blob);
+      return true;
+    }
+    try {
+      await saveAudioBlob(project.id, blobRef, blob);
+      return true;
+    } catch (err) {
+      console.error('Parapara! saving a sound failed:', err);
+      return false;
+    }
+  }
+
   // A trim or move in the sound panel (5b): one 'audio' undo step per
   // drag. The decoded sound is the same, so nothing reloads.
-  function changeClip(clip) {
-    if (!canAct() || adjust || playback.active || landing) return;
+  function changeClip(kind, clip) {
+    if (!canAct() || adjust || playback.active || landing || take) return;
     const before = project.audioClips;
-    const after = [clip];
+    const after = withClip(before, kind, clip);
     if (sameClips(before, after)) return;
     setClips(after);
     history.push({ type: 'audio', before, after, bytes: 0 });
     devLog.add('sound-edit', {
+      kind,
       trim: `${clip.trimStart.toFixed(2)}-${clip.trimEnd.toFixed(2)}`,
       at: clip.offset.toFixed(2),
     });
   }
 
-  // The sound panel's state: the clip, its decoded length and peaks
-  // (once loaded), and what limits editing.
-  function renderSound() {
-    const clip = project.audioClips[0] ?? null;
-    const buffer = clip && soundBuffer.ref === clip.blobRef ? soundBuffer.buffer : null;
-    if (buffer && ui.sound.isOpen && soundPeaks.ref !== clip.blobRef) {
+  // One row of the sound panel: its clip, decoded length and peaks
+  // (once loaded). Peaks are worked out the first time the panel shows
+  // a clip — never for a project whose panel stays shut.
+  function soundRow(kind) {
+    const clip = clipOfKind(project.audioClips, kind);
+    if (!clip) return { clip: null, duration: 0, peaks: null, loading: false };
+    const buffer = soundBuffers.get(clip.blobRef) ?? null;
+    if (buffer && ui.sound.isOpen && !soundPeaks.has(clip.blobRef)) {
       const channels = [];
       for (let ch = 0; ch < buffer.numberOfChannels; ch++) channels.push(buffer.getChannelData(ch));
-      soundPeaks = { ref: clip.blobRef, peaks: computePeaks(channels, buffer.sampleRate) };
+      soundPeaks.set(clip.blobRef, computePeaks(channels, buffer.sampleRate));
     }
-    ui.sound.render({
+    return {
       clip,
       duration: buffer ? buffer.duration : 0,
-      peaks: buffer && soundPeaks.ref === clip.blobRef ? soundPeaks.peaks : null,
-      loading: Boolean(soundLoading),
+      peaks: buffer ? soundPeaks.get(clip.blobRef) ?? null : null,
+      loading: soundLoadingRefs.has(clip.blobRef),
+    };
+  }
+
+  // The sound panel's state: both rows, what limits editing, and the
+  // recording in progress.
+  function renderSound() {
+    ui.sound.render({
+      music: soundRow('music'),
+      voice: soundRow('voice'),
       fps: project.fps,
       frameCount: project.frames.length,
       busy: busy || Boolean(adjust),
       playing: playback.active || Boolean(landing),
+      recording: take && take.phase !== 'finishing'
+        ? { phase: take.phase === 'recording' ? 'recording' : 'countdown', startIndex: take.startIndex }
+        : null,
+      canRecord: recorder.supported,
     });
   }
 
-  // Delete sound (sound panel). Undoable; the file stays for undo.
-  function deleteSound() {
-    if (!canAct() || adjust || project.audioClips.length === 0) return;
+  // Delete a row (sound panel). Undoable; the file stays for undo.
+  function deleteSound(kind) {
+    if (!canAct() || adjust || take) return;
     const before = project.audioClips;
-    setClips([]);
-    history.push({ type: 'audio', before, after: [], bytes: 0 });
-    devLog.add('sound-deleted');
-    showBanner('Sound deleted.');
+    if (!clipOfKind(before, kind)) return;
+    setClips(withClip(before, kind, null));
+    history.push({ type: 'audio', before, after: project.audioClips, bytes: 0 });
+    devLog.add('sound-deleted', { kind });
+    showBanner(kind === 'voice' ? 'Voice deleted.' : 'Sound deleted.');
+  }
+
+  // --- recording (5c) ---
+  //
+  // Hold the mic (sound panel): a 3-second countdown, silent, with the
+  // mic opening meanwhile; then the recorder starts, and once it has,
+  // playback runs from her frame without looping, the Music playing and
+  // the old Voice silent. Letting go — or any other touch, the last
+  // frame, the 3-minute cap, hiding the app — ends it, and the take
+  // becomes the Voice (one 'audio' undo entry). Letting go during the
+  // countdown records nothing.
+  //
+  // take = {
+  //   phase: 'countdown' | 'starting' | 'recording' | 'finishing',
+  //   startIndex, fps, held, count, timer, capTimer,
+  //   stream (once open), opening (open()'s promise), opened (bool),
+  //   startedAt (when the recorder began, performance.now()),
+  //   anchor (performance.now() at the animation's time 0 of the run),
+  //   stopRequested }
+  //
+  // Before a hold starts, two popups may stand in its way (each
+  // interrupts the hold; she holds again after): replacing a Voice not
+  // recorded since the panel opened asks first; recording with Music
+  // shows the headphones tip once per panel opening.
+  function onMicDown() {
+    if (playback.active || landing) {
+      stopPlayback(); // like Import: a press while playing only stops
+      return;
+    }
+    if (take || !canAct() || adjust || !recorder.supported) return;
+    if (project.frames.length < 2) {
+      showBanner('Add another frame to record.');
+      return;
+    }
+    const voice = clipOfKind(project.audioClips, 'voice');
+    if (voice && voice.blobRef !== voiceOkRef) {
+      showConfirm({
+        title: 'Replace the voice?',
+        message: "Recording will replace this animation's voice recording. You can undo it while this animation is open.",
+        confirmLabel: 'Replace',
+      }).then((yes) => {
+        if (!yes) return;
+        voiceOkRef = voice.blobRef;
+        showBanner('Hold the mic to record.');
+      });
+      return;
+    }
+    const hasMusic = Boolean(clipOfKind(project.audioClips, 'music'));
+    if (hasMusic && !uiState.hideHeadphonesTip && !headphonesTipShown) {
+      headphonesTipShown = true;
+      showConfirm({
+        title: 'Use headphones',
+        message: 'Use headphones when you record over music, or the song gets recorded too.',
+        confirmLabel: 'Got it',
+        cancelLabel: "Don't show again",
+        dismissConfirms: true,
+      }).then((gotIt) => {
+        audio.unlock({ expectSound: true }); // still inside the tap
+        if (!gotIt) setUiState({ hideHeadphonesTip: true });
+        showBanner('Hold the mic to record.');
+      });
+      return;
+    }
+    startTake();
+  }
+
+  function startTake() {
+    const index = project.frames.indexOf(session.frame.id);
+    // From the last frame there's nothing to record over: start over.
+    const startIndex = index >= project.frames.length - 1 ? 0 : index;
+    // Inside the press: iOS starts sound only from a touch.
+    audio.unlock({ expectSound: Boolean(soundLoading) });
+    audio.setRecording(true);
+    const current = {
+      phase: 'countdown',
+      startIndex,
+      fps: project.fps,
+      held: true,
+      count: COUNTDOWN_SECONDS,
+      timer: 0,
+      capTimer: 0,
+      stream: null,
+      opened: false,
+      startedAt: 0,
+      anchor: null,
+      stopRequested: false,
+    };
+    take = current;
+    devLog.add('rec-hold', { from: tag(project.frames[startIndex]), fps: project.fps });
+    canvasApi.setPlaybackInput(true); // a canvas touch during the countdown only cancels
+    ui.countdown.show(current.count);
+    current.timer = setTimeout(tick, 1000);
+    renderSound();
+    renderTransport();
+
+    current.opening = recorder.open().then((stream) => {
+      micAllowed = true;
+      if (take !== current || current.phase === 'finishing') {
+        recorder.close(stream);
+        return null;
+      }
+      current.stream = stream;
+      current.opened = true;
+      return stream;
+    }, (err) => {
+      const why = micError(err);
+      devLog.add('rec-mic-failed', { why, error: String(err?.name ?? err) });
+      if (take === current) cancelTake('mic');
+      if (why === 'denied') {
+        showNotice("Parapara! can't use the microphone. To record, allow the microphone for Parapara! in the iPad's Settings.");
+      } else if (why === 'no-mic') {
+        showNotice('No microphone was found.');
+      } else {
+        showNotice("The microphone couldn't be started. Try again.");
+      }
+      return null;
+    });
+
+    function tick() {
+      if (take !== current || current.phase !== 'countdown') return;
+      current.count -= 1;
+      if (current.count > 0) {
+        ui.countdown.show(current.count);
+        current.timer = setTimeout(tick, 1000);
+        return;
+      }
+      beginRecording(current);
+    }
+  }
+
+  // The countdown ended with the mic still held: start the recorder,
+  // then the picture.
+  async function beginRecording(current) {
+    current.phase = 'starting';
+    ui.countdown.hide();
+    const stream = await current.opening;
+    if (take !== current || !stream) return;
+    if (current.stopRequested) {
+      cancelTake('released');
+      return;
+    }
+    let started;
+    try {
+      started = await recorder.start(stream);
+    } catch (err) {
+      devLog.add('rec-failed', { error: String(err?.message ?? err) });
+      if (take === current) cancelTake('failed');
+      showNotice("The recording couldn't be started. Try again.");
+      return;
+    }
+    if (take !== current) {
+      recorder.stop();
+      return;
+    }
+    current.startedAt = started.startedAt;
+    current.phase = 'recording';
+    devLog.add('rec-start', audio.debugState);
+    renderSound();
+    if (current.stopRequested) {
+      endTake('released');
+      return;
+    }
+    playback.start({
+      ids: project.frames,
+      startIndex: current.startIndex,
+      fps: current.fps,
+      loop: false,
+      skip: ['voice'],
+    });
+    // The 3-minute cap (MAX_CLIP_SECONDS), from the first frame.
+    current.capTimer = setTimeout(() => endTake('cap'), MAX_CLIP_SECONDS * 1000 + 2000);
+  }
+
+  // Playback showed a frame during a take: the first one fixes where the
+  // animation's time 0 is on the wall clock (what she sees and hears).
+  function noteTakeFrame() {
+    if (take?.phase === 'recording' && take.anchor === null) {
+      take.anchor = performance.now() - audio.clock.now();
+    }
+  }
+
+  // The mic was let go (or the touch was taken away).
+  function onMicUp({ cancelled } = {}) {
+    const current = take;
+    if (!current) return;
+    current.held = false;
+    if (current.phase === 'countdown') {
+      // A system prompt (the first mic request) takes the touch away:
+      // say so once she's answered, rather than "keep holding".
+      cancelTake(cancelled && !micAllowed ? 'prompt' : 'released');
+    } else if (current.phase === 'starting') {
+      current.stopRequested = true;
+    } else if (current.phase === 'recording') {
+      endTake('released');
+    }
+  }
+
+  // Anything else she does during a take ends it: during the countdown
+  // nothing is kept; once recording, the take is.
+  function interruptTake() {
+    if (!take) return;
+    if (take.phase === 'countdown') cancelTake('interrupted');
+    else if (take.phase === 'starting') take.stopRequested = true;
+    else if (take.phase === 'recording') endTake('interrupted');
+  }
+
+  // Ends a take that isn't recording yet: nothing is kept.
+  function cancelTake(reason) {
+    const current = take;
+    if (!current) return;
+    take = null;
+    clearTimeout(current.timer);
+    clearTimeout(current.capTimer);
+    ui.countdown.hide();
+    if (current.stream) recorder.close(current.stream);
+    if (recorder.recording) recorder.stop();
+    audio.setRecording(false);
+    canvasApi.setPlaybackInput(playStatus.state !== 'idle');
+    devLog.add('rec-cancel', { reason });
+    if (reason === 'released' || reason === 'interrupted') {
+      showBanner('Keep holding until the countdown ends.');
+    } else if (reason === 'prompt') {
+      current.opening?.then((stream) => {
+        if (micAllowed) showBanner('The microphone is on. Hold the mic again to record.');
+        return stream;
+      });
+    }
+    renderSound();
+    renderTransport();
+  }
+
+  // Ends a recording: stops the recorder and the picture (she lands on
+  // the frame showing, as after playback), then keeps the take. Actions
+  // tapped meanwhile wait for it (they wait on `landing`).
+  function endTake(reason) {
+    const current = take;
+    if (!current || current.phase !== 'recording') return;
+    current.phase = 'finishing';
+    clearTimeout(current.capTimer);
+    const stopped = recorder.stop();
+    audio.setRecording(false);
+    devLog.add('rec-stop', { reason });
+    if (playback.active) stopPlayback();
+    // After the current call stack, so a landing started by whoever
+    // stopped playback is the one this waits for.
+    queueMicrotask(() => {
+      const moved = landing ?? Promise.resolve();
+      const saving = moved
+        .then(() => stopped)
+        .then((blob) => keepTake(current, blob))
+        .catch((err) => {
+          console.error('Parapara! keeping a recording failed:', err);
+          showNotice("That recording couldn't be kept.");
+        })
+        .finally(() => {
+          if (take === current) take = null;
+          if (landing === saving) landing = null;
+          canvasApi.setPlaybackInput(playStatus.state !== 'idle');
+          renderSound();
+          renderTransport();
+        });
+      landing = saving;
+      renderTransport();
+    });
+  }
+
+  // The finished take becomes the Voice (replacing any), as one undo
+  // step. The lead-in before the first frame is cut (recordedClip).
+  async function keepTake(current, blob) {
+    if (!blob || current.anchor === null) {
+      showBanner('Nothing was recorded. Hold the mic until the animation starts.');
+      return;
+    }
+    const leadIn = (current.anchor - current.startedAt) / 1000;
+    await exclusiveTask(async () => {
+      let decoded;
+      const bytes = await blob.arrayBuffer();
+      try {
+        decoded = await audio.decode(bytes.slice(0));
+      } catch (err) {
+        devLog.add('rec-refused', { type: blob.type, bytes: blob.size, error: String(err?.message ?? err) });
+        showNotice("That recording couldn't be played, so it wasn't kept.");
+        return;
+      }
+      const blobRef = newId();
+      const clip = recordedClip({
+        id: newId(),
+        blobRef,
+        duration: decoded.duration,
+        leadIn,
+        offset: timeAtFrame(current.startIndex, current.fps),
+        minLength: minClipSeconds(current.fps),
+      });
+      if (!clip) {
+        showBanner('That was too short to keep. Hold the mic a little longer.');
+        return;
+      }
+      const stored = new Blob([bytes], { type: blob.type || 'audio/mp4' });
+      if (!(await storeSoundBlob(blobRef, stored))) {
+        showNotice("That recording couldn't be kept. The iPad may be out of space.");
+        return;
+      }
+      soundBuffers.set(blobRef, audio.keepFirst(decoded, MAX_CLIP_SECONDS));
+      voiceOkRef = blobRef; // a retake replaces it without asking
+      const before = project.audioClips;
+      await setClips(withClip(before, 'voice', clip));
+      history.push({ type: 'audio', before, after: project.audioClips, bytes: 0 });
+      devLog.add('recorded', {
+        sound: short(blobRef), type: stored.type, bytes: stored.size,
+        seconds: (clip.trimEnd - clip.trimStart).toFixed(2), leadIn: leadIn.toFixed(3),
+      });
+      showBanner('Voice recorded.');
+    });
+  }
+
+  // exclusive() skips a task while something else runs; a take must
+  // not be dropped, so it waits its turn.
+  async function exclusiveTask(task) {
+    while (busy) await new Promise((resolve) => setTimeout(resolve, 50));
+    return exclusive(task);
+  }
+
+  // DEV ONLY (5c): how late a sound she hears lands in a recording —
+  // the number for MIC_DELAY_SECONDS. Plays a click 0.6 s after the
+  // recorder starts and finds it in the file. Starts the sound inside
+  // the tap (gear menu), so it isn't wrapped in afterPlayback.
+  async function devMicDelayTest() {
+    if (playback.active) stopPlayback();
+    if (take || busy || !recorder.supported) return;
+    const ctx = audio.context;
+    if (!ctx) {
+      showNotice('Mic delay test: no Web Audio here.');
+      return;
+    }
+    audio.setRecording(true);
+    ctx.resume?.()?.catch?.(() => {});
+    let stream = null;
+    try {
+      stream = await recorder.open();
+      const { startedAt } = await recorder.start(stream);
+      stream = null;
+      const rate = ctx.sampleRate;
+      const click = ctx.createBuffer(1, Math.round(rate * 0.02), rate);
+      const data = click.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.sin((2 * Math.PI * 1000 * i) / rate) * 0.9;
+      const source = ctx.createBufferSource();
+      source.buffer = click;
+      source.connect(ctx.destination);
+      const when = ctx.currentTime + 0.6;
+      source.start(when);
+      // When the click reaches the speaker, on the page's clock.
+      const stamp = ctx.getOutputTimestamp?.();
+      const heardAt = stamp && stamp.performanceTime > 0
+        ? stamp.performanceTime + (when - stamp.contextTime) * 1000
+        : performance.now() + (when - ctx.currentTime + (ctx.outputLatency || ctx.baseLatency || 0)) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      const blob = await recorder.stop();
+      if (!blob) throw new Error('nothing was recorded');
+      const decoded = await audio.decode(await blob.arrayBuffer());
+      const samples = decoded.getChannelData(0);
+      let max = 0;
+      for (let i = 0; i < samples.length; i++) max = Math.max(max, Math.abs(samples[i]));
+      if (max < 0.02) {
+        showNotice("Mic delay test: the click wasn't heard. Turn the volume up, take off headphones, and try again.");
+        devLog.add('mic-delay', { result: 'not-heard', max: max.toFixed(3) });
+        return;
+      }
+      const threshold = Math.max(0.05, max * 0.5);
+      let onset = 0;
+      while (onset < samples.length && Math.abs(samples[onset]) < threshold) onset++;
+      const found = onset / decoded.sampleRate;
+      const expected = (heardAt - startedAt) / 1000;
+      const delayMs = Math.round((found - expected) * 1000);
+      devLog.add('mic-delay', { ms: delayMs, found: found.toFixed(3), expected: expected.toFixed(3), max: max.toFixed(2), type: blob.type });
+      showNotice(`Mic delay: ${delayMs} ms. Run it a few times; the numbers are in the activity log.`);
+    } catch (err) {
+      if (stream) recorder.close(stream);
+      if (recorder.recording) recorder.stop();
+      devLog.add('mic-delay', { result: 'failed', error: String(err?.name ?? err?.message ?? err) });
+      showNotice(`Mic delay test failed: ${err?.message ?? err}`);
+    } finally {
+      audio.setRecording(false);
+    }
   }
 
   // Use on all frames (3b, Image menu): this frame's image — photo and
@@ -2236,6 +2706,8 @@ function mountEditor(session, { canSave }) {
 
   flushEditor = flush;
   checkEditor = checkCanvases;
+  // Hiding the app ends a recording (and keeps the take).
+  hideEditor = () => interruptTake();
 
   // The project's sound decodes in the background; Play waits for it.
   loadSound();
@@ -2280,6 +2752,8 @@ function mountEditor(session, { canSave }) {
     const cards = await loadGalleryCards();
     flushEditor = null;
     checkEditor = null;
+    hideEditor = null;
+    if (take) cancelTake('closed');
     playback.destroy();
     audio.destroy();
     playbackFrames.destroy();

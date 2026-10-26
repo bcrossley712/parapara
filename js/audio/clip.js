@@ -7,8 +7,10 @@
 // apply these.
 //
 // The rules (PROJECT_NOTES.md, step 5):
-//   - One clip per project, in `project.audioClips` (an array so a
-//     second clip later isn't a restructure). Times are in seconds.
+//   - Two rows (5c): at most one Music clip (imported) and one Voice
+//     clip (recorded), in `project.audioClips`, each with `kind`
+//     ('music' | 'voice'; missing = 'music', as 5a/5b saved it). Music
+//     comes first in the list. Times are in seconds.
 //   - `trimStart`/`trimEnd` pick the part of the file that plays
 //     (non-destructive); `offset` is where in the animation it starts
 //     (missing = 0).
@@ -25,40 +27,87 @@ export const MAX_CLIP_SECONDS = 180;
 // WAV; far more of mp3/m4a). Keeps a big video out of memory too.
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 
+// The two rows, in the order they're listed (and drawn in the panel).
+export const CLIP_KINDS = ['music', 'voice'];
+
+// --- recording (5c) ---
+
+// The countdown before a recording starts, in seconds (her choice: 3).
+// Letting go during it records nothing.
+export const COUNTDOWN_SECONDS = 3;
+
+// How much later a sound she hears lands in the recorded file than
+// the recorder's start says (speaker → mic → file), in seconds.
+// Measured on her iPad with the dev Mic delay test and set here once;
+// no setting. 0 until measured.
+export const MIC_DELAY_SECONDS = 0;
+
 const isTime = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 
 // A saved `audioClips` made safe. Anything that isn't a usable clip is
 // dropped (a bad clip shouldn't fail the project); a missing or bad
-// `offset` becomes 0. One clip at most for now.
+// `offset` becomes 0; a missing or unknown `kind` is 'music' (5a/5b's
+// one clip). At most one clip of each kind — the first usable one —
+// with Music first.
 export function sanitizeAudioClips(value) {
   if (!Array.isArray(value)) return [];
-  const out = [];
+  const byKind = new Map();
   for (const clip of value) {
     if (!clip || typeof clip !== 'object') continue;
     if (typeof clip.id !== 'string' || !clip.id) continue;
     if (typeof clip.blobRef !== 'string' || !clip.blobRef) continue;
     if (!isTime(clip.trimStart) || !isTime(clip.trimEnd) || clip.trimEnd <= clip.trimStart) continue;
-    out.push({
+    const kind = CLIP_KINDS.includes(clip.kind) ? clip.kind : 'music';
+    if (byKind.has(kind)) continue;
+    byKind.set(kind, {
       id: clip.id,
+      kind,
       blobRef: clip.blobRef,
       trimStart: clip.trimStart,
       trimEnd: Math.min(clip.trimEnd, clip.trimStart + MAX_CLIP_SECONDS),
       offset: isTime(clip.offset) ? clip.offset : 0,
     });
-    if (out.length === 1) break;
   }
-  return out;
+  return CLIP_KINDS.filter((kind) => byKind.has(kind)).map((kind) => byKind.get(kind));
 }
 
-// A new clip for a freshly imported or recorded file `duration`
-// seconds long: the whole file (up to the cap), from the animation's
-// start. `clipped` says the file was longer than the cap.
-export function newClip({ id, blobRef, duration }) {
+// The clip of `kind` in a clip list, or null.
+export function clipOfKind(clips, kind) {
+  return (clips ?? []).find((clip) => (clip.kind ?? 'music') === kind) ?? null;
+}
+
+// A clip list with the `kind` row set to `clip` (null empties it); the
+// other row is untouched. Music stays first.
+export function withClip(clips, kind, clip) {
+  const rows = new Map(CLIP_KINDS.map((k) => [k, clipOfKind(clips, k)]));
+  rows.set(kind, clip ? { ...clip, kind } : null);
+  return CLIP_KINDS.map((k) => rows.get(k)).filter(Boolean);
+}
+
+// A new clip for a freshly imported file `duration` seconds long: the
+// whole file (up to the cap), from the animation's start. `clipped`
+// says the file was longer than the cap.
+export function newClip({ id, blobRef, duration, kind = 'music' }) {
   const length = Math.min(duration, MAX_CLIP_SECONDS);
   return {
-    clip: { id, blobRef, trimStart: 0, trimEnd: length, offset: 0 },
+    clip: { id, kind, blobRef, trimStart: 0, trimEnd: length, offset: 0 },
     clipped: duration > MAX_CLIP_SECONDS,
   };
+}
+
+// The Voice clip for a finished recording (5c). The file starts a
+// little before the first frame showed (opening the recorder, "Getting
+// ready"): `leadIn` seconds of it are cut with trimStart, plus the mic
+// delay, so her voice lands where she heard and saw it. `offset` is
+// where the take began in the animation (the frame she started on).
+// null when nothing usable is left — shorter than `minLength` (one
+// frame).
+export function recordedClip({ id, blobRef, duration, leadIn, offset, minLength = 0, micDelay = MIC_DELAY_SECONDS }) {
+  if (!(duration > 0)) return null;
+  const trimStart = Math.min(Math.max(0, (leadIn || 0) + micDelay), duration);
+  const trimEnd = Math.min(duration, trimStart + MAX_CLIP_SECONDS);
+  if (!(trimEnd - trimStart > 0) || trimEnd - trimStart < minLength) return null;
+  return { id, kind: 'voice', blobRef, trimStart, trimEnd, offset: isTime(offset) ? offset : 0 };
 }
 
 // Whether a picked file may be imported, before reading it:
@@ -100,6 +149,7 @@ export function sameClips(a, b) {
   const y = b ?? [];
   if (x.length !== y.length) return false;
   return x.every((c, i) => c.id === y[i].id && c.blobRef === y[i].blobRef
+    && (c.kind ?? 'music') === (y[i].kind ?? 'music')
     && c.trimStart === y[i].trimStart && c.trimEnd === y[i].trimEnd
     && (c.offset ?? 0) === (y[i].offset ?? 0));
 }

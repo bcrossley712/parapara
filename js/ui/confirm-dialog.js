@@ -15,8 +15,11 @@ let closeCurrent = null;
 
 // Resolves true (confirmed) or false (cancelled). `danger` paints the
 // confirm button red, for actions that can't be undone.
-export function showConfirm({ title, message = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
-  return openDialog({ title, message, confirmLabel, cancelLabel, danger, input: null })
+// `dismissConfirms`: a tap on the dim area (or Escape) counts as the
+// confirm button, not Cancel — for a notice whose second button is the
+// unusual choice (5c's headphones popup: Got it / Don't show again).
+export function showConfirm({ title, message = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false, dismissConfirms = false }) {
+  return openDialog({ title, message, confirmLabel, cancelLabel, danger, input: null, dismissConfirms })
     .then((answer) => answer !== null);
 }
 
@@ -26,7 +29,7 @@ export function showPrompt({ title, value = '', confirmLabel = 'OK', cancelLabel
   return openDialog({ title, message: '', confirmLabel, cancelLabel, danger: false, input: { value, maxLength } });
 }
 
-function openDialog({ title, message, confirmLabel, cancelLabel, danger, input }) {
+function openDialog({ title, message, confirmLabel, cancelLabel, danger, input, dismissConfirms = false }) {
   closeCurrent?.(null);
 
   return new Promise((resolve) => {
@@ -100,15 +103,17 @@ function openDialog({ title, message, confirmLabel, cancelLabel, danger, input }
 
     cancelBtn.addEventListener('click', () => close(null));
     confirmBtn.addEventListener('click', confirm);
-    // A tap on the dim area (not the dialog) cancels.
+    const dismiss = () => (dismissConfirms ? confirm() : close(null));
+    // A tap on the dim area (not the dialog) cancels (or confirms, with
+    // dismissConfirms).
     backdrop.addEventListener('pointerdown', (event) => {
       if (event.target === backdrop) {
         event.preventDefault();
-        close(null);
+        dismiss();
       }
     });
     dialog.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') close(null);
+      if (event.key === 'Escape') dismiss();
       // Enter submits the text field; on buttons it presses whichever
       // is focused, as usual.
       if (event.key === 'Enter' && event.target === field) {

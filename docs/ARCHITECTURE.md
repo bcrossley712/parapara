@@ -475,54 +475,99 @@ The photo picker (Photos vs Files, HEIC arriving as JPEG), memory with large pho
 
 ## Sound
 
-**Files:** `js/audio/clip.js` (pure clip rules, import caps, move/trim/slip),
-`audio/peaks.js` (waveform peaks), `audio/audio.js` (AudioContext,
-decode, the audio clock), `ui/sound-panel.js` (Sound button + panel,
-UI only).
+**Files:** `js/audio/clip.js` (pure clip rules, import caps, move/trim/slip,
+the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
+(AudioContext, decode, the audio clock, the audio session),
+`audio/recorder.js` (the mic and MediaRecorder, 5c),
+`ui/sound-panel.js` (Sound button + panel, UI only), `ui/countdown.js`
+(the countdown before recording); the hold and the take in `main.js`.
 
 ### How it works
 
-- **Sound (5a, 5b)** ([why](DESIGN_NOTES.md#planned-features)):
-  - **One clip** in `project.audioClips` (rules pure in
-    `audio/clip.js`; bad records dropped on open, never a failed
-    open): `trimStart`/`trimEnd` pick the part of the file, `offset`
-    where it starts in the animation — all seconds. 5a always makes
-    0 / file length / 0.
-  - **The file is stored exactly as picked, never re-encoded**
-    (`saveAudioBlob`: ArrayBuffer + its MIME type, before the project
-    points at it), and accepted only if it decodes here — so playback
-    and step 6's export can always read it. Over **20 MB** refused
-    before reading; longer than **3 min**, only the first 3 min are
-    decoded and used (banner). Only the current clip's decoded sound
-    is in memory.
+- **Sound (5a, 5b, 5c)** ([why](DESIGN_NOTES.md#planned-features)):
+  - **Two rows: one Music clip and one Voice clip** in
+    `project.audioClips`, each with `kind` (`'music'` | `'voice'`;
+    missing = `'music'`, as 5a/5b saved it), Music first. Rules pure in
+    `audio/clip.js` (`clipOfKind`, `withClip`); bad records dropped on
+    open, never a failed open. `trimStart`/`trimEnd` pick the part of
+    the file, `offset` where it starts in the animation — all seconds.
+    Import fills Music and recording fills Voice; neither touches the
+    other. More rows only if she asks.
+  - **A file is stored exactly as picked or recorded, never
+    re-encoded** (`saveAudioBlob`: ArrayBuffer + its MIME type, before
+    the project points at it), and kept only if it decodes here — so
+    playback and step 6's export can always read it. Imports over
+    **20 MB** refused before reading; longer than **3 min**, only the
+    first 3 min are decoded and used (banner). Only the current clips'
+    decoded sound is in memory.
   - **The audio clock** (`audio/audio.js`) drives playback when
-    there's a clip: playback hands it each run's start (frame time,
-    fps, frame count, loop) and stops it; its time is the
-    AudioContext's minus the output delay, so frames follow what she
-    hears. It schedules the clip on that clock — this pass at once,
-    each loop pass ~1 s ahead — so loops are seamless and never drift.
-    **The animation's length wins:** only the part inside frames ÷
-    fps plays. No clip, or a context that doesn't start within 1 s:
-    the wall clock, silently.
+    there's sound: playback hands it each run's start (frame time,
+    fps, frame count, loop, and `skip` — kinds left out) and stops it;
+    its time is the AudioContext's minus the output delay, so frames
+    follow what she hears. It schedules each clip on that clock — this
+    pass at once, each loop pass ~1 s ahead — so loops are seamless and
+    never drift. **The animation's length wins:** only the part inside
+    frames ÷ fps plays. Nothing to play, or a context that doesn't
+    start within 1 s: the wall clock, silently.
+  - **Plays in Silent mode:** the audio session (Safari's
+    `navigator.audioSession`) is `'playback'` before the context
+    starts — iOS otherwise mutes web sound in Silent mode (seen on her
+    iPad) — and `'play-and-record'` while the mic records. The Play tap
+    resumes the context even while the sound is still loading
+    (`unlock({ expectSound })`). Whether each run's sound started goes
+    to the activity log (`onEvent`).
   - **Sound button** (top bar, before Image; a dot when there's
-    sound) toggles the **sound panel** (5b, `ui/sound-panel.js`) over
-    the canvas area's bottom, above the tiles — covers, never shrinks;
-    not remembered across launches. Import while playing only stops
-    (picker inside the tap). Import/Replace/Delete and each trim/move
+    sound) toggles the **sound panel** over the canvas area's bottom,
+    above the tiles — covers, never shrinks; not remembered across
+    launches. Import while playing only stops (picker inside the tap).
+    Import/Replace, a recording, each row's Delete and each trim/move
     drag are one `'audio'` undo entry (`{ before, after }` clip lists);
     files stay in storage for undo and the sweep.
-  - **Panel (5b):** a track at the tiles' scale (one frame = a tile +
-    its gap, `strip.timeline`), scrolling with them: drag the clip to
-    move it — left past frame 1 grows `trimStart` (offset stays ≥ 0);
-    handles trim; an end pulled back to the animation's end plays to
-    the file's end. Above it, an **overview of the whole file** (not
-    in Flipaclip — she can't reach a song's middle at tile scale): drag
-    or tap it to pick which part plays (`slipClip`). Rules pure in
-    `audio/clip.js`; no snapping; min length one frame. A touch on the
-    track or overview while playing only stops. While open, the onion
-    badge and "Getting ready" sit above it and the layers panel ends
-    above it. Peaks (`audio/peaks.js`) are worked out when the panel
-    first shows a sound.
+  - **Panel:** each row has its controls on the left (over the
+    transport) and a track at the tiles' scale (one frame = a tile +
+    its gap, `strip.timeline`), scrolling with them. Rows are 48 px; an
+    **empty row stays slim** (40 px, a line saying what fills it), so
+    the panel is ~100–145 px. Its height is copied to the canvas area's
+    `--pp-sound-panel-height`, so the onion badge and "Getting ready"
+    sit above it; the layers panel ends above it. Drag a clip to move it
+    — left past frame 1 grows `trimStart` (offset stays ≥ 0); handles
+    trim; an end pulled back to the animation's end plays to the file's
+    end. Above the Music row, an **overview of the whole file** (not in
+    Flipaclip — she can't reach a song's middle at tile scale): drag or
+    tap it to pick which part plays (`slipClip`). No snapping; min
+    length one frame. A touch on a track or the overview while playing
+    only stops. Peaks are worked out when the panel first shows a clip.
+  - **Recording (5c)** — hold the mic (Voice row, red):
+    - **Before the hold:** fewer than two frames → a banner. Replacing a
+      Voice not recorded since the panel opened asks first (custom
+      confirm; retakes don't). With Music, the headphones tip shows once
+      per panel opening unless she chose "Don't show again"
+      (`uiState.hideHeadphonesTip`). Each popup stands in for the hold;
+      she holds again.
+    - **The hold:** a **3-second countdown** (`COUNTDOWN_SECONDS`) over
+      the canvas, silent, while the mic opens (`recorder.open`, echo
+      cancellation off). Letting go during it, or any other touch,
+      records nothing ("Keep holding…"). Then the recorder starts, and
+      once it says so, playback runs from her frame (the last frame →
+      frame 1) **without looping, Music playing, the old Voice
+      silent** (`skip: ['voice']`). A red bar grows on the Voice row.
+    - **Ends** on letting go, at the last frame, after 3 minutes, on any
+      other touch (canvas, transport, a track, a button), or when the app
+      is hidden — **the take is kept** in each case. She lands on the
+      frame showing, as after playback; actions tapped meanwhile wait for
+      the take to be saved (they wait on `landing`).
+    - **The take → Voice:** `recordedClip` — `offset` = the start
+      frame's time; `trimStart` = the lead-in (the recorder's start to
+      the first frame shown, both on `performance.now()`) +
+      `MIC_DELAY_SECONDS`; shorter than a frame → not kept (banner).
+      The mic closes after every take.
+    - **First hold:** iOS's mic prompt takes the touch; once she allows
+      it, a banner says to hold again. Refused → a notice pointing to
+      Settings.
+    - **Mic delay:** measured with the dev "Mic delay test" (gear →
+      Developer: plays a click on the speaker, records it, compares when
+      it was heard with where it landed) and set once in
+      `MIC_DELAY_SECONDS`; 0 until measured.
 
 ### Don't break
 
@@ -531,6 +576,17 @@ UI only).
   for a stroke or a playback stop. **Its waveform canvases are only as
   wide as the track**, redrawn on scroll — never one canvas the length
   of the song (iOS canvas limits and memory).
+- **`audio.unlock()` stays synchronous in the Play tap and the mic
+  press, before any await**, and is called even when the sound is still
+  loading — a touch is the only chance iOS gives to start the context.
+- **Any way playback stops ends a recording** — `endTake` hangs off
+  playback's `'idle'` report, not off each stop path; the countdown
+  (not playing yet) is ended by `interruptTake`, which `afterPlayback`,
+  Play, the step buttons, a canvas tap and hiding the app call.
+- **`exclusive()` drops a task while another runs** — a finished take
+  must not be dropped, so it waits its turn (`exclusiveTask`).
+- **The countdown overlay never takes touches** (`pointer-events:
+  none`) — it would steal the held mic's pointer.
 
 ### Testing
 
@@ -541,11 +597,18 @@ UI only).
   `page.evaluate` as byte arrays (ArrayBuffers don't survive it).
   Panel drags (5b) grab the clip's *visible* part (the track clips
   it when scrolled) and start from frame 1 — a drag ending near the
-  track's left end edge-scrolls and moves the clip further.
+  track's left end edge-scrolls and moves the clip further. Row
+  locators are scoped (`.pp-sound-panel__row--music` / `--voice`).
+- **Recording in e2e** (`recording.spec.js`): Chromium's fake mic
+  (`--use-fake-device-for-media-stream`, allowed by
+  `--use-fake-ui-for-media-stream`) records WebM/Opus. The countdown
+  runs in real time (3 s a hold). A take lands where it stopped, so a
+  retake goes back to frame 1 first or it may finish before the test
+  looks. A second pointer while the mouse holds the mic is a CDP touch.
 
 ### iPad-only checks
 
-Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, mic permission in the installed app, recording latency, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform.
+Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding.
 
 ---
 
@@ -598,6 +661,9 @@ temporary), `ui/dev-log-view.js` (DEV ONLY); screen routing in
   pick, and fingers joining it are ignored until all are up (the
   playback-stop swallow). Panels she works with open (layers, sound)
   don't count. Taps on other controls still act and close the menu.
+- **Dialogs** (`confirm-dialog.js`): a tap on the dim area cancels,
+  except with `dismissConfirms` (5c's headphones tip, where the second
+  button — "Don't show again" — is the unusual choice).
 - **Messages:** information that isn't a problem (locked/hidden
   layer, layer cap) is a fading banner that never blocks touches
   (`showBanner`); real problems (couldn't save) are a toast that waits

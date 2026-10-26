@@ -6,7 +6,11 @@
 // frames follow what she hears. No DOM and no storage: main.js reads
 // the file and hands over bytes; the rules for where the clip lands
 // are in clip.js. Unit-tested with a fake AudioContext
-// (tests/unit/audio.test.js). Recording (5c) joins later.
+// (tests/unit/audio.test.js). The mic itself is recorder.js (5c).
+//
+// Two clips (5c): the Music and Voice rows play together, each placed
+// by its own clip record. start({ skip }) leaves kinds out of a run —
+// while she records, the old Voice is silent and the Music plays.
 //
 // The clock (PROJECT_NOTES.md, step 5):
 //   - start({ position, fps, frameCount, loop }) begins a run from
@@ -23,6 +27,16 @@
 //     A context still starting (resume() is asked for in the Play tap)
 //     holds the first frame until sound begins; if it hasn't begun
 //     within START_TIMEOUT_MS, the run carries on silently.
+//
+// Silent mode (5a, checked on her iPad): iOS mutes web sound in Silent
+// mode unless the page says its sound is media. The audio session is
+// set to 'playback' (Safari's navigator.audioSession) before the
+// context starts, so her animation's sound plays like a video's. 5c's
+// recording switches it to 'play-and-record' while the mic is on.
+//
+// onEvent(name, detail) reports, for the activity log, whether a run's
+// sound actually started: 'sound-start' { waitedMs }, 'sound-silent'
+// { reason, state }, and 'sound-unlock-failed' { error }.
 
 import { animationSeconds, clipPlacement } from './clip.js';
 
@@ -36,17 +50,41 @@ function defaultContext() {
   return Ctor ? new Ctor() : null;
 }
 
+// The page's audio session (Safari 16.4+), or null elsewhere.
+function defaultSession() {
+  return globalThis.navigator?.audioSession ?? null;
+}
+
 // createContext(): a new AudioContext, or null without Web Audio.
 // wallNow(): the wall clock in ms (tests pass a fake).
-export function createAudio({ createContext = defaultContext, wallNow = () => performance.now() } = {}) {
+// audioSession: Safari's navigator.audioSession, or null.
+// onEvent(name, detail): what happened to a run's sound (see above).
+export function createAudio({
+  createContext = defaultContext,
+  wallNow = () => performance.now(),
+  audioSession = defaultSession(),
+  onEvent = () => {},
+} = {}) {
   let ctx = null;
   let contextFailed = false;
-  let clip = null;      // the project's clip record
-  let buffer = null;    // its decoded sound (an AudioBuffer)
+  // The project's clips with their decoded sound: [{ clip, buffer }].
+  let tracks = [];
   let run = null;       // the playing run (see start)
+  let recording = false; // the mic is on (setRecording)
+
+  // Says the page's sound is media, so Silent mode doesn't mute it.
+  function setSession(type) {
+    if (!audioSession) return;
+    try {
+      if (audioSession.type !== type) audioSession.type = type;
+    } catch (err) {
+      console.warn('Parapara! could not set the audio session:', err);
+    }
+  }
 
   function context() {
     if (ctx || contextFailed) return ctx;
+    setSession('playback');
     try {
       ctx = createContext();
     } catch (err) {
@@ -67,7 +105,7 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
 
   // Plays buffer[from .. from+duration) at context time `when`. A start
   // already in the past is shifted (its beginning cut), never late.
-  function schedule(when, from, duration) {
+  function schedule(buffer, when, from, duration) {
     const lateBy = Math.max(0, ctx.currentTime - when);
     const length = duration - lateBy;
     if (!(length > 0)) return;
@@ -83,11 +121,13 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
   // the run begins at startedAt + k·length − position (context time).
   function pump() {
     if (!run || run.mode !== 'audio' || !run.loop) return;
-    const { placement, length } = run;
+    const { parts, length } = run;
     for (;;) {
       const passStart = run.startedAt + run.nextPass * length - run.position;
       if (passStart - ctx.currentTime > LOOKAHEAD) return;
-      schedule(passStart + placement.at, placement.from, placement.to - placement.from);
+      for (const { buffer, placement } of parts) {
+        schedule(buffer, passStart + placement.at, placement.from, placement.to - placement.from);
+      }
       run.nextPass += 1;
     }
   }
@@ -111,31 +151,51 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
     run.t0 = wallNow() - elapsedMs;
   }
 
+  // Once per run: the sound began (after how long a wait).
+  function reportStarted() {
+    if (run.reported) return;
+    run.reported = true;
+    onEvent('sound-start', { waitedMs: Math.round(Math.max(0, wallNow() - run.requestedAt)) });
+  }
+
   const clock = {
-    start({ position = 0, fps, frameCount, loop = true }) {
+    // skip: clip kinds left out of this run (['voice'] while recording).
+    start({ position = 0, fps, frameCount, loop = true, skip = [] }) {
       clock.stop();
       const length = animationSeconds(frameCount, fps);
-      const placement = buffer ? clipPlacement(clip, length) : null;
+      const parts = [];
+      for (const { clip, buffer } of tracks) {
+        if (skip.includes(clip.kind ?? 'music')) continue;
+        const placement = clipPlacement(clip, length);
+        if (placement) parts.push({ buffer, placement });
+      }
       run = { mode: 'wall', t0: wallNow(), sources: new Set() };
       // A suspended or interrupted context may be starting (the Play tap
       // asked it to): run on it, holding until it does (see now()).
-      if (!placement || !context() || ctx.state === 'closed') return;
+      if (parts.length === 0) return;
+      if (!context() || ctx.state === 'closed') {
+        onEvent('sound-silent', { reason: 'no-web-audio', state: ctx?.state ?? 'none' });
+        return;
+      }
       Object.assign(run, {
+        requestedAt: wallNow(),
+        reported: false,
         mode: 'audio',
         position,
         length,
         loop,
-        placement,
+        parts,
         startedAt: ctx.currentTime,
         waitingSince: ctx.state === 'running' ? null : wallNow(),
         nextPass: 1,
       });
-      // This pass: whatever's left of the clip from `position` on.
-      const { at, from, to } = placement;
-      const into = position - at; // how far into the clip the run starts
-      if (into < to - from) {
-        const skip = Math.max(0, into);
-        schedule(run.startedAt + Math.max(0, -into), from + skip, to - from - skip);
+      // This pass: whatever's left of each clip from `position` on.
+      for (const { buffer, placement: { at, from, to } } of parts) {
+        const into = position - at; // how far into the clip the run starts
+        if (into < to - from) {
+          const cut = Math.max(0, into);
+          schedule(buffer, run.startedAt + Math.max(0, -into), from + cut, to - from - cut);
+        }
       }
       pump();
     },
@@ -148,12 +208,16 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
         if (run.waitingSince === null) run.waitingSince = wallNow();
         if (wallNow() - run.waitingSince > START_TIMEOUT_MS) {
           const elapsed = Math.max(0, (ctx.currentTime - run.startedAt) * 1000);
+          // Only a run that never started is "silent"; a later stop
+          // (an interruption) is reported the same way.
+          onEvent('sound-silent', { reason: run.reported ? 'stopped' : 'did-not-start', state: ctx.state });
           goWall(elapsed);
           return elapsed;
         }
         return Math.max(0, (ctx.currentTime - run.startedAt) * 1000);
       }
       run.waitingSince = null;
+      reportStarted();
       pump();
       return (ctx.currentTime - outputDelay() - run.startedAt) * 1000;
     },
@@ -173,13 +237,26 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
     clock,
 
     // Call synchronously inside a tap (Play): iOS only starts sound
-    // from one. Nothing to do without a clip.
-    unlock() {
-      if (!buffer || !context()) return;
+    // from one. Nothing to do without sound — but a sound still being
+    // loaded counts (`expectSound`): Play pressed while a project opens
+    // waits in "Getting ready", and this tap is the only chance to
+    // start the context for it.
+    unlock({ expectSound = false } = {}) {
+      if (!(tracks.length > 0 || expectSound) || !context()) return;
+      if (!recording) setSession('playback');
       if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
         const resumed = ctx.resume();
-        resumed?.catch?.((err) => console.warn('Parapara! sound could not start:', err));
+        resumed?.catch?.((err) => {
+          console.warn('Parapara! sound could not start:', err);
+          onEvent('sound-unlock-failed', { error: String(err?.message ?? err) });
+        });
       }
+    },
+
+    // For the log: the context's state ('none' before one exists) and
+    // the audio session's type ('none' without one).
+    get debugState() {
+      return { ctx: ctx?.state ?? 'none', session: audioSession?.type ?? 'none' };
     },
 
     // Decodes a stored file's bytes (ArrayBuffer) into sound. Rejects if
@@ -206,22 +283,37 @@ export function createAudio({ createContext = defaultContext, wallNow = () => pe
       return out;
     },
 
-    // The project's clip and its decoded sound (both null: no sound).
+    // The project's clips and their decoded sound: [{ clip, buffer }]
+    // (entries without a buffer — not decoded yet — are left out).
     // Takes effect from the next run.
-    setClip(nextClip, decoded) {
-      clip = nextClip ?? null;
-      buffer = nextClip ? decoded ?? null : null;
+    setClips(list) {
+      tracks = (list ?? []).filter((t) => t && t.clip && t.buffer);
     },
 
-    // The blobRef whose sound is loaded, or null.
-    get loadedRef() {
-      return buffer && clip ? clip.blobRef : null;
+    // Whether any clip's sound is loaded (for the log).
+    get hasSound() {
+      return tracks.length > 0;
+    },
+
+    // While the mic is recording (5c): the audio session says so
+    // ('play-and-record'), so iOS lets the music play while the mic is
+    // on; back to 'playback' after.
+    setRecording(on) {
+      recording = Boolean(on);
+      setSession(recording ? 'play-and-record' : 'playback');
+    },
+
+    // The AudioContext, created if needed (null without Web Audio) —
+    // for the dev Mic delay test, which plays a click on it.
+    get context() {
+      return context();
     },
 
     destroy() {
       clock.stop();
-      clip = null;
-      buffer = null;
+      tracks = [];
+      if (recording) setSession('playback');
+      recording = false;
       const closing = ctx;
       ctx = null;
       contextFailed = true;
