@@ -8,7 +8,7 @@
 // eyedropper's live preview under a finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, waitForToolSettings } from './helpers.js';
+import { openApp, reloadApp, readDb, waitForToolSettings, closeLayersPanel } from './helpers.js';
 
 test.beforeEach(async ({ page }) => {
   page.on('dialog', (d) => {
@@ -53,17 +53,21 @@ async function screenPoint(page, x, y) {
 }
 
 async function stroke(page, y) {
+  const reopen = await closeLayersPanel(page);
   const a = await screenPoint(page, 400, y);
   const b = await screenPoint(page, 1400, y);
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 20 });
   await page.mouse.up();
+  await reopen();
 }
 
 async function tapCanvas(page, x, y) {
+  const reopen = await closeLayersPanel(page);
   const p = await screenPoint(page, x, y);
   await page.mouse.click(p.x, p.y);
+  await reopen();
 }
 
 // The color in use right now (not the saved one, which lags by the

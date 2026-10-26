@@ -33,6 +33,20 @@
 //     or the overview stops playback and does nothing else (anything
 //     that changes the project stops playback first); Import only stops
 //     it too (the file picker must open inside the tap, iOS).
+//   - The mixer (after 5c): each row's label is its volume button
+//     ("Music 100%"); it opens a slider — Music 0–100%, Voice 0–200%.
+//     The slider works while sound plays (that's the point: she mixes by
+//     ear), so it never stops playback. A menu: a tap outside closes it.
+//   - Listen and Set start (after 5c), beside the overview: play just the
+//     song from the part's start. Listen leaves the start alone (a line
+//     runs across the overview); Set start moves the part along with the
+//     song, and wherever it stops is the new start. Either button reads
+//     Stop while it plays; any tap outside the two buttons and the
+//     volume controls stops it (a tap on the canvas only stops it).
+//     main.js plays the sound and reports through setListening().
+//   - Moving the song (the overview, Set start, or dragging the Music
+//     clip) when there's a Voice take asks first (main.js, through
+//     canRetimeMusic): the take was recorded against the song's timing.
 //
 // The waveforms are drawn on canvases only as wide as the track and
 // redrawn as they scroll — never one canvas as long as the song (iOS
@@ -51,6 +65,8 @@ import {
   trimClipEnd,
   slipClip,
   clipGain,
+  clipVolume,
+  MAX_VOLUME,
 } from '../audio/clip.js';
 import { peakBetween } from '../audio/peaks.js';
 
@@ -85,6 +101,13 @@ const EMPTY_ROW = { clip: null, duration: 0, peaks: null, loading: false };
 //   onMicUp({ cancelled }) — and let go (cancelled: the touch was taken
 //     away, e.g. by a system prompt)
 //   onPlayingTouch() — a track or the overview was touched while playing
+//   onVolumeInput(kind, volume) — the slider moving (live; 1 = 100%)
+//   onVolumeCommit(kind, volume) — let go (one undo step)
+//   onListen(mode) — Listen ('listen') or Set start ('set') tapped while
+//     not playing that mode; inside the tap (iOS starts sound only there)
+//   onListenStop() — Stop, or a tap away, while listening
+//   canRetimeMusic() — may the song's timing change now? false: main.js
+//     asked first, and the touch does nothing
 //   onOpenChange(open)
 // options.container: the canvas area (the panel goes in it; its
 //   --pp-sound-panel-height is kept up to date for what sits above).
@@ -150,17 +173,33 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
   const overviewCanvas = document.createElement('canvas');
   const windowBox = document.createElement('div');
   windowBox.className = 'pp-sound-panel__window';
-  overview.append(overviewCanvas, windowBox);
-  overviewRow.append(sideCell(), overview);
+  // Where she is in the song while listening.
+  const listenLine = document.createElement('div');
+  listenLine.className = 'pp-sound-panel__playhead pp-sound-panel__listen-line';
+  listenLine.hidden = true;
+  overview.append(overviewCanvas, windowBox, listenLine);
+  const overviewSide = sideCell();
+  const listenBtn = textButton('Listen', () => onListenTap('listen'), 'pp-sound-panel__listen');
+  const setStartBtn = textButton('Set start', () => onListenTap('set'), 'pp-sound-panel__listen');
+  overviewSide.append(listenBtn, setStartBtn);
+  overviewRow.append(overviewSide, overview);
 
   // One row: its controls, then its track.
   function createRow(kind) {
     const element = document.createElement('div');
     element.className = `pp-sound-panel__row pp-sound-panel__row--${kind}`;
     const side = sideCell();
-    const label = document.createElement('span');
+    // The row's name, and its volume button once it has a clip.
+    const label = document.createElement('button');
+    label.type = 'button';
     label.className = 'pp-sound-panel__label';
-    label.textContent = ROW_TEXT[kind].label;
+    const labelName = document.createElement('span');
+    labelName.className = 'pp-sound-panel__label-name';
+    labelName.textContent = ROW_TEXT[kind].label;
+    const labelVolume = document.createElement('span');
+    labelVolume.className = 'pp-sound-panel__label-volume';
+    label.append(labelName, labelVolume);
+    label.addEventListener('click', () => toggleVolume(kind));
     side.appendChild(label);
 
     const track = document.createElement('div');
@@ -186,7 +225,7 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
 
     element.append(side, track);
     return {
-      kind, element, side, track, waveCanvas, clipBox, startHandle, endHandle, playheadLine, message,
+      kind, element, side, label, labelVolume, track, waveCanvas, clipBox, startHandle, endHandle, playheadLine, message,
     };
   }
 
@@ -212,7 +251,23 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
   recordBar.hidden = true;
   rows.voice.track.insertBefore(recordBar, rows.voice.playheadLine);
 
-  panel.append(overviewRow, rows.music.element, rows.voice.element);
+  // The volume slider (after 5c): one popover, for whichever row opened it.
+  const volumePop = document.createElement('div');
+  volumePop.className = 'pp-volume-pop';
+  volumePop.setAttribute('role', 'dialog');
+  volumePop.hidden = true;
+  const volumeTitle = document.createElement('div');
+  volumeTitle.className = 'pp-volume-pop__title';
+  const volumeInput = document.createElement('input');
+  volumeInput.type = 'range';
+  volumeInput.min = '0';
+  volumeInput.step = '5';
+  volumeInput.className = 'pp-volume-pop__slider';
+  const volumeNote = document.createElement('div');
+  volumeNote.className = 'pp-volume-pop__note';
+  volumePop.append(volumeTitle, volumeInput, volumeNote);
+
+  panel.append(overviewRow, rows.music.element, rows.voice.element, volumePop);
   container.appendChild(panel);
 
   let state = {
@@ -227,9 +282,15 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
   let mic = null;       // the mic button's pointer, while held
   let playheadIndex = null;
   let geo = null;       // timeline geometry, refreshed on each layout
+  let volumeKind = null; // the row whose volume slider is open
+  let listening = null; // { mode: 'listen' | 'set', position, clip } (setListening)
 
   const rowState = (kind) => state[kind] ?? EMPTY_ROW;
-  const clipShown = (kind) => (preview?.kind === kind ? preview.clip : rowState(kind).clip);
+  const clipShown = (kind) => {
+    if (preview?.kind === kind) return preview.clip;
+    if (kind === 'music' && listening?.clip) return listening.clip; // Set start moving it
+    return rowState(kind).clip;
+  };
   const ready = (kind) => {
     const r = rowState(kind);
     return Boolean(r.clip && r.peaks && r.duration > 0);
@@ -248,6 +309,7 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     if (!open) {
       cancelGesture();
       releaseMic(true);
+      closeVolume();
       container.style.removeProperty('--pp-sound-panel-height');
     }
     callbacks.onOpenChange?.(open);
@@ -333,7 +395,7 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     const perPx = 1 / pxPerSecond();
     const mid = h / 2;
     const { peaks } = rowState(kind);
-    const gain = clipGain(clip); // a leveled take draws as loud as it plays
+    const gain = clipGain(clip) * clipVolume(clip); // drawn as loud as it plays
     ctx.fillStyle = c[kind];
     for (let x = Math.floor(x0); x < x1; x++) {
       const t = (x + geo.scrollLeft) * perPx; // animation time
@@ -416,6 +478,9 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     windowBox.hidden = false;
     windowBox.style.left = `${(from / duration) * w}px`;
     windowBox.style.width = `${Math.max(3, ((to - from) / duration) * w)}px`;
+    const pos = listening?.mode === 'listen' ? listening.position : null;
+    listenLine.hidden = pos === null || pos === undefined;
+    if (!listenLine.hidden) listenLine.style.left = `${(pos / duration) * w}px`;
   }
 
   // --- dragging ---
@@ -426,6 +491,11 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
 
   function onDown(event, area, row) {
     if (gesture || !event.isPrimary) return;
+    if (listening) {
+      // The tap-away listener has stopped it; that's all this touch does.
+      gesture = { pointerId: event.pointerId, swallowed: true };
+      return;
+    }
     if (state.playing) {
       // Swallow the touch: stopping is all it does.
       gesture = { pointerId: event.pointerId, swallowed: true };
@@ -450,6 +520,12 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
       if (event.target === row.startHandle) action = 'trim-start';
       else if (event.target === row.endHandle) action = 'trim-end';
       else if (event.target === row.clipBox) action = 'move';
+    }
+    // Moving the song against a Voice take asks first; this touch then
+    // does nothing (the question stands in for it).
+    if ((action === 'slip' || (action === 'move' && kind === 'music')) && !(callbacks.canRetimeMusic?.() ?? true)) {
+      gesture = { pointerId: event.pointerId, swallowed: true };
+      return;
     }
     geo = timeline.geometry();
     gesture = {
@@ -567,6 +643,93 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
   document.addEventListener('pointercancel', onDocUp, { signal });
   panel.addEventListener('contextmenu', (event) => event.preventDefault());
 
+  // --- the mixer (after 5c) ---
+
+  const percent = (v) => `${Math.round(v * 100)}%`;
+
+  function toggleVolume(kind) {
+    if (volumeKind === kind) {
+      closeVolume();
+      return;
+    }
+    const clip = rowState(kind).clip;
+    if (!clip) return;
+    volumeKind = kind;
+    const max = MAX_VOLUME[kind] ?? 1;
+    volumeInput.max = String(Math.round(max * 100));
+    volumeInput.value = String(Math.round(clipVolume(clip) * 100));
+    volumeInput.setAttribute('aria-label', `${ROW_TEXT[kind].label} volume`);
+    volumeNote.textContent = kind === 'voice' ? 'Over 100% makes your voice louder than you recorded it.' : '';
+    volumeNote.hidden = kind !== 'voice';
+    showVolumeText();
+    volumePop.hidden = false;
+    // Above the row's button, inside the panel's width.
+    const btn = rows[kind].label.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    volumePop.style.left = `${Math.max(8, btn.left - box.left)}px`;
+    volumePop.style.bottom = `${box.bottom - btn.top + 8}px`;
+    rows[kind].label.classList.add('is-open');
+  }
+
+  function showVolumeText() {
+    volumeTitle.textContent = `${ROW_TEXT[volumeKind].label} volume ${volumeInput.value}%`;
+  }
+
+  function closeVolume() {
+    if (volumeKind === null) return;
+    rows[volumeKind].label.classList.remove('is-open');
+    volumeKind = null;
+    volumePop.hidden = true;
+  }
+
+  volumeInput.addEventListener('input', () => {
+    if (volumeKind === null) return;
+    showVolumeText();
+    rows[volumeKind].labelVolume.textContent = `${volumeInput.value}%`;
+    callbacks.onVolumeInput?.(volumeKind, Number(volumeInput.value) / 100);
+  });
+  volumeInput.addEventListener('change', () => {
+    if (volumeKind === null) return;
+    callbacks.onVolumeCommit?.(volumeKind, Number(volumeInput.value) / 100);
+  });
+  // A menu: a tap anywhere outside it (or its button) closes it.
+  document.addEventListener('pointerdown', (event) => {
+    if (volumeKind === null) return;
+    const target = event.target;
+    if (volumePop.contains(target) || rows[volumeKind].label.contains(target)) return;
+    closeVolume();
+  }, { signal, capture: true });
+
+  // --- Listen and Set start (after 5c) ---
+
+  function onListenTap(mode) {
+    if (listening?.mode === mode) callbacks.onListenStop?.();
+    else callbacks.onListen?.(mode);
+  }
+
+  // Any tap outside the two buttons and the volume controls stops it.
+  document.addEventListener('pointerdown', (event) => {
+    if (!listening) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (listenBtn.contains(target) || setStartBtn.contains(target)) return;
+    if (volumePop.contains(target) || rows.music.label.contains(target) || rows.voice.label.contains(target)) return;
+    callbacks.onListenStop?.();
+  }, { signal, capture: true });
+
+  // next: null (stopped) or { mode, position (s into the file), clip
+  // (Set start: the Music clip as it moves; else null) }.
+  function setListening(next) {
+    listening = next;
+    listenBtn.textContent = next?.mode === 'listen' ? 'Stop' : 'Listen';
+    setStartBtn.textContent = next?.mode === 'set' ? 'Stop' : 'Set start';
+    listenBtn.classList.toggle('is-playing', next?.mode === 'listen');
+    setStartBtn.classList.toggle('is-playing', next?.mode === 'set');
+    if (!open) return;
+    drawOverview();
+    if (!next || next.mode === 'set') draw();
+  }
+
   // --- the mic (5c): press and hold ---
 
   micBtn.addEventListener('pointerdown', (event) => {
@@ -658,6 +821,22 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     micText.textContent = recording?.phase === 'recording' ? 'Recording' : 'Hold to record';
     rows.voice.track.classList.toggle('is-muted', Boolean(recording));
 
+    for (const kind of ['music', 'voice']) {
+      const row = rows[kind];
+      const clip = rowState(kind).clip;
+      row.labelVolume.textContent = clip ? percent(clipVolume(clip)) : '';
+      row.label.disabled = !clip;
+      row.label.setAttribute('aria-label', clip ? `${ROW_TEXT[kind].label} volume ${percent(clipVolume(clip))}` : ROW_TEXT[kind].label);
+      if (!clip && volumeKind === kind) closeVolume();
+      else if (clip && volumeKind === kind && document.activeElement !== volumeInput) {
+        volumeInput.value = String(Math.round(clipVolume(clip) * 100));
+        showVolumeText();
+      }
+    }
+    const listenOff = state.busy || Boolean(recording);
+    listenBtn.disabled = listenOff && listening?.mode !== 'listen';
+    setStartBtn.disabled = listenOff && listening?.mode !== 'set';
+
     panel.classList.toggle('is-busy', state.busy);
     overviewRow.hidden = !ready('music');
     renderRow('music');
@@ -680,6 +859,7 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     element: panel,
     render,
     setPlayhead,
+    setListening,
     open: () => setOpen(true),
     close: () => setOpen(false),
     get isOpen() {
@@ -689,12 +869,21 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     get micHeld() {
       return mic !== null;
     },
+    // The volume slider is open (a canvas tap only closes it).
+    get isMenuOpen() {
+      return volumeKind !== null;
+    },
+    // Listen or Set start is playing (a canvas tap only stops it).
+    get isListening() {
+      return listening !== null;
+    },
   };
 }
 
 function sameClip(a, b) {
   return a.trimStart === b.trimStart && a.trimEnd === b.trimEnd && a.offset === b.offset;
 }
+// (Volume isn't changed by a drag; its slider reports on its own.)
 
 // A pair of beamed eighth notes.
 const SOUND_ICON = `

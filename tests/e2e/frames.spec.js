@@ -10,7 +10,7 @@
 // layers), and how the strip scrolls under her finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, layersSettled, layerMenu } from './helpers.js';
+import { openApp, reloadApp, layersSettled, layerMenu, closeLayersPanel, openLayersPanel } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -39,6 +39,7 @@ async function goToFrame(page, n) {
 
 // A horizontal mouse stroke at canvas-pixel height y.
 async function stroke(page, y) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   const sx = (x) => box.x + (x / 1920) * box.width;
   const sy = (v) => box.y + (v / 1080) * box.height;
@@ -46,6 +47,7 @@ async function stroke(page, y) {
   await page.mouse.down();
   for (let i = 1; i <= 20; i++) await page.mouse.move(sx(400 + i * 50), sy(y));
   await page.mouse.up();
+  await reopen();
 }
 
 // Is the active layer painted at canvas-pixel (x, y)?
@@ -163,9 +165,11 @@ test('layers are shared: a layer added or hidden on one frame is on every frame'
   expect(ids1).toEqual(ids2);
   await expect(page.locator('.pp-layers__row')).toHaveCount(2);
 
+  await openLayersPanel(page); // the tile tap closed it
   await page.getByRole('button', { name: 'Hide Layer 1' }).click();
   await goToFrame(page, 2);
   await expect(page.locator(`.pp-layer[data-layer-id="${ids2[0]}"]`)).toHaveCSS('visibility', 'hidden');
+  await openLayersPanel(page);
   await expect(page.getByRole('button', { name: 'Show Layer 1' })).toBeVisible();
 
   // Every frame record has a slot for both layers.

@@ -113,14 +113,21 @@ export function makeCanvas(width, height) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width));
   canvas.height = Math.max(1, Math.round(height));
+  liveCanvases += 1; // DEV ONLY
   return canvas;
 }
 
 export function freeCanvas(canvas) {
   if (!canvas) return;
+  if (canvas.width > 0) liveCanvases -= 1; // DEV ONLY
   canvas.width = 0;
   canvas.height = 0;
 }
+
+// DEV ONLY (activity log): canvases made here and not yet freed, app-wide
+// — whether closing a project leaves any behind. Remove with the log.
+let liveCanvases = 0;
+export const liveCanvasCount = () => liveCanvases;
 
 export function encodePNG(canvas) {
   return new Promise((resolve, reject) => {

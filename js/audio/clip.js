@@ -53,8 +53,35 @@ export const MIC_DELAY_SECONDS = -0.022;
 export const TAKE_TARGET_PEAK = 0.7;
 export const MAX_TAKE_GAIN = 8;
 
+// Leveling by loudness (after 5c: peak leveling left takes far quieter
+// than music — a single loud instant capped the lift while the rest of
+// the voice stayed quiet). New takes are lifted so their speech (silent
+// stretches left out) averages TAKE_TARGET_LOUDNESS (RMS, 0–1), still
+// at most MAX_TAKE_GAIN, never below 1, and with their loudest instant
+// at most MAX_LEVELED_PEAK — what's over 1 is squeezed by the take's
+// compressor and the mix's limiter (audio.js). Such clips are marked
+// `leveling: 'loudness'` (missing = 'peak', 5c's takes, left as they
+// were). First-try numbers: tune by ear on her iPad.
+export const TAKE_TARGET_LOUDNESS = 0.18;
+export const MAX_LEVELED_PEAK = 2;
+// Speech loudness is measured in windows this long; a window quieter
+// than SPEECH_FLOOR (RMS) is a pause and doesn't count.
+export const LOUDNESS_WINDOW_SECONDS = 0.05;
+export const SPEECH_FLOOR = 0.01;
+
+// --- the mixer (after 5c) ---
+//
+// Each row has a `volume` (1 = 100%, missing = 1), set with its slider
+// and applied on top of a take's leveling. Music only turns down; Voice
+// can be boosted to 200% (her request: her voice must carry over the
+// song). Saved per clip; one undo step per slider release.
+export const MAX_VOLUME = { music: 1, voice: 2 };
+export const VOLUME_STEP = 0.05;
+
 const isTime = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const isGain = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_TAKE_GAIN;
+const maxVolume = (kind) => MAX_VOLUME[kind] ?? 1;
+const isVolume = (v, kind) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= maxVolume(kind);
 
 // A saved `audioClips` made safe. Anything that isn't a usable clip is
 // dropped (a bad clip shouldn't fail the project); a missing or bad
@@ -79,6 +106,8 @@ export function sanitizeAudioClips(value) {
       trimEnd: Math.min(clip.trimEnd, clip.trimStart + MAX_CLIP_SECONDS),
       offset: isTime(clip.offset) ? clip.offset : 0,
       ...(isGain(clip.gain) && clip.gain !== 1 ? { gain: clip.gain } : {}),
+      ...(clip.leveling === 'loudness' ? { leveling: 'loudness' } : {}),
+      ...(isVolume(clip.volume, kind) && clip.volume !== 1 ? { volume: clip.volume } : {}),
     });
   }
   return CLIP_KINDS.filter((kind) => byKind.has(kind)).map((kind) => byKind.get(kind));
@@ -115,14 +144,17 @@ export function newClip({ id, blobRef, duration, kind = 'music' }) {
 // where the take began in the animation (the frame she started on).
 // null when nothing usable is left — shorter than `minLength` (one
 // frame).
-// `gain`: the take's leveling (takeGain); 1 is left out.
-export function recordedClip({ id, blobRef, duration, leadIn, offset, minLength = 0, micDelay = MIC_DELAY_SECONDS, gain = 1 }) {
+// `gain`: the take's leveling (takeGain / loudnessGain); 1 is left out.
+// `leveling`: 'loudness' marks a take leveled by loudness (it plays
+// through a compressor); anything else is left out.
+export function recordedClip({ id, blobRef, duration, leadIn, offset, minLength = 0, micDelay = MIC_DELAY_SECONDS, gain = 1, leveling = null }) {
   if (!(duration > 0)) return null;
   const trimStart = Math.min(Math.max(0, (leadIn || 0) + micDelay), duration);
   const trimEnd = Math.min(duration, trimStart + MAX_CLIP_SECONDS);
   if (!(trimEnd - trimStart > 0) || trimEnd - trimStart < minLength) return null;
   const clip = { id, kind: 'voice', blobRef, trimStart, trimEnd, offset: isTime(offset) ? offset : 0 };
   if (isGain(gain) && gain !== 1) clip.gain = gain;
+  if (leveling === 'loudness') clip.leveling = 'loudness';
   return clip;
 }
 
@@ -135,6 +167,64 @@ export function takeGain(peak) {
 // A clip's gain (1 when it has none).
 export function clipGain(clip) {
   return isGain(clip?.gain) ? clip.gain : 1;
+}
+
+// How loud a take's speech is: the RMS (0–1) over the windows between
+// `from` and `to` seconds that aren't pauses (louder than SPEECH_FLOOR),
+// channels averaged. 0 if it's all quiet. `channels`: Float32Arrays.
+export function speechLoudness(channels, sampleRate, from, to) {
+  if (!channels?.length || !(sampleRate > 0)) return 0;
+  const size = Math.max(1, Math.round(LOUDNESS_WINDOW_SECONDS * sampleRate));
+  const total = Math.min(...channels.map((c) => c.length));
+  const start = Math.max(0, Math.floor(from * sampleRate));
+  const end = Math.min(total, Math.ceil(to * sampleRate));
+  const floor = SPEECH_FLOOR * SPEECH_FLOOR;
+  let sum = 0;
+  let windows = 0;
+  for (let w = start; w < end; w += size) {
+    const stop = Math.min(end, w + size);
+    let power = 0;
+    for (const data of channels) {
+      for (let i = w; i < stop; i++) power += data[i] * data[i];
+    }
+    power /= (stop - w) * channels.length;
+    if (power > floor) {
+      sum += power;
+      windows += 1;
+    }
+  }
+  return windows ? Math.sqrt(sum / windows) : 0;
+}
+
+// The gain that levels a take by loudness (see TAKE_TARGET_LOUDNESS):
+// `loudness` from speechLoudness, `peak` its loudest sample (0–1).
+export function loudnessGain({ loudness, peak }) {
+  if (!(loudness > 0)) return 1;
+  let gain = TAKE_TARGET_LOUDNESS / loudness;
+  if (peak > 0) gain = Math.min(gain, MAX_LEVELED_PEAK / peak);
+  return Math.min(MAX_TAKE_GAIN, Math.max(1, gain));
+}
+
+// A clip's volume (its row's slider; 1 when it has none).
+export function clipVolume(clip) {
+  const kind = clip?.kind ?? 'music';
+  return isVolume(clip?.volume, kind) ? clip.volume : 1;
+}
+
+// `value` as a row's volume: snapped to VOLUME_STEP and kept within the
+// row's range (Music ≤ 100%, Voice ≤ 200%).
+export function sanitizeVolume(value, kind) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  const snapped = Math.round(value / VOLUME_STEP) * VOLUME_STEP;
+  return Math.min(maxVolume(kind), Math.max(0, Math.round(snapped * 100) / 100));
+}
+
+// The clip with its volume set (100% leaves the field out).
+export function withVolume(clip, value) {
+  const kind = clip.kind ?? 'music';
+  const volume = sanitizeVolume(value, kind);
+  const { volume: _old, ...rest } = clip;
+  return volume === 1 ? rest : { ...rest, volume };
 }
 
 // Whether a picked file may be imported, before reading it:
@@ -179,7 +269,9 @@ export function sameClips(a, b) {
     && (c.kind ?? 'music') === (y[i].kind ?? 'music')
     && c.trimStart === y[i].trimStart && c.trimEnd === y[i].trimEnd
     && (c.offset ?? 0) === (y[i].offset ?? 0)
-    && clipGain(c) === clipGain(y[i]));
+    && clipGain(c) === clipGain(y[i])
+    && clipVolume(c) === clipVolume(y[i])
+    && (c.leveling ?? 'peak') === (y[i].leveling ?? 'peak'));
 }
 
 // --- editing in the sound panel (5b) ---

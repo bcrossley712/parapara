@@ -1,6 +1,7 @@
 // End-to-end tests: a tap on the canvas while a menu or popover is open
-// only closes it — nothing is drawn (Procreate's way). Panels she works
-// with open (layers, sound) don't count: a tap draws as usual.
+// only closes it — nothing is drawn (Procreate's way). The layers panel
+// counts too (a menu since 5c). The sound panel, which she works with
+// open, doesn't: a tap draws as usual.
 //
 // Not covered here (device-only): how it feels with her stylus.
 
@@ -41,6 +42,11 @@ const menus = [
     shown: (page) => page.locator('.pp-frame-menu'),
   },
   {
+    name: 'the layers panel',
+    open: (page) => page.getByRole('button', { name: 'Layers', exact: true }).click(),
+    shown: (page) => page.locator('.pp-layers:not(.pp-layers--hidden)'),
+  },
+  {
     name: 'the layer menu',
     open: (page) => openLayerMenu(page),
     shown: (page) => page.locator('.pp-layer-menu'),
@@ -78,14 +84,52 @@ for (const menu of menus) {
   });
 }
 
-test('panels she works with open don\'t count: a tap draws with layers and sound open', async ({ page }) => {
+test('the sound panel doesn\'t count: a tap draws with it open', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Layers', exact: true }).click();
-  await expect(page.locator('.pp-layers')).toBeVisible();
   await page.locator('.pp-sound-btn').click();
   await expect(page.locator('.pp-sound-panel')).toBeVisible();
   await tapCanvas(page);
   await expect.poll(() => ink(page)).toBeGreaterThan(0);
-  await expect(page.locator('.pp-layers')).toBeVisible();
   await expect(page.locator('.pp-sound-panel')).toBeVisible();
+});
+
+test('the layer menu and the layers panel close together on one canvas tap', async ({ page }) => {
+  await openApp(page);
+  await openLayerMenu(page);
+  await tapCanvas(page);
+  await expect(page.locator('.pp-layer-menu')).toHaveCount(0);
+  await expect(page.locator('.pp-layers')).toBeHidden();
+  expect(await ink(page)).toBe(0);
+});
+
+test('a canvas tap mid-rename closes the panel and keeps the typed name', async ({ page }) => {
+  await openApp(page);
+  await openLayerMenu(page);
+  await page.locator('.pp-layer-menu').getByRole('menuitem', { name: 'Rename', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Layer name' }).fill('Sky');
+  await tapCanvas(page);
+  await expect(page.locator('.pp-layers')).toBeHidden();
+  expect(await ink(page)).toBe(0);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.locator('.pp-layers__name')).toHaveText(['Sky']);
+});
+
+test('picking a layer keeps the panel open', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Add layer' }).click();
+  await expect(page.locator('.pp-layers__row')).toHaveCount(2);
+  const other = page.locator('.pp-layers__row:not(.is-active) .pp-layers__name');
+  await other.click();
+  await expect(page.locator('.pp-layers__row.is-active .pp-layers__name')).toHaveText('Layer 1');
+  await expect(page.locator('.pp-layers')).toBeVisible();
+});
+
+test('a tap on another control closes the layers panel and still acts', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.locator('.pp-layers')).toBeVisible();
+  await page.getByRole('button', { name: 'Erase', exact: true }).click();
+  await expect(page.locator('.pp-layers')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Erase', exact: true })).toHaveClass(/is-active/);
 });

@@ -13,7 +13,7 @@
 // take to fill in on the iPad.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp } from './helpers.js';
+import { openApp, reloadApp, closeLayersPanel } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const addFrameBtn = (page) => page.getByRole('button', { name: 'Add frame' });
@@ -39,6 +39,7 @@ async function goToFrame(page, n) {
 
 // A mouse stroke in canvas-pixel coordinates.
 async function stroke(page, x1, y1, x2, y2) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   const sx = (x) => box.x + (x / 1920) * box.width;
   const sy = (y) => box.y + (y / 1080) * box.height;
@@ -48,6 +49,7 @@ async function stroke(page, x1, y1, x2, y2) {
     await page.mouse.move(sx(x1 + ((x2 - x1) * i) / 20), sy(y1 + ((y2 - y1) * i) / 20));
   }
   await page.mouse.up();
+  await reopen();
 }
 
 // What tile `n` (1-based) shows: null if it has no picture yet, else

@@ -14,6 +14,10 @@
 
 export const DEV_LOG_KEY = 'parapara-dev-log';
 export const DEV_LOG_MAX = 300;
+// What the view's Copy takes: the newest lines, enough to cover the
+// minute or so before a problem (a problem alone writes 4–6). Copy all
+// takes everything.
+export const DEV_LOG_COPY_LINES = 60;
 // Writes are batched: the whole log is rewritten at most this often
 // (it used to be on every event — work at every stroke's end), and
 // right away on flush() (the app being hidden).
@@ -106,9 +110,11 @@ export function createDevLog({
       persist();
     },
 
-    // The log as text, oldest first.
-    read() {
-      return load().join('\n');
+    // The log as text, oldest first — only the newest `last` lines if
+    // given.
+    read(last = Infinity) {
+      const all = load();
+      return (last < all.length ? all.slice(-last) : all).join('\n');
     },
 
     clear() {

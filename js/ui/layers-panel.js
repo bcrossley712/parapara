@@ -2,6 +2,9 @@
 //
 // The layers panel: floats over the right side of the canvas area
 // (doesn't shrink the canvas), opened from the top bar's Layers button.
+// A menu, Procreate's way: a canvas tap closes it (ui.js), picking a
+// layer keeps it open, and it isn't reopened at launch. Closing it
+// mid-rename keeps the name she typed.
 // Like Sketchbook/Procreate/Flipaclip: top layer listed first, each row
 // with a thumbnail, name, visibility and lock toggles and a drag handle;
 // tap a row to make it the active layer. Tapping the active layer's
@@ -69,6 +72,7 @@ export function createLayersPanel(callbacks, { signal } = {}) {
   let state = { layers: [], activeLayerId: null, maxLayers: Infinity, busy: false, canPaste: false };
   let open = false;
   let renamingId = null;
+  let finishRename = null; // the open name field's finish(commit), if any
   const thumbs = new Map(); // layer id -> <canvas>
 
   // --- header action ---
@@ -207,6 +211,7 @@ export function createLayersPanel(callbacks, { signal } = {}) {
         if (done) return;
         done = true;
         renamingId = null;
+        finishRename = null;
         const next = name.value.trim();
         if (commit && next && next !== layer.name) callbacks.onRename(layer.id, next);
         else render(state);
@@ -216,6 +221,7 @@ export function createLayersPanel(callbacks, { signal } = {}) {
         else if (e.key === 'Escape') finish(false);
       });
       name.addEventListener('blur', () => finish(true));
+      finishRename = finish;
       // Don't let a tap inside the field select the row.
       name.addEventListener('click', (e) => e.stopPropagation());
     } else {
@@ -320,6 +326,7 @@ export function createLayersPanel(callbacks, { signal } = {}) {
     const ids = new Set(state.layers.map((l) => l.id));
     for (const id of thumbs.keys()) if (!ids.has(id)) thumbs.delete(id);
     if (renamingId && !ids.has(renamingId)) renamingId = null;
+    finishRename = null; // buildRow sets it again for the field it makes
 
     const topFirst = [...state.layers].reverse();
     list.replaceChildren(...topFirst.map((layer, i) => buildRow(layer, i)));
@@ -354,6 +361,9 @@ export function createLayersPanel(callbacks, { signal } = {}) {
     panel.classList.toggle('pp-layers--hidden', !open);
     if (open) {
       for (const [id, canvas] of thumbs) callbacks.drawThumbnail(id, canvas);
+    } else if (finishRename) {
+      // Keeps what she typed (a canvas tap mid-rename, Procreate's way).
+      finishRename(true);
     } else if (renamingId) {
       renamingId = null;
       render(state);

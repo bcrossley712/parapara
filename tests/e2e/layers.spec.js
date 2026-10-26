@@ -7,7 +7,7 @@
 // Run: npm run test:e2e
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp } from './helpers.js';
+import { openApp, reloadApp, closeLayersPanel } from './helpers.js';
 
 // Creates the app's database before the app ever opens it. Runs on a
 // plain same-origin page (the manifest), so the app's own startup
@@ -75,8 +75,10 @@ function blobBytes(page, id) {
 }
 
 async function tapCanvas(page, x, y) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   await page.mouse.click(box.x + (x / 1920) * box.width, box.y + (y / 1080) * box.height);
+  await reopen();
 }
 
 const baseProject = {

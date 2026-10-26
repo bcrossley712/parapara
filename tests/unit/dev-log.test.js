@@ -55,6 +55,14 @@ test('only the newest lines are kept', () => {
   assert.equal(JSON.parse(storage.data[DEV_LOG_KEY]).length, 3);
 });
 
+test('read(last) gives only the newest lines', () => {
+  const log = createDevLog({ storage: fakeStorage(), now: () => at });
+  for (let i = 1; i <= 5; i++) log.add('e', { i });
+  assert.deepEqual(log.read(2).split('\n').map((l) => l.split(' ').at(-1)), ['i=4', 'i=5']);
+  assert.equal(log.read(10).split('\n').length, 5);
+  assert.equal(log.read(), log.read(Infinity));
+});
+
 test('clear empties it', () => {
   const storage = fakeStorage();
   const log = createDevLog({ storage, now: () => at });

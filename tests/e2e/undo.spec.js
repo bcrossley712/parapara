@@ -7,7 +7,7 @@
 // undo stays out of the way, and how the thresholds feel on her stylus.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layerMenu } from './helpers.js';
+import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layerMenu, closeLayersPanel } from './helpers.js';
 
 const undoBtn = (page) => page.getByRole('button', { name: 'Undo' });
 const redoBtn = (page) => page.getByRole('button', { name: 'Redo' });
@@ -30,6 +30,7 @@ async function mapper(page) {
 }
 
 async function drawStroke(page, y = 550) {
+  const reopen = await closeLayersPanel(page);
   const at = await mapper(page);
   const start = at(600, y);
   await page.mouse.move(start.x, start.y);
@@ -39,6 +40,7 @@ async function drawStroke(page, y = 550) {
     await page.mouse.move(p.x, p.y);
   }
   await page.mouse.up();
+  await reopen();
 }
 
 async function pickTool(page, name) {

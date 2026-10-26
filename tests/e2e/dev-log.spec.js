@@ -50,3 +50,29 @@ test('Clear empties the log', async ({ page }) => {
   await page.getByRole('button', { name: 'Close' }).click();
   await expect(page.locator('.pp-dev-log')).toHaveCount(0);
 });
+
+test('Copy takes the newest 60 lines, Copy all the whole log', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Seeded before the app starts (once), so its own log doesn't write over it.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    const lines = Array.from({ length: 100 }, (_, i) => `00:00:00.000 test n=${i + 1}`);
+    localStorage.setItem('parapara-dev-log', JSON.stringify(lines));
+  });
+  await openApp(page);
+  await openLog(page);
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await page.getByRole('button', { name: 'Copy last 60' }).click();
+  await expect(page.locator('.pp-dev-log [role="status"]')).toContainText('Copied the last 60');
+  let lines = (await clipboard()).split('\n');
+  expect(lines).toHaveLength(60);
+  expect(lines.at(-1)).toMatch(/ launch$|open /);
+
+  await page.getByRole('button', { name: 'Copy all' }).click();
+  await expect(page.locator('.pp-dev-log [role="status"]')).toContainText('whole log');
+  lines = (await clipboard()).split('\n');
+  expect(lines.length).toBeGreaterThan(100);
+  expect(lines[0]).toBe('00:00:00.000 test n=1');
+});

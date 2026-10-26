@@ -114,3 +114,26 @@ export async function layerMenu(page, name) {
   await openLayerMenu(page);
   await layerMenuItem(page, name).click();
 }
+
+// The layers panel is a menu (after 5c): a canvas touch with it open
+// only closes it. Drawing helpers close it first, as she would, and
+// reopen it after if it was open — `await reopen()` (a no-op if it
+// wasn't), so tests written for the old always-open panel still flow.
+export async function closeLayersPanel(page) {
+  const open = page.locator('.pp-layers:not(.pp-layers--hidden)');
+  if (await open.count() === 0) return async () => {};
+  const button = page.getByRole('button', { name: 'Layers', exact: true });
+  await button.click();
+  await expect(open).toHaveCount(0);
+  return async () => {
+    await button.click();
+    await expect(open).toHaveCount(1);
+  };
+}
+
+// Opens the layers panel if it's closed (a tap outside it closes it).
+export async function openLayersPanel(page) {
+  const open = page.locator('.pp-layers:not(.pp-layers--hidden)');
+  if (await open.count() === 0) await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(open).toHaveCount(1);
+}

@@ -276,9 +276,17 @@ export function initCanvas(container, options = {}) {
     emitDebug('canvas-renewed', { layer: el.dataset.layerId });
   }
 
+  // The context keeps the last stroke's mode — after an erase it's
+  // 'destination-out', and the load would erase instead of draw.
   function drawInto(surface, image) {
-    surface.ctx.clearRect(0, 0, width, height);
-    if (image) surface.ctx.drawImage(image, 0, 0, width, height);
+    const c = surface.ctx;
+    c.clearRect(0, 0, width, height);
+    if (!image) return;
+    c.save();
+    c.globalCompositeOperation = 'source-over';
+    c.globalAlpha = 1;
+    c.drawImage(image, 0, 0, width, height);
+    c.restore();
   }
 
   // Puts `image` (or blank) on a layer and records its ink map from the

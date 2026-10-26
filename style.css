@@ -1825,7 +1825,7 @@ html, body {
 }
 
 .pp-sound-panel__row--overview {
-  height: 20px;
+  height: 36px; /* after 5c: room for Listen and Set start */
 }
 
 /* An empty row stays slim: just its controls and a line of text. */
@@ -1843,14 +1843,106 @@ html, body {
   padding: 0 10px 0 12px;
 }
 
+/* The row's name — and its volume button once it has a clip (after 5c):
+   the name, the percent under it. */
 .pp-sound-panel__label {
   flex: 0 0 auto;
-  width: 46px;
+  width: 52px;
+  min-height: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pp-sound-panel__label:disabled {
+  cursor: default;
+}
+
+.pp-sound-panel__label:not(:disabled) {
+  background: rgba(250, 244, 235, 0.06);
+}
+
+.pp-sound-panel__label.is-open,
+.pp-sound-panel__label:not(:disabled):active {
+  background: var(--pp-ink-light);
+}
+
+.pp-sound-panel__label-name {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.7;
+}
+
+.pp-sound-panel__label-volume {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-sound-panel__label-volume:empty {
+  display: none;
+}
+
+/* Listen and Set start (after 5c): Stop while playing. */
+.pp-sound-panel__listen {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+
+.pp-sound-panel__listen.is-playing {
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+/* A row's volume slider (after 5c), above its button. */
+.pp-volume-pop {
+  position: absolute;
+  z-index: 2;
+  width: 240px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  border: 1px solid var(--pp-ink-light);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.pp-volume-pop[hidden] {
+  display: none;
+}
+
+.pp-volume-pop__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-volume-pop__slider {
+  width: 100%;
+  accent-color: var(--pp-accent);
+}
+
+.pp-volume-pop__note {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.pp-volume-pop__note[hidden] {
+  display: none;
 }
 
 .pp-sound-panel__btn {

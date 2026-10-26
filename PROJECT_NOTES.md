@@ -110,33 +110,48 @@ icon, manifest `name`/`short_name`, and repo copy.
   the buttons, not gestures. She knows songs from streaming apps can't
   be imported (bought downloads can).
 
+**Built, to check on the iPad (this push):**
+- **Erase-then-switch fix** (robot seed 115): an erase left the layer
+  in eraser mode, so the next frame load "erased" its drawing onto a
+  blank canvas. Real drawings tripped the guard (a needless fresh
+  canvas and the banner "…stopped showing, so it was loaded again" —
+  possibly some of what she's seen); a few small marks showed blank
+  and could be saved over. Check: erase as the last stroke, tap
+  another frame — no banner.
+- **Activity log:** Copy takes the last 60 lines; Copy all the rest.
+  Guard lines add `undo=` (MB), `cache=` (frames/MB) and `made=`
+  (offscreen canvases not freed, app-wide); `open` adds `made=`.
+- **Layers panel is a menu** (old Next item 4): any tap outside it
+  closes it (a canvas tap without drawing; a control tap still acts),
+  picking a layer keeps it open, not reopened at launch, a tap
+  mid-rename keeps the typed name.
+- **Mixer** (her request): MUSIC / VOICE labels are volume buttons —
+  Music 0–100%, Voice 0–200%, works while playing. New takes are
+  leveled by loudness (old takes unchanged) with a compressor; a
+  limiter on the mix. Check with headphones: is her voice now heard
+  over the music, any hiss or pumping? Numbers are first tries
+  (`TAKE_TARGET_LOUDNESS`, `TAKE_COMPRESSOR`, `LIMITER`); send the
+  `recorded` line (peak, loudness, gain) if it's off.
+- **Listen / Set start** beside the music bar: the song alone; Set
+  start's stop point becomes the start (no reaction delay — see if she
+  keeps correcting). A tap anywhere else stops it. Moving the song
+  when there's a Voice asks first, once per panel opening. Check:
+  sound starts on the first tap after opening the app.
+
 **Next, in this order** (each confirmed on the iPad before the next):
 
 1. **Lost canvas, still happening** — she sees "This frame's drawing
-   stopped showing…" now and then. The guard works (only the stroke
-   drawn on the blank canvas is lost), but she keeps hitting it, and
-   step 6's export will add memory pressure. One log (2026-10-25,
+   stopped showing…" now and then. Ask which ending she sees: "…loaded
+   again" alone is the load check (the erase bug above was one cause);
+   "…from your last save" is the save check. One log (2026-10-25,
    before 5c): 16 s into a new one-layer project, just after closing
    another — `copy-renewed`, then 0.8 s later `save-refused … had=1327
    lost=976 canvases=1/4` → `recover`. Two canvases emptied within a
    second points at iOS memory pressure. Leads: undo's ~150 MB budget,
    what a closed project leaves behind, the frame cache's in-memory
-   PNGs. Get more logs and note what she did just before each.
-   Also **robot test seed 115** (`HUNT_SEED=115`): frame A's first mark
-   is gone at the end; fails on the 5a commit too, so it's older (CI
-   only runs seeds 101–103). Its steps include "canvas loses its
-   pixels" — check the lost-canvas recovery first; it may be the same
-   area.
-2. **Voice vs music balance (her request).** She wants to talk/sing
-   over the music and be heard; takes play back too quiet against the
-   music at full volume, even with leveling (`gain`, up to 8×; listen
-  for hiss too). **Test properly
-   first, with headphones** — without them the mic records the music
-   too, so that test can't judge balance. Then decide with her:
-   Flipaclip gives each row its own volume; automatically lowering the
-   music while the voice plays ("ducking") is the other common way.
-   Step 6's export must mix with the same balance.
-3. **5c checks still open on the iPad:** music while recording (record
+   PNGs — the new `undo=`/`cache=`/`made=` fields show which grows.
+   Get more logs and note what she did just before each.
+2. **5c checks still open on the iPad:** music while recording (record
    mode may pause it — send the take's `rec-start`, `rec-session`,
    `sound-start`/`sound-silent` lines), headphones vs not, AirPods,
    the first-hold mic prompt, dragging handles with her stylus, a
@@ -145,14 +160,7 @@ icon, manifest `name`/`short_name`, and repo copy.
    a take ever sounds ~½ s late, look for `out=5` in the `rec-start` /
    `mic-delay` lines and rerun the Mic delay test. iOS asks for the mic
    after every relaunch — its choice, nothing to fix.
-4. **Layers panel → a menu that closes itself (her request,
-   Procreate's way).** Opens from the top-bar button as now; a canvas
-   tap only closes it (joins `anyMenuOpen`); not reopened at launch
-   (`uiState.layersPanelOpen` retired). Decide when building: picking a
-   layer keeps it open (Procreate) unless she wants otherwise; a canvas
-   tap mid-rename keeps the typed name. Flipaclip's
-   collapse-to-thumbnails was offered and not chosen.
-5. **Step 6** export + native share sheet (format reasoning and the
+3. **Step 6** export + native share sheet (format reasoning and the
    WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features))
    · **step 7** Cloudflare Worker + R2 (share links, Krita reference
    import) · then the requested extras under Open items.
@@ -165,7 +173,7 @@ and does starting a photo at 50% bother her when it's a background
 **Watch the activity log** (gear → Developer → Activity log). Get it
 if it shows `load-renewed`, `load-broken`, `save-refused`,
 `check-failed`, `hold-refused`, `recover` (lost canvas — each line
-also gives `canvases=`, `play=`, `onion=`) or `save-failed … timed out`
+also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-failed … timed out`
 (a layer encode that never finished; the save gives up after 15 s
 instead of locking the editor).
 
@@ -178,8 +186,10 @@ instead of locking the editor).
   while playing.
 - **Parked from step 5, unless she asks** (Flipaclip has them): more
   than two sound rows, slicing, looping past the end, a sound library,
-  scrubbing sound while stepping frames. (Volume balance became Next
-  item 2.)
+  scrubbing sound while stepping frames, or while dragging the music
+  bar (offered after 5c, not chosen: Set start covers it). Ask her:
+  on Flipaclip's import screen, can she play the song while picking
+  the part?
 - **Onion skin default (40%)** — she's happy for now; if she keeps
   adjusting it, revisit the default.
 - **Color picker layout** is a first try — adjust if she wants it
@@ -372,9 +382,10 @@ the **Activity log** — `storage/dev-log.js`, `ui/dev-log-view.js`,
 their `sw.js` entries, `tests/unit/dev-log.test.js`,
 `tests/e2e/dev-log.spec.js`, the `devLog.add` calls, `guardContext`
 and the `showNotice` wrapper in `main.js` (and the guard-context
-assertions in `canvas-loss.spec.js`), `canvasApi.onDebug`, and the
+assertions in `canvas-loss.spec.js`), `frameCache.memory`,
+`liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`, and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
-(`parapara-dev-log`).
+(`parapara-dev-log`); Copy takes the last 60 (`DEV_LOG_COPY_LINES`).
 
 ## Schema
 
@@ -398,11 +409,13 @@ bitmap. Planned fields are marked. Extend additively.
       referenceHidden: false,                 // 3a, Hide images; missing = false
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
-      audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset, gain } ]
+      audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset, gain, leveling, volume } ]
                                               // 5a; seconds; offset = where it starts, missing = 0;
                                               // 5c: kind 'music' | 'voice' (missing = 'music'), at most
                                               // one of each, Music first; gain (a take's leveling,
-                                              // ≤ 8) missing = 1; missing = [] (sanitizeAudioClips)
+                                              // ≤ 8) missing = 1; after 5c: leveling 'loudness'
+                                              // (missing = 'peak'), volume (Music ≤ 1, Voice ≤ 2)
+                                              // missing = 1; missing = [] (sanitizeAudioClips)
     }
 
     frame = {
@@ -418,8 +431,8 @@ bitmap. Planned fields are marked. Extend additively.
 type, buffer }` — layer bitmaps, reference images, the sound file
 (5a, its own MIME type) and the gallery thumbnail
 `thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
-`uiState` = `{ layersPanelOpen, screen: 'gallery' | 'editor',
-hideHeadphonesTip }` (5c; missing = false);
+`uiState` = `{ screen: 'gallery' | 'editor', hideHeadphonesTip }`
+(5c; missing = false; `layersPanelOpen` retired after 5c, ignored);
 `recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
@@ -461,7 +474,10 @@ with no story of how it got there.
   stays disabled, and the test times out waiting for a save or a frame
   switch (5 s waits, before the app's 15 s encode timeout fires).
   That's ~13–23 tests a full run, more when the machine is busy, a
-  different set each time — nothing to do with the app. So **a sandbox run is a pre-check; CI
+  different set each time — nothing to do with the app. (Seen
+  2026-10-26: saves taking ~7 s — past the 5 s waits — failing most
+  save-waiting tests. A local config that only raises `expect.timeout`
+  to 20 s, kept outside the repo, made them pass; CI unchanged.) So **a sandbox run is a pre-check; CI
   (pinned image) is the real check**: judge sandbox failures by
   whether they're this stall, and compare against a run without the
   change when in doubt.

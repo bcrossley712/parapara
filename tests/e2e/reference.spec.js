@@ -13,7 +13,7 @@
 // fingers and the stylus.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb } from './helpers.js';
+import { openApp, reloadApp, readDb, closeLayersPanel } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const addFrameBtn = (page) => page.getByRole('button', { name: 'Add frame' });
@@ -127,8 +127,10 @@ async function drag(page, from, to) {
 }
 
 async function tapCanvas(page, x, y) {
+  const reopen = await closeLayersPanel(page);
   const p = await screenPoint(page, x, y);
   await page.mouse.click(p.x, p.y);
+  await reopen();
 }
 
 // What the eyedropper picks at a canvas point.

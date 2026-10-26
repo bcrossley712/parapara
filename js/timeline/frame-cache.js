@@ -219,6 +219,14 @@ export function createFrameCache({
       return order.filter(needsBuild).length;
     },
 
+    // DEV ONLY (activity log): how many frames are held and the bytes
+    // of their PNGs (`value.blob`), stale ones included.
+    get memory() {
+      let bytes = 0;
+      for (const { value } of entries.values()) bytes += value?.blob?.size ?? 0;
+      return { frames: entries.size, bytes };
+    },
+
     // Build now, without waiting for changes to settle — she pressed
     // play and is waiting on it.
     rush() {

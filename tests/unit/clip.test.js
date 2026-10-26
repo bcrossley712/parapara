@@ -30,6 +30,13 @@ import {
   clipGain,
   MAX_TAKE_GAIN,
   TAKE_TARGET_PEAK,
+  speechLoudness,
+  loudnessGain,
+  clipVolume,
+  sanitizeVolume,
+  withVolume,
+  TAKE_TARGET_LOUDNESS,
+  MAX_LEVELED_PEAK,
 } from '../../js/audio/clip.js';
 
 const good = { id: 'c1', blobRef: 'a1', trimStart: 0, trimEnd: 4, offset: 0 };
@@ -272,4 +279,68 @@ test('a recorded clip keeps its gain; 1 is left out; sanitize keeps a good one',
 test('sameClips notices a gain change', () => {
   assert.equal(sameClips([{ ...good, gain: 2 }], [{ ...good }]), false);
   assert.equal(sameClips([{ ...good, gain: 1 }], [{ ...good }]), true);
+});
+
+// --- after 5c: loudness leveling and the mixer ---
+
+test('speechLoudness: the RMS of the speech, pauses left out', () => {
+  const rate = 1000; // 50-sample windows
+  const data = new Float32Array(1000);
+  for (let i = 0; i < 500; i++) data[i] = i % 2 ? 0.2 : -0.2; // 0.5 s at RMS 0.2
+  // the rest is silence: a pause, not counted
+  assert.ok(Math.abs(speechLoudness([data], rate, 0, 1) - 0.2) < 1e-6);
+  assert.equal(speechLoudness([new Float32Array(1000)], rate, 0, 1), 0);
+  // Only between from and to.
+  assert.equal(speechLoudness([data], rate, 0.5, 1), 0);
+});
+
+test('loudnessGain: lifts speech to the target, within the caps', () => {
+  assert.ok(Math.abs(loudnessGain({ loudness: TAKE_TARGET_LOUDNESS / 3, peak: 0.3 }) - 3) < 1e-9);
+  // Loud enough already: never turned down.
+  assert.equal(loudnessGain({ loudness: 0.5, peak: 0.9 }), 1);
+  // A loud instant caps it (what's over 1 is compressed and limited).
+  assert.equal(loudnessGain({ loudness: 0.03, peak: 0.5 }), MAX_LEVELED_PEAK / 0.5);
+  // Near silence: at most MAX_TAKE_GAIN.
+  assert.equal(loudnessGain({ loudness: 0.001, peak: 0.01 }), MAX_TAKE_GAIN);
+  assert.equal(loudnessGain({ loudness: 0, peak: 0 }), 1);
+});
+
+test('recordedClip marks a loudness-leveled take', () => {
+  const clip = recordedClip({ id: 'r', blobRef: 'b', duration: 5, leadIn: 0, offset: 0, micDelay: 0, gain: 3, leveling: 'loudness' });
+  assert.equal(clip.leveling, 'loudness');
+  assert.equal(recordedClip({ id: 'r', blobRef: 'b', duration: 5, leadIn: 0, offset: 0, micDelay: 0, gain: 3 }).leveling, undefined);
+});
+
+test('volume: Music up to 100%, Voice up to 200%, snapped to 5%', () => {
+  assert.equal(sanitizeVolume(1.5, 'music'), 1);
+  assert.equal(sanitizeVolume(1.5, 'voice'), 1.5);
+  assert.equal(sanitizeVolume(3, 'voice'), 2);
+  assert.equal(sanitizeVolume(0.42, 'music'), 0.4);
+  assert.equal(sanitizeVolume(-1, 'voice'), 0);
+  assert.equal(sanitizeVolume(NaN, 'voice'), 1);
+  const voice = { id: 'v', kind: 'voice', blobRef: 'b', trimStart: 0, trimEnd: 2, offset: 0 };
+  assert.equal(withVolume(voice, 1.8).volume, 1.8);
+  assert.equal('volume' in withVolume({ ...voice, volume: 1.8 }, 1), false); // 100% is left out
+  assert.equal(clipVolume(voice), 1);
+  assert.equal(clipVolume({ ...voice, volume: 1.8 }), 1.8);
+  assert.equal(clipVolume({ ...voice, kind: 'music', volume: 1.8 }), 1); // out of Music's range
+});
+
+test('saved clips keep their volume and leveling; bad ones are dropped', () => {
+  const [music, voice] = sanitizeAudioClips([
+    { id: 'm', kind: 'music', blobRef: 'a', trimStart: 0, trimEnd: 2, volume: 0.5 },
+    { id: 'v', kind: 'voice', blobRef: 'b', trimStart: 0, trimEnd: 2, volume: 1.7, gain: 2, leveling: 'loudness' },
+  ]);
+  assert.equal(music.volume, 0.5);
+  assert.equal(voice.volume, 1.7);
+  assert.equal(voice.leveling, 'loudness');
+  const [bad] = sanitizeAudioClips([{ id: 'm', blobRef: 'a', trimStart: 0, trimEnd: 2, volume: 1.5, leveling: 'x' }]);
+  assert.equal('volume' in bad, false); // Music can't be over 100%
+  assert.equal('leveling' in bad, false);
+});
+
+test('sameClips sees a volume change', () => {
+  const a = [{ id: 'm', kind: 'music', blobRef: 'a', trimStart: 0, trimEnd: 2, offset: 0 }];
+  assert.equal(sameClips(a, [{ ...a[0], volume: 0.5 }]), false);
+  assert.equal(sameClips(a, [{ ...a[0], volume: 1 }]), true);
 });

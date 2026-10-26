@@ -10,7 +10,7 @@
 // feels under her finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
+import { openApp, reloadApp, readDb, layersSettled, openLayerMenu, layerMenu, layerMenuItem, closeLayersPanel } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -63,6 +63,7 @@ async function addLayer(page) {
 
 // A horizontal mouse stroke at canvas-pixel height y.
 async function stroke(page, y) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   const sx = (x) => box.x + (x / 1920) * box.width;
   const sy = (v) => box.y + (v / 1080) * box.height;
@@ -70,6 +71,7 @@ async function stroke(page, y) {
   await page.mouse.down();
   for (let i = 1; i <= 20; i++) await page.mouse.move(sx(400 + i * 50), sy(y));
   await page.mouse.up();
+  await reopen();
 }
 
 // Is the layer (the active one by default) painted at canvas pixel (x, y)?

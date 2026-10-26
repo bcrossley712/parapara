@@ -408,3 +408,123 @@ test('touching the track while playing only stops playback', async ({ page }) =>
   const after = (await savedProject(page)).audioClips[0];
   expect(after.offset).toBe(clip.offset);
 });
+
+// --- after 5c: the mixer, Listen and Set start ---
+
+const musicVolumeBtn = (page) => musicRow(page).locator('.pp-sound-panel__label');
+const volumePop = (page) => page.locator('.pp-volume-pop');
+const volumeSlider = (page) => volumePop(page).locator('input[type="range"]');
+const listenBtn = (page) => panel(page).getByRole('button', { name: /^(Listen|Stop)$/ }).first();
+const setStartBtn = (page) => page.locator('.pp-sound-panel__listen').nth(1);
+
+// Sets the open volume slider as a finger would: moving, then let go.
+async function setVolume(page, percent) {
+  await volumeSlider(page).evaluate((el, value) => {
+    el.value = String(value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, percent);
+}
+
+// Painted pixels on the layer canvases (a tap that drew).
+const ink = (page) => page.evaluate(() => {
+  let n = 0;
+  for (const c of document.querySelectorAll('.pp-layer')) {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i]) n++;
+  }
+  return n;
+});
+
+async function tapCanvas(page) {
+  const box = await page.locator('.pp-canvas-area').boundingBox();
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.3);
+}
+
+test('the Music volume goes up to 100%, is saved, and is one undo step', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 4);
+  await importSound(page, { buffer: wav(2) });
+  await savedClip(page);
+  await expect(musicVolumeBtn(page)).toHaveText(/100%/);
+  await musicVolumeBtn(page).click();
+  await expect(volumePop(page)).toBeVisible();
+  await expect(volumeSlider(page)).toHaveAttribute('max', '100');
+  await setVolume(page, 40);
+  await expect(musicVolumeBtn(page)).toHaveText(/40%/);
+  await expect.poll(async () => (await savedProject(page)).audioClips[0].volume).toBe(0.4);
+
+  // A canvas tap only closes the slider.
+  await tapCanvas(page);
+  await expect(volumePop(page)).toBeHidden();
+  expect(await ink(page)).toBe(0);
+
+  await undoBtn(page).click();
+  await expect(musicVolumeBtn(page)).toHaveText(/100%/);
+  await expect.poll(async () => (await savedProject(page)).audioClips[0].volume).toBe(undefined);
+});
+
+test('the volume can change while the animation plays, without stopping it', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 24);
+  await importSound(page, { buffer: wav(2) });
+  await savedClip(page);
+  await playBtn(page).click(); // loop is on: it keeps playing
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await musicVolumeBtn(page).click();
+  await setVolume(page, 60);
+  await expect(page.locator('.pp-playback')).toBeVisible(); // still playing
+  await expect.poll(async () => (await savedProject(page)).audioClips[0].volume).toBe(0.6);
+});
+
+test('Listen plays the song alone from its start and leaves the start alone', async ({ page }) => {
+  await watchSound(page);
+  await openApp(page);
+  await frames(page, 4);
+  await importSound(page, { buffer: wav(3) });
+  await savedClip(page);
+  const before = await page.evaluate(() => window.__soundStarts.length);
+  await listenBtn(page).click();
+  await expect(listenBtn(page)).toHaveText('Stop');
+  await expect(page.locator('.pp-sound-panel__listen-line')).toBeVisible();
+  const starts = await page.evaluate(() => window.__soundStarts);
+  expect(starts.length).toBe(before + 1);
+  expect(starts.at(-1).offset).toBe(0); // from the part's start
+  await expect(page.locator('.pp-playback')).toBeHidden(); // no animation
+
+  await listenBtn(page).click();
+  await expect(listenBtn(page)).toHaveText('Listen');
+  await expect(page.locator('.pp-sound-panel__listen-line')).toBeHidden();
+  expect((await savedProject(page)).audioClips[0].trimStart).toBe(0);
+  await expect(undoBtn(page)).toBeEnabled(); // the import, nothing new
+});
+
+test('Set start: where it stops is the new start, as one undo step', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 4);
+  await importSound(page, { buffer: wav(3) });
+  await setStartBtn(page).click();
+  await expect(setStartBtn(page)).toHaveText('Stop');
+  // The part moves along with the song.
+  const window0 = await page.locator('.pp-sound-panel__window').boundingBox();
+  await expect.poll(async () => (await page.locator('.pp-sound-panel__window').boundingBox()).x, { timeout: 5000 })
+    .toBeGreaterThan(window0.x + 5);
+  await setStartBtn(page).click();
+  await expect(setStartBtn(page)).toHaveText('Set start');
+  const moved = await savedClipWhere(page, (c) => c.trimStart > 0.1);
+  expect(moved.offset).toBe(0); // still from frame 1
+
+  await undoBtn(page).click();
+  await expect.poll(async () => (await savedProject(page)).audioClips[0].trimStart).toBe(0);
+});
+
+test('a canvas tap while listening only stops it', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 4);
+  await importSound(page, { buffer: wav(3) });
+  await listenBtn(page).click();
+  await expect(listenBtn(page)).toHaveText('Stop');
+  await tapCanvas(page);
+  await expect(listenBtn(page)).toHaveText('Listen');
+  expect(await ink(page)).toBe(0);
+});

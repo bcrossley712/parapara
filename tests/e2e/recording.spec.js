@@ -292,3 +292,53 @@ test('with one frame, the mic asks for another frame', async ({ page }) => {
   await expect(banner(page)).toContainText('Add another frame to record');
   await expect(countdown(page)).toBeHidden();
 });
+
+// --- after 5c: leveling by loudness, the Voice's volume, moving the song ---
+
+test('a take is leveled by loudness; its volume goes to 200%; moving the song asks first', async ({ page }) => {
+  await openApp(page);
+  await frames(page, 24);
+  await openPanel(page);
+  await holdUntilRecording(page);
+  await page.waitForTimeout(800); // record a little (proving time passes)
+  await page.mouse.up();
+  await expect(banner(page)).toContainText('Voice recorded');
+  const voice = await savedVoice(page);
+  expect(voice.leveling).toBe('loudness');
+
+  // The Voice can be boosted past 100%.
+  const voiceVolume = voiceRow(page).locator('.pp-sound-panel__label');
+  await voiceVolume.click();
+  const slider = page.locator('.pp-volume-pop input[type="range"]');
+  await expect(slider).toHaveAttribute('max', '200');
+  await slider.evaluate((el) => {
+    el.value = '180';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(voiceVolume).toHaveText(/180%/);
+  await savedVoice(page, (v) => v.volume === 1.8);
+  await voiceVolume.click(); // closes it
+
+  // Music added after the take: moving it asks first. (4 s, so the
+  // part that plays — 2 s — leaves room to tap past it.)
+  await importMusic(page, 4);
+  const overview = page.locator('.pp-sound-panel__overview');
+  await expect(overview).toBeVisible();
+  const box = await overview.boundingBox();
+  const music = async () => (await savedProject(page)).audioClips.find((c) => c.kind === 'music');
+  await expect.poll(async () => Boolean(await music())).toBe(true);
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await expect(dialog(page)).toContainText('Move the song?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  expect((await music()).trimStart).toBe(0);
+
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await dialog(page).getByRole('button', { name: 'Move it' }).click();
+  await expect(banner(page)).toContainText('Now move the song');
+  await expect(page.locator('.pp-dialog-backdrop')).toHaveCount(0);
+  expect((await music()).trimStart).toBe(0); // the asking tap did nothing
+  // Asked once per opening: now it moves.
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await expect.poll(async () => (await music()).trimStart).toBeGreaterThan(1);
+});

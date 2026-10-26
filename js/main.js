@@ -93,7 +93,7 @@ import {
 import { createAutosaver } from './storage/autosave.js';
 import { createHistory } from './storage/history.js';
 import { renderThumbnail } from './canvas/thumbnail.js';
-import { renderFrame, makeCanvas, freeCanvas, encodePNG } from './canvas/render-frame.js';
+import { renderFrame, makeCanvas, freeCanvas, encodePNG, liveCanvasCount } from './canvas/render-frame.js';
 import { createFrameTiles } from './canvas/frame-tiles.js';
 import { createFrameCache, layerSignature } from './timeline/frame-cache.js';
 import { createPlayback } from './timeline/playback.js';
@@ -104,7 +104,8 @@ import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
 import {
   sanitizeAudioClips, newClip, checkImportSize, sameClips, MAX_CLIP_SECONDS,
-  clipOfKind, withClip, recordedClip, timeAtFrame, minClipSeconds, COUNTDOWN_SECONDS, takeGain,
+  clipOfKind, withClip, recordedClip, timeAtFrame, minClipSeconds, COUNTDOWN_SECONDS,
+  speechLoudness, loudnessGain, withVolume, sanitizeVolume, clipVolume, slipClip,
 } from './audio/clip.js';
 import { createRecorder, micError, micSettings } from './audio/recorder.js';
 import { computePeaks } from './audio/peaks.js';
@@ -122,7 +123,7 @@ const appRoot = document.getElementById('app');
 // Tool, color and brush sizes — app-wide, not per project, so they
 // follow her from one animation into the next (see storage.js).
 let toolSettings = null;
-// { layersPanelOpen, screen: 'gallery' | 'editor', hideHeadphonesTip }
+// { screen: 'gallery' | 'editor', hideHeadphonesTip }
 // — remembered across launches. hideHeadphonesTip (5c): she chose
 // "Don't show again" on the headphones popup.
 let uiState = {};
@@ -191,7 +192,7 @@ const appActions = {
   checkForUpdate: () => updater.checkForUpdate(),
   applyUpdate: () => updater.applyUpdate(),
   freshReload: () => updater.freshReload(),
-  showActivityLog: () => showDevLog({ read: () => devLog.read(), clear: () => devLog.clear() }),
+  showActivityLog: () => showDevLog({ read: (last) => devLog.read(last), clear: () => devLog.clear() }),
 };
 
 // Problems she has to OK go in the activity log too (dev only).
@@ -247,8 +248,9 @@ async function launch() {
   }
   try {
     const saved = await loadUiState();
+    // layersPanelOpen (2b–5c) is retired: the panel is a menu now (not
+    // reopened at launch); an old saved value is ignored.
     uiState = {
-      layersPanelOpen: saved?.layersPanelOpen === true,
       // Installs from before the gallery have no screen saved; they
       // were always in the editor.
       screen: saved?.screen === 'gallery' ? 'gallery' : 'editor',
@@ -256,7 +258,7 @@ async function launch() {
     };
   } catch (err) {
     console.warn('Parapara! could not load UI state:', err);
-    uiState = { layersPanelOpen: false, screen: 'editor', hideHeadphonesTip: false };
+    uiState = { screen: 'editor', hideHeadphonesTip: false };
   }
 
   if (uiState.screen === 'editor') {
@@ -490,6 +492,7 @@ function mountEditor(session, { canSave }) {
   devLog.add('open', {
     project: short(project.id), frames: project.frames.length, layers: project.layers.length,
     at: tag(session.frame.id), canSave,
+    made: liveCanvasCount(), // before this project makes any: what earlier ones left
   });
 
   // Created below if saving works; otherwise changes simply aren't
@@ -519,7 +522,6 @@ function mountEditor(session, { canSave }) {
     onGallery: canSave ? afterPlayback(() => close()) : null,
     onUndo: afterPlayback(() => undo()),
     onRedo: afterPlayback(() => redo()),
-    layersPanelOpen: uiState.layersPanelOpen === true,
     layers: {
       onSelect: afterPlayback((id) => selectLayer(id)),
       onAdd: afterPlayback(() => addLayer()),
@@ -537,7 +539,6 @@ function mountEditor(session, { canSave }) {
         canvasApi.setLayerProps(id, { opacity });
       },
       onOpacityCommit: afterPlayback((id, before, after) => commitOpacity(id, before, after)),
-      onOpenChange: (open) => setUiState({ layersPanelOpen: open }),
     },
     colors: {
       onPaletteAdd: (hex) => addPaletteColor(hex),
@@ -595,13 +596,22 @@ function mountEditor(session, { canSave }) {
       onMicDown: () => onMicDown(),
       onMicUp: (detail) => onMicUp(detail),
       onPlayingTouch: () => stopPlayback(),
+      onVolumeInput: (kind, volume) => audio.setVolume(kind, sanitizeVolume(volume, kind)),
+      onVolumeCommit: (kind, volume) => commitVolume(kind, volume),
+      onListen: (mode) => startListen(mode),
+      onListenStop: () => finishListen('stop'),
+      canRetimeMusic: () => canRetimeMusic('Now move the song.'),
       onOpenChange: (open) => {
         // What the panel remembers lasts one opening: a Voice recorded
-        // before it was opened asks before it's replaced, and the
-        // headphones tip shows again.
+        // before it was opened asks before it's replaced (and before the
+        // song is moved under it), and the headphones tip shows again.
         voiceOkRef = null;
+        musicRetimeOk = false;
         headphonesTipShown = false;
-        if (!open) interruptTake();
+        if (!open) {
+          interruptTake();
+          finishListen('closed');
+        }
         renderSound();
       },
     },
@@ -788,6 +798,9 @@ function mountEditor(session, { canSave }) {
   let take = null;
   let micAllowed = false;      // the mic opened once this session
   let voiceOkRef = null;       // a Voice she may replace without asking
+  let musicRetimeOk = false;   // she said the song may move under the Voice (this opening)
+  // Listen / Set start (after 5c): { mode: 'listen' | 'set', startClip, raf }.
+  let listen = null;
   let headphonesTipShown = false; // shown since the panel opened
 
   const playback = createPlayback({
@@ -1107,10 +1120,17 @@ function mountEditor(session, { canSave }) {
     for (const c of all) {
       if (c.width >= project.canvas.width && c.height >= project.canvas.height) full += 1;
     }
+    const mb = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
+    const cache = frameCache.memory;
     return {
       canvases: `${full}/${all.length}`,
       play: playback.state,
       onion: project.onionSkin.on ? 'on' : 'off',
+      // Memory leads: undo's pixels (MB), the frame cache (frames/MB of
+      // PNGs), and offscreen canvases not yet freed, app-wide.
+      undo: mb(history.bytes),
+      cache: `${cache.frames}/${mb(cache.bytes)}`,
+      made: liveCanvasCount(),
     };
   }
 
@@ -1928,6 +1948,101 @@ function mountEditor(session, { canSave }) {
     }
   }
 
+  // --- the mixer and listening (after 5c) ---
+
+  // A row's volume slider let go: one 'audio' undo step. Allowed while
+  // playing — she mixes by ear (the bus already followed the slider).
+  function commitVolume(kind, volume) {
+    const clip = clipOfKind(project.audioClips, kind);
+    if (!clip || busy || adjust) {
+      audio.setVolume(kind, clip ? clipVolume(clip) : 1); // refused: back to the saved level
+      renderSound();
+      return;
+    }
+    const before = project.audioClips;
+    const after = withClip(before, kind, withVolume(clip, volume));
+    if (sameClips(before, after)) return;
+    project.audioClips = after;
+    scheduleProjectSave();
+    applyClips();
+    renderSound();
+    history.push({ type: 'audio', before, after, bytes: 0 });
+    devLog.add('sound-volume', { kind, volume: clipVolume(clipOfKind(after, kind)).toFixed(2) });
+  }
+
+  // Moving the song when there's a Voice take puts them out of time
+  // (the take was recorded against the song as it was): asks first,
+  // once per panel opening. False while asking — the touch or tap that
+  // asked does nothing; she does it again after (like the mic's popups).
+  function canRetimeMusic(then) {
+    if (musicRetimeOk || !clipOfKind(project.audioClips, 'voice')) return true;
+    showConfirm({
+      title: 'Move the song?',
+      message: 'Your voice was recorded with the song where it is now. Moving the song will put them out of time.',
+      confirmLabel: 'Move it',
+    }).then((yes) => {
+      if (!yes) return;
+      musicRetimeOk = true;
+      showBanner(then);
+    });
+    return false;
+  }
+
+  // Listen ('listen') or Set start ('set'): the song alone from the
+  // part's start. Runs inside the tap (iOS starts sound only there).
+  function startListen(mode) {
+    if (playback.active || landing) {
+      stopPlayback(); // like Import: a tap while playing only stops
+      return;
+    }
+    if (listen) finishListen('switch');
+    if (take || !canAct() || adjust) return;
+    const clip = clipOfKind(project.audioClips, 'music');
+    if (!clip || !soundBuffers.get(clip.blobRef)) return;
+    if (mode === 'set' && !canRetimeMusic('Tap Set start again.')) return;
+    audio.unlock();
+    const started = audio.listen({ kind: 'music', from: clip.trimStart, onEnd: () => finishListen('end') });
+    if (!started) return;
+    listen = { mode, startClip: clip, raf: 0 };
+    devLog.add('listen', { mode, from: clip.trimStart.toFixed(2), ...audio.debugState });
+    const step = () => {
+      if (!listen) return;
+      ui.sound.setListening(listenState());
+      listen.raf = requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  // Set start: the Music clip with its start where she's listening.
+  function movedStart(position) {
+    const buffer = soundBuffers.get(listen.startClip.blobRef);
+    return slipClip(listen.startClip, position - listen.startClip.trimStart, {
+      duration: buffer ? buffer.duration : listen.startClip.trimEnd,
+      minLength: minClipSeconds(project.fps),
+    });
+  }
+
+  function listenState() {
+    const position = audio.listenPosition() ?? listen.startClip.trimStart;
+    return { mode: listen.mode, position, clip: listen.mode === 'set' ? movedStart(position) : null };
+  }
+
+  // Stops listening. For Set start, wherever it stopped is the new start
+  // (one undo step) — however it stopped, except the editor closing.
+  function finishListen(why) {
+    if (!listen) return;
+    const current = listen;
+    const position = audio.listenPosition();
+    cancelAnimationFrame(current.raf);
+    audio.stopListening();
+    let moved = null;
+    if (current.mode === 'set' && position !== null && why !== 'destroy') moved = movedStart(position);
+    listen = null;
+    ui.sound.setListening(null);
+    devLog.add('listen-stop', { mode: current.mode, why, at: position === null ? '-' : position.toFixed(2) });
+    if (moved) changeClip('music', moved);
+  }
+
   // A trim or move in the sound panel (5b): one 'audio' undo step per
   // drag. The decoded sound is the same, so nothing reloads.
   function changeClip(kind, clip) {
@@ -2298,10 +2413,12 @@ function mountEditor(session, { canSave }) {
         minLength: minClipSeconds(current.fps),
       };
       let clip = recordedClip(placed);
-      // Level the take (her first ones were very quiet): lift its
-      // loudest point in the part that plays (takeGain).
+      // Level the take by its speech's loudness in the part that plays
+      // (loudnessGain; after 5c — peak leveling left takes quieter than
+      // the music). It plays through a compressor (audio.js).
       const peak = clip ? loudest(decoded, clip.trimStart, clip.trimEnd) : 0;
-      if (clip) clip = recordedClip({ ...placed, gain: takeGain(peak) });
+      const loudness = clip ? speechLoudness(channelsOf(decoded), decoded.sampleRate, clip.trimStart, clip.trimEnd) : 0;
+      if (clip) clip = recordedClip({ ...placed, gain: loudnessGain({ loudness, peak }), leveling: 'loudness' });
       if (!clip) {
         showBanner('That was too short to keep. Hold the mic a little longer.');
         return;
@@ -2313,13 +2430,14 @@ function mountEditor(session, { canSave }) {
       }
       soundBuffers.set(blobRef, audio.keepFirst(decoded, MAX_CLIP_SECONDS));
       voiceOkRef = blobRef; // a retake replaces it without asking
+      musicRetimeOk = false; // the new take is in time with the song as it is
       const before = project.audioClips;
       await setClips(withClip(before, 'voice', clip));
       history.push({ type: 'audio', before, after: project.audioClips, bytes: 0 });
       devLog.add('recorded', {
         sound: short(blobRef), type: stored.type, bytes: stored.size,
         seconds: (clip.trimEnd - clip.trimStart).toFixed(2), leadIn: leadIn.toFixed(3),
-        peak: peak.toFixed(3), gain: (clip.gain ?? 1).toFixed(2),
+        peak: peak.toFixed(3), loudness: loudness.toFixed(3), gain: (clip.gain ?? 1).toFixed(2),
       });
       showBanner('Voice recorded.');
     });
@@ -2332,6 +2450,12 @@ function mountEditor(session, { canSave }) {
   function setMicMode(on, why) {
     audio.setRecording(on);
     devLog.add('rec-session', { mode: on ? 'record' : 'playback', why, ...audio.debugState });
+  }
+
+  function channelsOf(buffer) {
+    const channels = [];
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) channels.push(buffer.getChannelData(ch));
+    return channels;
   }
 
   // The loudest sample (any channel) between `from` and `to` seconds.
@@ -2790,7 +2914,10 @@ function mountEditor(session, { canSave }) {
   flushEditor = flush;
   checkEditor = checkCanvases;
   // Hiding the app ends a recording (and keeps the take).
-  hideEditor = () => interruptTake();
+  hideEditor = () => {
+    interruptTake();
+    finishListen('hidden');
+  };
 
   // The project's sound decodes in the background; Play waits for it.
   loadSound();
@@ -2803,6 +2930,7 @@ function mountEditor(session, { canSave }) {
   async function close() {
     if (closing || !canAct()) return;
     closing = true;
+    finishListen('destroy');
     devLog.add('close', { at: tag(session.frame.id) });
     busy = true;
     canvasApi.setInputBlocked(true);

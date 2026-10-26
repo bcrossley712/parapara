@@ -37,13 +37,94 @@
 // onEvent(name, detail) reports, for the activity log, whether a run's
 // sound actually started: 'sound-start' { waitedMs }, 'sound-silent'
 // { reason, state }, and 'sound-unlock-failed' { error }.
+//
+// The mix (after 5c; buildMix, which step 6's export must reuse on an
+// OfflineAudioContext so it sounds the same):
+//   source → its take's leveling (GainNode, clip.gain)
+//          → a compressor, for takes leveled by loudness
+//          → its row's volume (one GainNode per kind, live: setVolume)
+//          → a limiter on the whole mix → the speaker.
+// The limiter keeps a boosted voice from distorting when it and the
+// song peak together.
+//
+// Listening (after 5c): listen() plays just the Music clip's file from a
+// point, through the same mix, with no animation — the sound panel's
+// Listen and Set start. listenPosition() says where in the file she is.
 
-import { animationSeconds, clipPlacement, clipGain } from './clip.js';
+import { animationSeconds, clipPlacement, clipGain, clipVolume, CLIP_KINDS } from './clip.js';
 
 // How far ahead the next loop pass is queued, in seconds.
 export const LOOKAHEAD = 1;
 // How long a run waits for a starting context before going silent.
 export const START_TIMEOUT_MS = 1000;
+
+// The mix's limiter and a loudness-leveled take's compressor. First-try
+// settings, to tune by ear on her iPad. (A DynamicsCompressorNode adds
+// its own make-up gain, a little for the limiter, ~3 dB for the take's.)
+export const LIMITER = { threshold: -1, knee: 0, ratio: 20, attack: 0.002, release: 0.1 };
+export const TAKE_COMPRESSOR = { threshold: -14, knee: 8, ratio: 3, attack: 0.005, release: 0.15 };
+
+function compressor(ctx, settings) {
+  if (typeof ctx.createDynamicsCompressor !== 'function') return null;
+  const node = ctx.createDynamicsCompressor();
+  for (const [key, value] of Object.entries(settings)) {
+    if (node[key] && 'value' in node[key]) node[key].value = value;
+  }
+  return node;
+}
+
+// The mix on `ctx` (see the header): { input(kind), setVolume(kind, v),
+// connect(source, clip) }. Without GainNodes (very old engines), sources
+// go straight to the speaker.
+export function buildMix(ctx) {
+  const canGain = typeof ctx.createGain === 'function';
+  const limiter = compressor(ctx, LIMITER);
+  limiter?.connect(ctx.destination);
+  const out = limiter ?? ctx.destination;
+  const buses = new Map();
+  for (const kind of CLIP_KINDS) {
+    if (!canGain) break;
+    const bus = ctx.createGain();
+    bus.bus = kind; // tells tests the row buses from a take's leveling
+    bus.connect(out);
+    buses.set(kind, bus);
+  }
+  const input = (kind) => buses.get(kind) ?? out;
+  return {
+    input,
+    setVolume(kind, value) {
+      const bus = buses.get(kind);
+      if (!bus) return;
+      const at = ctx.currentTime ?? 0;
+      if (typeof bus.gain.setTargetAtTime === 'function') {
+        bus.gain.cancelScheduledValues?.(at);
+        bus.gain.setTargetAtTime(value, at, 0.02); // no click
+      } else {
+        bus.gain.value = value;
+      }
+    },
+    // Routes a source for `clip` through its leveling, compressor (if
+    // leveled by loudness) and row.
+    connect(source, clip) {
+      let head = input(clip?.kind ?? 'music');
+      if (clip?.leveling === 'loudness') {
+        const squeeze = compressor(ctx, TAKE_COMPRESSOR);
+        if (squeeze) {
+          squeeze.connect(head);
+          head = squeeze;
+        }
+      }
+      const gain = clipGain(clip);
+      if (gain !== 1 && canGain) {
+        const node = ctx.createGain();
+        node.gain.value = gain;
+        node.connect(head);
+        head = node;
+      }
+      source.connect(head);
+    },
+  };
+}
 
 function defaultContext() {
   const Ctor = globalThis.AudioContext ?? globalThis.webkitAudioContext;
@@ -71,6 +152,8 @@ export function createAudio({
   let tracks = [];
   let run = null;       // the playing run (see start)
   let recording = false; // the mic is on (setRecording)
+  let mix = null;       // buildMix on the context, once it exists
+  let listening = null; // { source, from, startedAt, onEnd } (listen)
 
   // Says the page's sound is media, so Silent mode doesn't mute it.
   function setSession(type) {
@@ -92,7 +175,20 @@ export function createAudio({
       ctx = null;
     }
     if (!ctx) contextFailed = true;
+    else {
+      mix = buildMix(ctx);
+      applyVolumes();
+    }
     return ctx;
+  }
+
+  // Each row's bus to its clip's volume.
+  function applyVolumes() {
+    if (!mix) return;
+    for (const kind of CLIP_KINDS) {
+      const track = tracks.find((t) => (t.clip.kind ?? 'music') === kind);
+      mix.setVolume(kind, track ? clipVolume(track.clip) : 1);
+    }
   }
 
   // Seconds between the context's clock and the speaker.
@@ -104,22 +200,15 @@ export function createAudio({
   }
 
   // Plays buffer[from .. from+duration) at context time `when`. A start
-  // already in the past is shifted (its beginning cut), never late.
-  // `gain` (a take's leveling, 1 = as recorded) goes through a GainNode.
-  function schedule(buffer, gain, when, from, duration) {
+  // already in the past is shifted (its beginning cut), never late. The
+  // source goes through the mix as `clip` says (leveling, row).
+  function schedule(buffer, clip, when, from, duration) {
     const lateBy = Math.max(0, ctx.currentTime - when);
     const length = duration - lateBy;
     if (!(length > 0)) return;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    if (gain !== 1 && typeof ctx.createGain === 'function') {
-      const node = ctx.createGain();
-      node.gain.value = gain;
-      source.connect(node);
-      node.connect(ctx.destination);
-    } else {
-      source.connect(ctx.destination);
-    }
+    mix.connect(source, clip);
     source.start(when + lateBy, from + lateBy, length);
     run.sources.add(source);
     source.onended = () => run?.sources.delete(source);
@@ -133,8 +222,8 @@ export function createAudio({
     for (;;) {
       const passStart = run.startedAt + run.nextPass * length - run.position;
       if (passStart - ctx.currentTime > LOOKAHEAD) return;
-      for (const { buffer, gain, placement } of parts) {
-        schedule(buffer, gain, passStart + placement.at, placement.from, placement.to - placement.from);
+      for (const { buffer, clip, placement } of parts) {
+        schedule(buffer, clip, passStart + placement.at, placement.from, placement.to - placement.from);
       }
       run.nextPass += 1;
     }
@@ -170,12 +259,13 @@ export function createAudio({
     // skip: clip kinds left out of this run (['voice'] while recording).
     start({ position = 0, fps, frameCount, loop = true, skip = [] }) {
       clock.stop();
+      stopListening();
       const length = animationSeconds(frameCount, fps);
       const parts = [];
       for (const { clip, buffer } of tracks) {
         if (skip.includes(clip.kind ?? 'music')) continue;
         const placement = clipPlacement(clip, length);
-        if (placement) parts.push({ buffer, gain: clipGain(clip), placement });
+        if (placement) parts.push({ buffer, clip, placement });
       }
       run = { mode: 'wall', t0: wallNow(), sources: new Set() };
       // A suspended or interrupted context may be starting (the Play tap
@@ -198,11 +288,11 @@ export function createAudio({
         nextPass: 1,
       });
       // This pass: whatever's left of each clip from `position` on.
-      for (const { buffer, gain, placement: { at, from, to } } of parts) {
+      for (const { buffer, clip, placement: { at, from, to } } of parts) {
         const into = position - at; // how far into the clip the run starts
         if (into < to - from) {
           const cut = Math.max(0, into);
-          schedule(buffer, gain, run.startedAt + Math.max(0, -into), from + cut, to - from - cut);
+          schedule(buffer, clip, run.startedAt + Math.max(0, -into), from + cut, to - from - cut);
         }
       }
       pump();
@@ -241,8 +331,64 @@ export function createAudio({
     },
   };
 
+  function stopListening() {
+    const was = listening;
+    listening = null;
+    if (!was) return;
+    try {
+      was.source.onended = null;
+      was.source.stop();
+    } catch {
+      // already stopped
+    }
+  }
+
   return {
     clock,
+
+    // Plays the `kind` clip's file alone from `from` seconds (of the
+    // file) to its end — no animation (the sound panel's Listen and Set
+    // start). Call inside the tap, after unlock(). onEnd() when the file
+    // runs out (not on stopListening). False if there's nothing to play.
+    listen({ kind = 'music', from = 0, onEnd = () => {} } = {}) {
+      clock.stop();
+      stopListening();
+      const track = tracks.find((t) => (t.clip.kind ?? 'music') === kind);
+      if (!track || !context() || ctx.state === 'closed') return false;
+      const start = Math.min(Math.max(0, from), track.buffer.duration);
+      const source = ctx.createBufferSource();
+      source.buffer = track.buffer;
+      mix.connect(source, track.clip);
+      source.start(ctx.currentTime, start);
+      const me = { source, from: start, startedAt: ctx.currentTime, onEnd, end: track.buffer.duration };
+      source.onended = () => {
+        if (listening !== me) return;
+        listening = null;
+        onEnd();
+      };
+      listening = me;
+      return true;
+    },
+
+    // Where in the file she's hearing now (seconds), or null when not
+    // listening. Holds at the start until the context runs.
+    listenPosition() {
+      if (!listening || !ctx) return null;
+      const heard = ctx.currentTime - outputDelay() - listening.startedAt;
+      return Math.min(listening.end, listening.from + Math.max(0, heard));
+    },
+
+    stopListening,
+
+    get listening() {
+      return listening !== null;
+    },
+
+    // A row's volume, live (its slider moving): the bus follows at once,
+    // whatever is playing. The clip itself is saved by main.js.
+    setVolume(kind, value) {
+      mix?.setVolume(kind, value);
+    },
 
     // Call synchronously inside a tap (Play): iOS only starts sound
     // from one. Nothing to do without sound — but a sound still being
@@ -305,6 +451,7 @@ export function createAudio({
     // Takes effect from the next run.
     setClips(list) {
       tracks = (list ?? []).filter((t) => t && t.clip && t.buffer);
+      applyVolumes();
     },
 
     // Whether any clip's sound is loaded (for the log).
@@ -328,7 +475,9 @@ export function createAudio({
 
     destroy() {
       clock.stop();
+      stopListening();
       tracks = [];
+      mix = null;
       if (recording) setSession('playback');
       recording = false;
       const closing = ctx;

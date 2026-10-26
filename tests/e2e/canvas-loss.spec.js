@@ -104,6 +104,9 @@ test('a save from a canvas that lost its pixels is refused, and the layer is rel
   // / all canvases, playback state, onion skin.
   expect(log).toMatch(/save-refused .*canvases=\d+\/\d+ play=idle onion=off/);
   expect(log).toMatch(/recover .*canvases=\d+\/\d+ play=idle onion=off/);
+  // Memory leads (undo MB, frame cache frames/MB, canvases not freed).
+  expect(log).toMatch(/recover .* onion=off undo=\d+\.\d cache=\d+\/\d+\.\d made=\d+/);
+  expect(log).toMatch(/ open .* made=\d+/);
 });
 
 test('a canvas that stays blank is swapped for a fresh one when the frame loads', async ({ page }) => {
@@ -156,6 +159,48 @@ test('erasing the whole drawing on purpose still saves', async ({ page }) => {
   await expect(toast(page)).toHaveCount(0);
   const log = await logText(page);
   expect(log).not.toContain('save-refused');
+});
+
+// An erase leaves the layer's context in 'destination-out'. A frame load
+// right after it used to draw the saved drawing in that mode — erasing
+// it onto a blank canvas. A real drawing tripped the guard (a needless
+// fresh canvas and banner); a tiny one showed blank, and the next save
+// wrote over it (robot test seed 115).
+async function eraseOnNewFrame(page) {
+  await addFrameBtn(page).click();
+  await expect(tile(page, 2)).toHaveClass(/is-current/);
+  await expect(addFrameBtn(page)).toBeEnabled();
+  let before = await savedDrawingBytes(page);
+  await stroke(page, 800, 600, 1400);
+  await waitForDrawingSave(page, before);
+  await page.getByRole('button', { name: 'Erase', exact: true }).click();
+  before = await savedDrawingBytes(page);
+  await stroke(page, 800, 700, 1000);
+  await waitForDrawingSave(page, before);
+  await tile(page, 1).click();
+  await expect(tile(page, 1)).toHaveClass(/is-current/);
+  await expect(addFrameBtn(page)).toBeEnabled();
+}
+
+test('a frame opened right after an erase shows its drawing', async ({ page }) => {
+  await openApp(page);
+  await drawAndSave(page);
+  await eraseOnNewFrame(page);
+
+  expect(await paintedAt(page, 900, 400)).toBe(true);
+  const log = await logText(page);
+  expect(log).not.toContain('load-renewed');
+  await expect(banner(page)).toHaveCount(0);
+});
+
+test('a tiny drawing opened right after an erase is still there', async ({ page }) => {
+  await openApp(page);
+  const before = await savedDrawingBytes(page);
+  await stroke(page, 400, 913, 917); // a dot: below the guard's size on purpose
+  await waitForDrawingSave(page, before);
+  await eraseOnNewFrame(page);
+
+  expect(await paintedAt(page, 915, 400)).toBe(true);
 });
 
 // Painted pixels in the stored bitmaps (thumbnails aside), decoded.

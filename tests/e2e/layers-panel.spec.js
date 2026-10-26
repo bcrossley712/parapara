@@ -9,7 +9,7 @@
 // "Fill all layers" is for that).
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
+import { openApp, reloadApp, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem, closeLayersPanel } from './helpers.js';
 
 const rows = (page) => page.locator('.pp-layers__row');
 const addBtn = (page) => page.getByRole('button', { name: 'Add layer' });
@@ -43,6 +43,7 @@ async function addLayer(page) {
 
 // A mouse stroke in canvas-pixel coordinates.
 async function stroke(page, x1, y1, x2, y2) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   const sx = (x) => box.x + (x / 1920) * box.width;
   const sy = (y) => box.y + (y / 1080) * box.height;
@@ -52,6 +53,7 @@ async function stroke(page, x1, y1, x2, y2) {
     await page.mouse.move(sx(x1 + ((x2 - x1) * i) / 20), sy(y1 + ((y2 - y1) * i) / 20));
   }
   await page.mouse.up();
+  await reopen();
 }
 
 // Painted pixel count on one layer canvas.
@@ -227,8 +229,9 @@ test('opacity applies live, is one undo step, and is saved', async ({ page }) =>
   await expect(layerEl).toHaveCSS('opacity', '0.4');
   await expect(page.locator('.pp-layers__opacity-text')).toHaveText('Opacity 40%');
 
-  await undo(page);
+  await undo(page); // a tap outside: closes the panel
   await expect(layerEl).toHaveCSS('opacity', '1');
+  await openPanel(page);
   await expect(slider).toHaveValue('100');
   await redo(page);
   await expect(layerEl).toHaveCSS('opacity', '0.4');
@@ -312,7 +315,7 @@ test('undoing a stroke on another layer changes that layer, not the active one',
   expect(l2Painted).toBeGreaterThan(0);
 });
 
-test('the layer cap disables Add at 8, and the panel stays open across a reload', async ({ page }) => {
+test('the layer cap disables Add at 8, and the panel isn\'t reopened at launch', async ({ page }) => {
   await openApp(page);
   await openPanel(page);
   for (let i = 0; i < 7; i++) await addLayer(page);
@@ -321,20 +324,10 @@ test('the layer cap disables Add at 8, and the panel stays open across a reload'
 
   await expect.poll(async () => (await savedProject(page))?.layers.length).toBe(8);
   await reloadApp(page);
-  await expect(page.locator('.pp-layers')).toBeVisible(); // remembered open
-  await expect(rows(page)).toHaveCount(8);
-
+  // A menu (5c): closed at launch, whatever an older install saved.
+  await expect(page.locator('.pp-layers')).toBeHidden();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
-  await expect(page.locator('.pp-layers')).toBeHidden();
-  await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
-    const req = indexedDB.open('parapara');
-    req.onsuccess = () => {
-      const r = req.result.transaction('meta').objectStore('meta').get('uiState');
-      r.onsuccess = () => { req.result.close(); resolve(r.result?.value ?? null); };
-    };
-  }))).toMatchObject({ layersPanelOpen: false });
-  await reloadApp(page);
-  await expect(page.locator('.pp-layers')).toBeHidden();
+  await expect(rows(page)).toHaveCount(8);
 });
 
 test('fill stops at lines on another layer, through the real panel', async ({ page }) => {
@@ -353,6 +346,7 @@ test('fill stops at lines on another layer, through the real panel', async ({ pa
 
   await page.locator(`.pp-layers__row[data-layer-id="${color}"]`).click();
   await page.getByRole('button', { name: 'Fill', exact: true }).click();
+  await closeLayersPanel(page); // a tap with it open only closes it
   const box = await page.locator('.pp-canvas').boundingBox();
   await page.mouse.click(box.x + (950 / 1920) * box.width, box.y + (550 / 1080) * box.height);
 

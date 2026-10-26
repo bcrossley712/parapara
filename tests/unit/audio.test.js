@@ -21,14 +21,24 @@ function fakeContext({ state = 'running', outputLatency = 0 } = {}) {
     resumes: 0,
     closed: false,
     gains: [],
+    compressors: [],
     createGain() {
-      const node = { gain: { value: 1 }, connect() {} };
+      const node = {
+        gain: { value: 1, setTargetAtTime(v) { this.value = v; }, cancelScheduledValues() {} },
+        connect(to) { node.to = to; },
+      };
       ctx.gains.push(node);
+      return node;
+    },
+    createDynamicsCompressor() {
+      const param = () => ({ value: 0 });
+      const node = { threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), connect(to) { node.to = to; } };
+      ctx.compressors.push(node);
       return node;
     },
     createBufferSource() {
       return {
-        connect() {},
+        connect(to) { this.to = to; },
         start: (when, offset, duration) => ctx.started.push([round(when), round(offset), round(duration)]),
         stop: () => { ctx.stopped += 1; },
       };
@@ -363,7 +373,7 @@ test('a clip\'s gain plays through a GainNode; no gain, no node', () => {
   ]);
   audio.clock.start({ position: 0, fps: 10, frameCount: 40, loop: false });
   assert.equal(ctx.started.length, 2);
-  assert.deepEqual(ctx.gains.map((g) => g.gain.value), [4]);
+  assert.deepEqual(ctx.gains.filter((g) => !g.bus).map((g) => g.gain.value), [4]);
 });
 
 test('wake resumes a paused context outside a tap', async () => {
@@ -376,4 +386,57 @@ test('wake resumes a paused context outside a tap', async () => {
   ctx.state = 'running';
   audio.wake();
   assert.equal(ctx.resumes, 1);
+});
+
+// --- after 5c: the mix and listening ---
+
+const bus = (ctx, kind) => ctx.gains.find((g) => g.bus === kind);
+
+test('each row plays through its own volume, into a limiter', async () => {
+  const { ctx, audio } = setup({ clipFields: { kind: 'music', volume: 0.5 } });
+  await audio.decode(new ArrayBuffer(8)); // makes the context
+  assert.equal(bus(ctx, 'music').gain.value, 0.5);
+  assert.equal(bus(ctx, 'voice').gain.value, 1);
+  assert.equal(bus(ctx, 'music').to, ctx.compressors[0]); // the limiter
+  assert.equal(ctx.compressors[0].to, ctx.destination);
+  audio.setVolume('music', 0.8); // live, while she drags
+  assert.equal(bus(ctx, 'music').gain.value, 0.8);
+});
+
+test('a loudness-leveled take goes through its own compressor', async () => {
+  const { ctx, audio } = setup({ clipFields: { kind: 'voice', gain: 3, leveling: 'loudness' } });
+  ctx.currentTime = 1;
+  audio.clock.start({ position: 0, fps: 12, frameCount: 48, loop: false });
+  const leveling = ctx.gains.find((g) => !g.bus);
+  assert.equal(leveling.gain.value, 3);
+  assert.equal(leveling.to, ctx.compressors[1]); // [0] is the limiter
+  assert.equal(ctx.compressors[1].to, bus(ctx, 'voice'));
+});
+
+test('listen plays the song alone from a point, and says where it is', () => {
+  const { ctx, audio } = setup({ clipFields: { kind: 'music' } });
+  ctx.currentTime = 5;
+  assert.equal(audio.listen({ from: 1.5 }), true);
+  assert.deepEqual(ctx.started.at(-1).slice(0, 2), [5, 1.5]); // now, from 1.5 s into the file
+  assert.equal(audio.listening, true);
+  ctx.currentTime = 6.25;
+  assert.equal(audio.listenPosition(), 2.75);
+  audio.stopListening();
+  assert.equal(audio.listening, false);
+  assert.equal(audio.listenPosition(), null);
+});
+
+test('listen ends at the file\'s end; playback stops it', () => {
+  const { ctx, audio } = setup({ clipFields: { kind: 'music' } });
+  let ended = 0;
+  audio.listen({ from: 0, onEnd: () => { ended += 1; } });
+  audio.clock.start({ position: 0, fps: 12, frameCount: 24 });
+  assert.equal(audio.listening, false);
+  assert.equal(ended, 0);
+  assert.equal(ctx.stopped > 0, true);
+});
+
+test('listen with no music plays nothing', () => {
+  const { audio } = setup({ clipFields: { kind: 'voice' } });
+  assert.equal(audio.listen({ from: 0 }), false);
 });

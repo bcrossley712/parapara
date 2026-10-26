@@ -34,9 +34,8 @@ import { createCountdown } from './countdown.js';
 //   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
 //   Omitted actions report "unavailable" rather than breaking the UI.
 // options.onUndo / options.onRedo: the top-bar buttons.
-// options.layers: callbacks for the layers panel (see layers-panel.js);
-//   onOpenChange also fires when the top-bar button toggles it.
-// options.layersPanelOpen: open the layers panel at startup.
+// options.layers: callbacks for the layers panel (see layers-panel.js).
+//   It starts closed (a menu, not reopened at launch).
 // options.frames: callbacks for the frame strip ({ onSelect, onAdd,
 //   onDuplicate },
 //   see timeline/frame-strip.js).
@@ -49,7 +48,8 @@ import { createCountdown } from './countdown.js';
 //   onUseOnAllFrames, onToggleImages }, see image-menu.js).
 // options.sound: the Sound button's panel intents ({ onImport,
 //   onDelete(kind), onChange(kind, clip), onMicDown, onMicUp,
-//   onPlayingTouch, onOpenChange }, see sound-panel.js;
+//   onPlayingTouch, onVolumeInput, onVolumeCommit, onListen, onListenStop,
+//   canRetimeMusic, onOpenChange }, see sound-panel.js;
 //   step 5).
 // options.reference: the adjust-image bar's intents ({ onOpacityInput,
 //   onFlip, onReplace, onDelete, onDone }, see reference-bar.js). onDone also
@@ -78,7 +78,6 @@ export function initUI(container, options = {}) {
     onUndo = () => {},
     onRedo = () => {},
     layers: layersCallbacks = {},
-    layersPanelOpen = false,
     frames: framesCallbacks = {},
     transport: transportCallbacks = {},
     colors: colorCallbacks = {},
@@ -106,9 +105,11 @@ export function initUI(container, options = {}) {
   // A tap on the canvas while a menu or popover is open only closes it
   // (Procreate's way) — no stroke, fill or pick; fingers joining it are
   // ignored too (canvas.js dismissTouch). Registered before the menus'
-  // own tap-outside listeners, so it sees them still open. Panels she
-  // works with open (layers, sound) don't count; controls inside the
-  // canvas area (sound panel, onion badge) handle their own taps.
+  // own tap-outside listeners, so it sees them still open. The layers
+  // panel counts (Procreate's popover; closed by the listener below);
+  // the sound panel, which she works
+  // with open, doesn't. Controls inside the canvas area (sound panel,
+  // onion badge) handle their own taps.
   document.addEventListener('pointerdown', (event) => {
     const target = event.target;
     if (!(target instanceof Element) || !canvasArea.contains(target)) return;
@@ -117,8 +118,22 @@ export function initUI(container, options = {}) {
     canvasApi.dismissTouch(event.pointerId);
   }, { signal, capture: true });
 
+  // The layers panel closes on any tap outside it (Procreate's popover)
+  // — the canvas (swallowed above), the rail, the top bar, the strip.
+  // Its own Layers button toggles it instead.
+  document.addEventListener('pointerdown', (event) => {
+    if (!layersPanel.isOpen) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (layersPanel.element.contains(target) || layersBtn.contains(target)) return;
+    layersPanel.setOpen(false);
+  }, { signal, capture: true });
+
   function anyMenuOpen() {
     return pickerOpen
+      || layersPanel.isOpen
+      || soundPanel.isMenuOpen   // a row's volume slider
+      || soundPanel.isListening  // Listen / Set start: a tap only stops it
       || settingsPanel.isOpen
       || imageMenu.isMenuOpen
       || layersPanel.isMenuOpen
@@ -163,7 +178,6 @@ export function initUI(container, options = {}) {
     onOpenChange: (open) => {
       layersBtn.classList.toggle('is-active', open);
       layersBtn.setAttribute('aria-pressed', String(open));
-      layersCallbacks.onOpenChange?.(open);
     },
   }, { signal });
   layersBtn.setAttribute('aria-pressed', 'false');
@@ -517,12 +531,6 @@ export function initUI(container, options = {}) {
   const bodyResize = new ResizeObserver(() => fitLayersPanel());
   bodyResize.observe(body);
   signal.addEventListener('abort', () => bodyResize.disconnect());
-
-  if (layersPanelOpen) {
-    layersPanel.setOpen(true, { notify: false });
-    layersBtn.classList.add('is-active');
-    layersBtn.setAttribute('aria-pressed', 'true');
-  }
 
   function destroy() {
     listeners.abort();

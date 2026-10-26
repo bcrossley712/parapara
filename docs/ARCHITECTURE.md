@@ -92,9 +92,10 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   diffed against the start angle.
 - **A layer's context keeps the last stroke's blending mode** — erase
   leaves `destination-out` set. Anything that draws onto a layer
-  outside a stroke (paste, 4d) sets `source-over` and alpha 1 itself
-  inside `save()`/`restore()`, or it erases instead (the robot test
-  caught this).
+  outside a stroke (paste, 4d; loads through `drawInto`) sets
+  `source-over` and alpha 1 itself inside `save()`/`restore()`, or it
+  erases instead (the robot test caught both — a load right after an
+  erase showed blank, and a tiny drawing could then be saved over).
 - Fill applies immediately but is a gesture candidate like draw/erase:
   a second finger in the window reverts it from the committed copy. It
   commits on pointerup.
@@ -564,11 +565,16 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
     - **Leveling:** with echo cancellation off, iOS doesn't boost the
       mic, and her first takes were very quiet. Automatic gain is asked
       for (Safari may ignore it; `rec-start` logs what it applied), and
-      each take gets a **`gain`** (`takeGain`: its loudest point lifted
-      to 0.7, at most 8×, never below 1) stored on the clip — missing =
-      1. Playback applies it through a GainNode, the waveform is drawn
-      with it, and step 6's export must apply it too. The file is never
-      changed.
+      each take gets a **`gain`** stored on the clip — missing = 1. 5c's
+      takes: `takeGain` (loudest point to 0.7). **After 5c, by
+      loudness** (`loudnessGain`; her test with headphones: still far
+      under the music): the speech's RMS, pauses left out
+      (`speechLoudness`), lifted to `TAKE_TARGET_LOUDNESS`, at most 8×,
+      never below 1, its loudest instant at most `MAX_LEVELED_PEAK`;
+      marked `leveling: 'loudness'`, which plays through a compressor
+      (`TAKE_COMPRESSOR`). Older takes keep theirs. The waveform is drawn
+      with gain × volume. The file is never changed. `recorded` logs
+      `peak`, `loudness` and `gain`.
     - **Record mode may pause the sound:** as a take starts the engine
       is asked to run again (`audio.wake()`); `rec-start` logs its
       state, and the take's music logs `sound-start` / `sound-silent`.
@@ -581,8 +587,45 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
       when it was heard) and set once in `MIC_DELAY_SECONDS`: -22 ms on
       her iPad (2026-10-25).
 
+  - **The mixer (after 5c, her request):** each row's label is its
+    volume button ("MUSIC 100%"), opening a slider — **Music 0–100%,
+    Voice 0–200%**, 5% steps — saved as the clip's `volume` (missing =
+    1; `withVolume`, `clipVolume`). It works while sound plays and never
+    stops playback (she mixes by ear): `audio.setVolume` moves the row's
+    bus live, release is one `'audio'` undo step (`commitVolume`). A
+    menu (`isMenuOpen`): a tap outside closes it, a canvas tap only
+    closes it. **The mix** (`buildMix` in `audio.js`): source → take
+    leveling → compressor (loudness-leveled takes) → row bus (volume) →
+    a limiter (`LIMITER`) → speaker; the limiter keeps a boost from
+    distorting. Settings are first tries, to tune by ear.
+  - **Listen / Set start (after 5c, her request):** beside the
+    overview; the song alone (`audio.listen`), from the part's start,
+    no animation. **Listen** leaves the start alone (a line runs across
+    the overview); **Set start** moves the part with the song
+    (`slipClip` to `audio.listenPosition()`), and wherever it stops —
+    Stop, a tap away, the song's end, hiding the app or closing the
+    panel — is the new start, one undo step (`finishListen`). No
+    reaction-delay allowance (her choice; revisit if she corrects
+    every time). Either button reads Stop while playing; **any tap
+    outside the two buttons and the volume controls stops it**, a
+    canvas tap only stops it (`isListening` in `anyMenuOpen`). While
+    the animation plays, the buttons only stop it (like Import).
+    Scrubbing (sound while dragging) was offered and not chosen.
+  - **Moving the song under a Voice asks first** (after 5c): the take
+    was recorded against the song's timing. Dragging the overview, Set
+    start, or moving the Music clip (not trimming — that keeps the rest
+    in place) asks "Move the song?" once per panel opening
+    (`canRetimeMusic`); the asking touch does nothing, she does it again
+    (like the mic's popups). A new take resets it.
+
 ### Don't break
 
+- **Step 6's export mixes through `buildMix`** on an
+  OfflineAudioContext — leveling, compressor, volumes and limiter —
+  or the file won't sound like playback.
+- **Volume never stops playback**, and its commit is allowed while
+  playing (`commitVolume` checks only busy) — unlike every other sound
+  edit (`changeClip` refuses while playing).
 - **The sound panel stops its own pointer events** (like the onion
   badge) — it's inside the canvas area, which would take a touch on it
   for a stroke or a playback stop. **Its waveform canvases are only as
@@ -624,7 +667,11 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
 
 ### iPad-only checks
 
-Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding.
+(after 5c) the voice/music balance with headphones — loudness target,
+compressor and limiter by ear, hiss on a boosted quiet take; Listen and
+Set start starting from the tap (and with the screen's output delay,
+where Set start lands vs. what she heard); the volume slider with her
+stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding.
 
 ---
 
@@ -675,8 +722,15 @@ temporary), `ui/dev-log-view.js` (DEV ONLY); screen routing in
   canvas while a menu or popover is open (color picker, Image, layer,
   frame, onion settings, fps, gear) only closes it — no stroke, fill or
   pick, and fingers joining it are ignored until all are up (the
-  playback-stop swallow). Panels she works with open (layers, sound)
-  don't count. Taps on other controls still act and close the menu.
+  playback-stop swallow). **The layers panel counts too** (after 5c,
+  her request — Procreate's popover): any tap outside it closes it
+  (and its layer menu) — `ui.js`'s tap-outside listener, after the
+  dismiss listener so a canvas tap is still swallowed; its Layers
+  button toggles it; picking a layer keeps it open; it isn't
+  reopened at launch (`uiState.layersPanelOpen` retired — an old saved
+  value is ignored); closing it mid-rename keeps the typed name. The
+  sound panel, which she works with open, doesn't count. Taps on other
+  controls still act and close the menu.
 - **Dialogs** (`confirm-dialog.js`): a tap on the dim area cancels,
   except with `dismissConfirms` (5c's headphones tip, where the second
   button — "Don't show again" — is the unusual choice).

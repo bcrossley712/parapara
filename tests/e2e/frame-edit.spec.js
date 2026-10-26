@@ -14,7 +14,7 @@
 // on a held tile.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem } from './helpers.js';
+import { openApp, reloadApp, readDb, savedDrawingBytes, waitForDrawingSave, layersSettled, openLayerMenu, layerMenu, layerMenuItem, closeLayersPanel, openLayersPanel } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -60,6 +60,7 @@ async function openMenu(page) {
 
 // A horizontal mouse stroke at canvas-pixel height y.
 async function stroke(page, y) {
+  const reopen = await closeLayersPanel(page);
   const box = await page.locator('.pp-canvas').boundingBox();
   const sx = (x) => box.x + (x / 1920) * box.width;
   const sy = (v) => box.y + (v / 1080) * box.height;
@@ -67,6 +68,7 @@ async function stroke(page, y) {
   await page.mouse.down();
   for (let i = 1; i <= 20; i++) await page.mouse.move(sx(400 + i * 50), sy(y));
   await page.mouse.up();
+  await reopen();
 }
 
 // Is the active layer painted at canvas pixel (x, y)?
@@ -313,6 +315,7 @@ test('a locked layer refuses a paste', async ({ page }) => {
   await stroke(page, 300);
   await layerMenu(page, 'Copy');
   await addFrame(page);
+  await openLayersPanel(page); // the strip tap closed it
   await page.getByRole('button', { name: 'Lock Layer 1' }).click();
   await layerMenu(page, 'Paste');
   await expect(banner(page)).toContainText('locked');
