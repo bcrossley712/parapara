@@ -474,10 +474,10 @@ with no story of how it got there.
   stays disabled, and the test times out waiting for a save or a frame
   switch (5 s waits, before the app's 15 s encode timeout fires).
   That's ~13–23 tests a full run, more when the machine is busy, a
-  different set each time — nothing to do with the app. (Seen
-  2026-10-26: saves taking ~7 s — past the 5 s waits — failing most
-  save-waiting tests. A local config that only raises `expect.timeout`
-  to 20 s, kept outside the repo, made them pass; CI unchanged.) So **a sandbox run is a pre-check; CI
+  different set each time — nothing to do with the app. **If saves run
+  slow** (save-waiting tests time out at 5 s), add `E2E_SLOW_WAIT=20000`
+  to the e2e command (CI never sets it); "hiding the app saves
+  immediately" still fails there (it needs a save within 300 ms). So **a sandbox run is a pre-check; CI
   (pinned image) is the real check**: judge sandbox failures by
   whether they're this stall, and compare against a run without the
   change when in doubt.

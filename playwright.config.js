@@ -17,8 +17,15 @@ const PORT = 8765;
 //   deploy version (serve.js /__test__/state), which every open page
 //   would notice — so they run alone, one at a time, after 'app' is
 //   done. A failing 'app' test therefore skips them; fix that first.
+
+// A slow machine (a Claude sandbox where saves take over 5 s): set
+// E2E_SLOW_WAIT=20000 to raise the wait for each expect (and the test
+// limit with it). Unset — always in CI — nothing changes.
+const slowWait = Number(process.env.E2E_SLOW_WAIT) || 0;
+
 export default defineConfig({
   testDir: 'tests/e2e',
+  ...(slowWait ? { expect: { timeout: slowWait }, timeout: 120000 } : {}),
   // Two workers by default — the Claude sandbox has 2 CPUs, and canvas
   // work gets flaky when oversubscribed. E2E_WORKERS overrides; CI sets
   // 4 for GitHub's 4-core runner (deploy.yml).
