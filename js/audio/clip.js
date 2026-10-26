@@ -39,8 +39,10 @@ export const COUNTDOWN_SECONDS = 3;
 // How much later a sound she hears lands in the recorded file than
 // the recorder's start says (speaker → mic → file), in seconds.
 // Measured on her iPad with the dev Mic delay test and set here once;
-// no setting. 0 until measured.
-export const MIC_DELAY_SECONDS = 0;
+// no setting. Measured 2026-10-25: -21 to -24 ms across 18 clicks and a
+// relaunch (the file starts slightly before MediaRecorder's start
+// event), so -22 ms.
+export const MIC_DELAY_SECONDS = -0.022;
 
 // Leveling a take (5c, after her first iPad takes came out very quiet:
 // with echo cancellation off, iOS doesn't boost the mic). Each recorded

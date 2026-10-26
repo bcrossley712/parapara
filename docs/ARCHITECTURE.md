@@ -578,8 +578,8 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
     - **Mic delay:** measured with the dev "Mic delay test" (gear →
       Developer: three clicks on the speaker, 0.4 s apart, each found in
       the recording as a jump above the room's noise and compared with
-      when it was heard) and set once in `MIC_DELAY_SECONDS`; 0 until
-      measured.
+      when it was heard) and set once in `MIC_DELAY_SECONDS`: -22 ms on
+      her iPad (2026-10-25).
 
 ### Don't break
 

@@ -144,73 +144,47 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **A layer encode that never finishes fails the save after 15 s**
   instead of locking the editor (see docs/ARCHITECTURE.md → Saving and storage); if the log
   shows `save-failed … timed out`, get the log.
-- **Now: step 5 — audio**, in three parts, each confirmed on the iPad
-  before the next: **5a** import, storage and playback in sync · **5b**
-  the sound panel, waveform and trim · **5c** hold-to-record while
-  playing. What's built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Sound; the format
-  reasoning, step 6's export, and where her songs can come from are in
-  [design notes](docs/DESIGN_NOTES.md#planned-features).
-  - **5a: import confirmed on the iPad; sound was silent — she was in
-    Silent mode.** Fixed (after 5b): the audio session is set to
-    "playback", so sound plays in Silent mode like her apps'; Play
-    pressed while a project's sound is still loading now starts it too;
-    the log says whether each Play's sound started (`sound-start`,
-    `sound-silent`, `sound-unlock-failed`; `play` lists `ctx=` and
-    `session=`). **Not yet confirmed on the iPad.** Check: sound plays
-    with Silent on; in time with the animation, from frame 1 and from a
-    later frame, looping without a gap or drift; the first Play after
-    opening a project with sound (also Play pressed during "Getting
-    ready"); fps and loop changes while playing; hiding the app stops
-    it; a song over 3 minutes (only its start is used). If sound is
-    missing, get the log. Tell her up front: songs from Spotify/Apple
-    Music/Amazon Music streams can't be imported — bought downloads can.
-  - **Her choices:** **hold to record** (Flipaclip; let go to stop);
-    **the animation plays while she records**, so she can time her
-    voice to it; **the waveform shows only in the sound panel** —
-    the canvas keeps its full height (no lane under the tiles);
-    **she records over music** (after 5b's first iPad check).
-  - **5b: built, not yet confirmed on the iPad** — waiting on sound
-    (how it works: docs/ARCHITECTURE.md → Sound). Check: the track
-    lines up with the tiles and scrolls with them smoothly; dragging a
-    handle or the clip with her stylus (handles big enough? edge
-    scrolling too fast or slow?); picking a part of a long song on the
-    overview; the playhead line while playing; a touch on the panel
-    while playing only stops; the onion badge above the panel; memory
-    with a 3-minute song open (the waveform is worked out when the
-    panel first opens — any pause?). Ask her whether the panel should
-    reopen by itself next launch (it doesn't).
-  - **5c: built, not yet confirmed on the iPad** — Music and Voice
-    rows, hold-to-record over music; how it works and her choices are in
-    docs/ARCHITECTURE.md → Sound (countdown 3 s, headphones tip, confirm
-    before replacing an older Voice, take kept on any interruption). Also
-    fixed with it: the panel's waveform could be missing right after
-    opening (`ui.js` didn't pass `onOpenChange` on). **First, run gear →
-    Developer → Mic delay test** a few times (speaker, volume up, no
-    headphones, quiet room) and send the log's `mic-delay` lines — the
-    number goes into `MIC_DELAY_SECONDS` once. Check: the first hold asks
-    for the mic and the banner says to hold again; the countdown and the
-    hold with her finger and stylus (no callout or text selection on the
-    held button); letting go during the countdown; recording from a later
-    frame, playing to the last frame; music audible while recording
-    (volume? speaker or earpiece?); the voice lining up with the
-    animation on playback; with headphones vs without (does the song get
-    into the voice?); AirPods; Silent mode; the headphones tip and
-    "Don't show again"; replacing an older voice asks; Delete on each
-    row; the panel's height with one and two rows. If anything's off,
-    get the log (`rec-*`, `recorded`, `mic-delay`).
-  - **After the first iPad round (2026-10-25):** takes recorded and
-    played back, but **her voice was very quiet**, and the Mic delay
-    test never found its click (the recording was too quiet for its
-    fixed threshold — the click was heard in the room). Changed, **not
-    yet on the iPad:** each take is leveled (a stored `gain`, up to 8×);
-    automatic gain is asked for (`rec-start` logs whether Safari
-    applied it: `agc=`); the test plays three clicks and finds them
-    above the room's noise; record mode's paused sound is asked to run
-    (`rec-start ctx=`). Check: is her voice loud enough now, and is
-    there hiss? Run the Mic delay test again and send the `mic-delay`
-    lines. Try a take **with music** and send its `rec-start` and
-    `sound-start`/`sound-silent` lines — does the music play while she
-    records?
+- **Now: step 5 — audio. 5a–5c are built and work on her iPad**
+  (tested 2026-10-25): import, storage and playback in sync (5a); the
+  sound panel, waveform and trim (5b); Music and Voice rows with
+  hold-to-record over music (5c). How it all works and her choices are
+  in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Sound; the format
+  reasoning, step 6's export and where her songs can come from are in
+  [design notes](docs/DESIGN_NOTES.md#planned-features). Tell her:
+  songs from Spotify/Apple Music/Amazon Music streams can't be
+  imported — bought downloads can.
+  - **Her choices:** **hold to record** (Flipaclip; let go to stop),
+    after a **3-second countdown**; **the animation plays while she
+    records**, so she can time her voice to it; **she records over
+    music** (headphones needed — echo cancellation is off for a natural
+    voice); **the waveform shows only in the sound panel** — the canvas
+    keeps its full height.
+  - **Kinks still being worked out** (last build sent 2026-10-25, not
+    yet on the iPad):
+    - **Quiet voice:** takes are now leveled (a stored `gain`, up to
+      8×) and automatic gain is asked for (`rec-start … agc=`). Check:
+      loud enough now? Hiss?
+    - **Quieter first loops after a take:** the switch back from record
+      mode now waits for the mic to close (`rec-session` lines). Check
+      the first loop plays at full volume.
+    - **Mic delay measured: -22 ms** (-21 to -24 across six runs and a
+      relaunch; `MIC_DELAY_SECONDS` in `clip.js`). **Watch:** one
+      session (the first launch after an update, 2026-10-25 19:52) read
+      ~510 ms instead, with `out=5` (not `out=2`) and clicks half as
+      loud — iOS set up the speaker differently and the reason is
+      unknown. If music during a take ever sounds ~½ s late, look for
+      `out=5` in `rec-start`/`mic-delay` lines and run the test again.
+    - **Music while recording not tried yet:** record mode may pause
+      the sound (`rec-start ctx=suspended` seen); it's now asked to run.
+      Send a take-with-music's `rec-start`, `rec-session` and
+      `sound-start`/`sound-silent` lines.
+    - iOS asks for the mic again after each relaunch of the installed
+      app (seen) — iOS's choice; the first hold after a launch is
+      interrupted by it.
+    - Still to check when convenient: the first-hold mic prompt,
+      headphones vs not (does the song get into the voice?), AirPods,
+      dragging handles with her stylus, a 3-minute song's memory/pause,
+      whether the panel should reopen by itself next launch (it doesn't).
   - **Out unless she asks** (Flipaclip has them): more than two rows,
     slicing, looping past the end, volume (song vs voice balance is the
     likely ask), a sound library, scrubbing sound while stepping
