@@ -101,133 +101,89 @@ icon, manifest `name`/`short_name`, and repo copy.
 
 ## Current state
 
-- **Steps 1, 2a–2e, 3a and 3b: done and confirmed on the iPad** —
-  drawing engine, saving, undo/redo, shared layers + bare-bones frame
-  strip, project gallery, 2e's requests (copy frame/layer, duplicate
-  project, eyedropper, recent colors, palette, Clear layer, lock
-  blocks delete), the reference image (3a: Image button, HEIC from
-  Photos, large photos, adjusting by stylus all checked) and reference
-  across frames (3b: Use on all frames, new frames inheriting, Flip ↔ /
-  ↕). How each works is in docs/ARCHITECTURE.md; she mostly undoes with the
-  buttons, not gestures. The color picker's layout is a first try —
-  adjust if she wants it different.
-- **Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
-  does she want to draw/erase on the photo itself (→ "Make into
-  layer"), and does starting at 50% bother her when it's a background
-  (→ remember her last opacity, or a choice on import)? Neither blocks
-  step 5.
-- **Step 4: done and confirmed on the iPad** — 4a frame cache and
-  tile pictures, 4b playback + transport, 4c onion skin, 4d frame
-  delete/reorder and the layer menu with Copy / Paste. How each works
-  is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Frame cache and playback, Playback, Onion
-  skin, Frame strip editing, Layer menu); 4a's measurements are in
-  [design notes](docs/DESIGN_NOTES.md#playback-and-the-frame-cache).
-  Onion skin: she's happy with the colors and 40% for now; if she
-  keeps adjusting the opacity, revisit the default.
-  - **Frame holds** (a drawing lasting several beats, Rough Animator)
-    are out unless she asks; adding them later is an optional
-    `frame.hold` (missing = 1) read only by `frameAtBeat`.
-  - **Out unless she misses them:** showing the cached frame
-    instantly on a frame switch, a scrubber, ping-pong loop, a play
-    range (in/out points), a clean fullscreen preview, a frame
-    counter, zooming while playing.
-- **The data-loss bug: guard built; no recurrence seen in the log
-  since, but little use yet** — keep the activity log in and keep
-  checking it. iOS emptied a layer's canvas while she drew (storage
-  still held every frame); before the guard, her next stroke saved
-  blank over the drawing. The guard is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Lost
-  canvases. Cause (likely memory) unknown: **if the log shows
-  `load-renewed`, `load-broken`, `save-refused`, `check-failed`,
-  `hold-refused` or `recover`, get the log** — it says when and how
-  often, and now also `canvases=<full-size>/<all>` (in the page;
-  offscreen ones aren't counted), `play=` and `onion=`.
-- **A layer encode that never finishes fails the save after 15 s**
-  instead of locking the editor (see docs/ARCHITECTURE.md → Saving and storage); if the log
-  shows `save-failed … timed out`, get the log.
-- **Now: step 5 — audio. 5a–5c are built and work on her iPad**
-  (tested 2026-10-25): import, storage and playback in sync (5a); the
-  sound panel, waveform and trim (5b); Music and Voice rows with
-  hold-to-record over music (5c). How it all works and her choices are
-  in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → Sound; the format
-  reasoning, step 6's export and where her songs can come from are in
-  [design notes](docs/DESIGN_NOTES.md#planned-features). Tell her:
-  songs from Spotify/Apple Music/Amazon Music streams can't be
-  imported — bought downloads can.
-  - **Her choices:** **hold to record** (Flipaclip; let go to stop),
-    after a **3-second countdown**; **the animation plays while she
-    records**, so she can time her voice to it; **she records over
-    music** (headphones needed — echo cancellation is off for a natural
-    voice); **the waveform shows only in the sound panel** — the canvas
-    keeps its full height.
-  - **Kinks still being worked out** (last build sent 2026-10-25, not
-    yet on the iPad):
-    - **Quiet voice:** takes are now leveled (a stored `gain`, up to
-      8×) and automatic gain is asked for (`rec-start … agc=`). Check:
-      loud enough now? Hiss?
-    - **Quieter first loops after a take:** the switch back from record
-      mode now waits for the mic to close (`rec-session` lines). Check
-      the first loop plays at full volume.
-    - **Mic delay measured: -22 ms** (-21 to -24 across six runs and a
-      relaunch; `MIC_DELAY_SECONDS` in `clip.js`). **Watch:** one
-      session (the first launch after an update, 2026-10-25 19:52) read
-      ~510 ms instead, with `out=5` (not `out=2`) and clicks half as
-      loud — iOS set up the speaker differently and the reason is
-      unknown. If music during a take ever sounds ~½ s late, look for
-      `out=5` in `rec-start`/`mic-delay` lines and run the test again.
-    - **Music while recording not tried yet:** record mode may pause
-      the sound (`rec-start ctx=suspended` seen); it's now asked to run.
-      Send a take-with-music's `rec-start`, `rec-session` and
-      `sound-start`/`sound-silent` lines.
-    - iOS asks for the mic again after each relaunch of the installed
-      app (seen) — iOS's choice; the first hold after a launch is
-      interrupted by it.
-    - Still to check when convenient: the first-hold mic prompt,
-      headphones vs not (does the song get into the voice?), AirPods,
-      dragging handles with her stylus, a 3-minute song's memory/pause,
-      whether the panel should reopen by itself next launch (it doesn't).
-  - **Out unless she asks** (Flipaclip has them): more than two rows,
-    slicing, looping past the end, volume (song vs voice balance is the
-    likely ask), a sound library, scrubbing sound while stepping
-    frames.
-  - **Device-only:** mic permission in the installed app (iOS may ask
-    every launch), recording latency, the echo with and without
-    headphones, playback volume and routing while the mic is on,
-    AirPods dropping to call quality while recording.
-- **Lost canvas seen again (log from 2026-10-25, before 5c) — look
-  into it after 5c.** She keeps getting "This frame's drawing stopped
-  showing…". The log: 16 s into a new one-layer project (just after
-  closing another), `copy-renewed` (undo's committed copy emptied),
-  then 0.8 s later `save-refused … had=1327 lost=976 canvases=1/4` →
-  `recover`. The guard worked; only the stroke drawn on the blank
-  canvas was lost. Two canvases emptied within a second points at iOS
-  memory pressure. Leads: the undo history's ~150 MB in memory, what a
-  closed project leaves behind, the frame cache's in-memory PNGs. Ask
-  for more logs; note what she did just before each.
-- **Layers panel → a menu that closes itself (her request, Procreate's
-  way) — after 5c.** Opens from the top-bar button as now; a canvas
-  tap only closes it (joins "a canvas tap with a menu open only closes
-  it" — `anyMenuOpen`); not reopened at launch (`uiState.layersPanelOpen`
-  retired). Decide when building: picking a layer keeps it open
-  (Procreate) unless she wants otherwise; a canvas tap mid-rename keeps
-  the typed name. The collapse-to-thumbnails version (Flipaclip) was
-  offered and not chosen.
-- **A canvas tap with a menu open only closes it (after 5b): built,
-  not yet confirmed on the iPad.** Check with her stylus and fingers:
-  open the color picker (and the Image, layer, frame, onion, fps and
-  gear menus), tap the canvas — the menu closes, no dot; the next tap
-  draws.
-- **Robot test seed 115 loses a mark — found after 5b, not yet
-  investigated.** `HUNT_SEED=115` fails every time it gets past the
-  sandbox stall: frame A's first mark is gone on screen at the end.
-  It fails the same on the 5a commit (before 5b and the menu change),
-  so it's older; CI only runs seeds 101–103. Its steps include "canvas
-  loses its pixels" — check the lost-canvas recovery first.
-- **Build order after step 4:** 5 audio record/import + single-clip
-  trim · 6 export + native share sheet · 7 Cloudflare Worker + R2
-  (share links, Krita reference import) · then the requested extras
-  under Open items.
+- **Done and confirmed on the iPad:** steps 1–4 and 5a–5c — drawing,
+  saving, undo, layers, gallery, 2e's requests, reference image, frame
+  cache, playback, onion skin, frame editing, a canvas tap closing an
+  open menu, and sound (import, sound panel, hold-to-record over
+  music). How each works is in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
+  the buttons, not gestures. She knows songs from streaming apps can't
+  be imported (bought downloads can).
+
+**Next, in this order** (each confirmed on the iPad before the next):
+
+1. **Lost canvas, still happening** — she sees "This frame's drawing
+   stopped showing…" now and then. The guard works (only the stroke
+   drawn on the blank canvas is lost), but she keeps hitting it, and
+   step 6's export will add memory pressure. One log (2026-10-25,
+   before 5c): 16 s into a new one-layer project, just after closing
+   another — `copy-renewed`, then 0.8 s later `save-refused … had=1327
+   lost=976 canvases=1/4` → `recover`. Two canvases emptied within a
+   second points at iOS memory pressure. Leads: undo's ~150 MB budget,
+   what a closed project leaves behind, the frame cache's in-memory
+   PNGs. Get more logs and note what she did just before each.
+   Also **robot test seed 115** (`HUNT_SEED=115`): frame A's first mark
+   is gone at the end; fails on the 5a commit too, so it's older (CI
+   only runs seeds 101–103). Its steps include "canvas loses its
+   pixels" — check the lost-canvas recovery first; it may be the same
+   area.
+2. **Voice vs music balance (her request).** She wants to talk/sing
+   over the music and be heard; takes play back too quiet against the
+   music at full volume, even with leveling (`gain`, up to 8×; listen
+  for hiss too). **Test properly
+   first, with headphones** — without them the mic records the music
+   too, so that test can't judge balance. Then decide with her:
+   Flipaclip gives each row its own volume; automatically lowering the
+   music while the voice plays ("ducking") is the other common way.
+   Step 6's export must mix with the same balance.
+3. **5c checks still open on the iPad:** music while recording (record
+   mode may pause it — send the take's `rec-start`, `rec-session`,
+   `sound-start`/`sound-silent` lines), headphones vs not, AirPods,
+   the first-hold mic prompt, dragging handles with her stylus, a
+   3-minute song's memory/pause, whether the panel should reopen at
+   launch (it doesn't). **Mic delay** is set at -22 ms; if music during
+   a take ever sounds ~½ s late, look for `out=5` in the `rec-start` /
+   `mic-delay` lines and rerun the Mic delay test. iOS asks for the mic
+   after every relaunch — its choice, nothing to fix.
+4. **Layers panel → a menu that closes itself (her request,
+   Procreate's way).** Opens from the top-bar button as now; a canvas
+   tap only closes it (joins `anyMenuOpen`); not reopened at launch
+   (`uiState.layersPanelOpen` retired). Decide when building: picking a
+   layer keeps it open (Procreate) unless she wants otherwise; a canvas
+   tap mid-rename keeps the typed name. Flipaclip's
+   collapse-to-thumbnails was offered and not chosen.
+5. **Step 6** export + native share sheet (format reasoning and the
+   WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features))
+   · **step 7** Cloudflare Worker + R2 (share links, Krita reference
+   import) · then the requested extras under Open items.
+
+**Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
+does she want to draw/erase on the photo itself (→ "Make into layer"),
+and does starting a photo at 50% bother her when it's a background
+(→ remember her last opacity, or a choice on import)?
+
+**Watch the activity log** (gear → Developer → Activity log). Get it
+if it shows `load-renewed`, `load-broken`, `save-refused`,
+`check-failed`, `hold-refused`, `recover` (lost canvas — each line
+also gives `canvases=`, `play=`, `onion=`) or `save-failed … timed out`
+(a layer encode that never finished; the save gives up after 15 s
+instead of locking the editor).
 
 **Open items**
+- **Parked from step 4, unless she asks:** frame holds (a drawing
+  lasting several beats, Rough Animator — later an optional
+  `frame.hold`, missing = 1, read only by `frameAtBeat`); showing the
+  cached frame instantly on a frame switch, a scrubber, ping-pong loop,
+  a play range, a clean fullscreen preview, a frame counter, zooming
+  while playing.
+- **Parked from step 5, unless she asks** (Flipaclip has them): more
+  than two sound rows, slicing, looping past the end, a sound library,
+  scrubbing sound while stepping frames. (Volume balance became Next
+  item 2.)
+- **Onion skin default (40%)** — she's happy for now; if she keeps
+  adjusting it, revisit the default.
+- **Color picker layout** is a first try — adjust if she wants it
+  different.
 - **Save the frame cache to IndexedDB?** Not yet. **Trigger:** she
   notices the wait when opening a project (every open rebuilds it —
   ~6–10 s for 48 frames). Saving it would make opens instant but costs
