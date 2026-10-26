@@ -26,6 +26,10 @@ import {
   clipOfKind,
   withClip,
   recordedClip,
+  takeGain,
+  clipGain,
+  MAX_TAKE_GAIN,
+  TAKE_TARGET_PEAK,
 } from '../../js/audio/clip.js';
 
 const good = { id: 'c1', blobRef: 'a1', trimStart: 0, trimEnd: 4, offset: 0 };
@@ -244,4 +248,28 @@ test('slipClip: an end at the file\'s end stays there', () => {
   const whole = { ...clip, trimStart: 30, trimEnd: duration };
   assert.deepEqual(slipClip(whole, -20, { duration, minLength }), { ...whole, trimStart: 10 });
   near(slipClip(whole, 100, { duration, minLength }).trimStart, duration - minLength);
+});
+
+test('takeGain lifts a quiet take to the target, capped, never down', () => {
+  assert.equal(takeGain(TAKE_TARGET_PEAK / 2), 2);
+  assert.equal(takeGain(0.001), MAX_TAKE_GAIN);
+  assert.equal(takeGain(0.95), 1);
+  assert.equal(takeGain(0), 1);
+  assert.equal(takeGain(NaN), 1);
+});
+
+test('a recorded clip keeps its gain; 1 is left out; sanitize keeps a good one', () => {
+  const clip = recordedClip({ id: 'r', blobRef: 'b', duration: 5, leadIn: 0, offset: 0, micDelay: 0, gain: 3.5 });
+  assert.equal(clip.gain, 3.5);
+  assert.equal('gain' in recordedClip({ id: 'r', blobRef: 'b', duration: 5, leadIn: 0, offset: 0, micDelay: 0 }), false);
+  assert.equal(sanitizeAudioClips([{ ...good, kind: 'voice', gain: 3.5 }])[0].gain, 3.5);
+  assert.equal('gain' in sanitizeAudioClips([{ ...good, gain: 'x' }])[0], false);
+  assert.equal('gain' in sanitizeAudioClips([{ ...good, gain: 99 }])[0], false);
+  assert.equal(clipGain({}), 1);
+  assert.equal(clipGain(clip), 3.5);
+});
+
+test('sameClips notices a gain change', () => {
+  assert.equal(sameClips([{ ...good, gain: 2 }], [{ ...good }]), false);
+  assert.equal(sameClips([{ ...good, gain: 1 }], [{ ...good }]), true);
 });

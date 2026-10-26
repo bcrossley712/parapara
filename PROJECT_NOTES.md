@@ -198,6 +198,19 @@ icon, manifest `name`/`short_name`, and repo copy.
     "Don't show again"; replacing an older voice asks; Delete on each
     row; the panel's height with one and two rows. If anything's off,
     get the log (`rec-*`, `recorded`, `mic-delay`).
+  - **After the first iPad round (2026-10-25):** takes recorded and
+    played back, but **her voice was very quiet**, and the Mic delay
+    test never found its click (the recording was too quiet for its
+    fixed threshold — the click was heard in the room). Changed, **not
+    yet on the iPad:** each take is leveled (a stored `gain`, up to 8×);
+    automatic gain is asked for (`rec-start` logs whether Safari
+    applied it: `agc=`); the test plays three clicks and finds them
+    above the room's noise; record mode's paused sound is asked to run
+    (`rec-start ctx=`). Check: is her voice loud enough now, and is
+    there hiss? Run the Mic delay test again and send the `mic-delay`
+    lines. Try a take **with music** and send its `rec-start` and
+    `sound-start`/`sound-silent` lines — does the music play while she
+    records?
   - **Out unless she asks** (Flipaclip has them): more than two rows,
     slicing, looping past the end, volume (song vs voice balance is the
     likely ask), a sound library, scrubbing sound while stepping
@@ -455,10 +468,11 @@ bitmap. Planned fields are marked. Extend additively.
       referenceHidden: false,                 // 3a, Hide images; missing = false
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
-      audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset } ]
+      audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset, gain } ]
                                               // 5a; seconds; offset = where it starts, missing = 0;
                                               // 5c: kind 'music' | 'voice' (missing = 'music'), at most
-                                              // one of each, Music first; missing = [] (sanitizeAudioClips)
+                                              // one of each, Music first; gain (a take's leveling,
+                                              // ≤ 8) missing = 1; missing = [] (sanitizeAudioClips)
     }
 
     frame = {

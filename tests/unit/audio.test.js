@@ -20,6 +20,12 @@ function fakeContext({ state = 'running', outputLatency = 0 } = {}) {
     stopped: 0,
     resumes: 0,
     closed: false,
+    gains: [],
+    createGain() {
+      const node = { gain: { value: 1 }, connect() {} };
+      ctx.gains.push(node);
+      return node;
+    },
     createBufferSource() {
       return {
         connect() {},
@@ -347,4 +353,27 @@ test('recording switches the audio session to play-and-record, and back', async 
   assert.equal(session.type, 'play-and-record');
   audio.setRecording(false);
   assert.equal(session.type, 'playback');
+});
+
+test('a clip\'s gain plays through a GainNode; no gain, no node', () => {
+  const { ctx, audio } = setup();
+  audio.setClips([
+    { clip: clip({ kind: 'music' }), buffer: ctx.createBuffer(1, 400, 100) },
+    { clip: clip({ id: 'v', kind: 'voice', gain: 4 }), buffer: ctx.createBuffer(1, 400, 100) },
+  ]);
+  audio.clock.start({ position: 0, fps: 10, frameCount: 40, loop: false });
+  assert.equal(ctx.started.length, 2);
+  assert.deepEqual(ctx.gains.map((g) => g.gain.value), [4]);
+});
+
+test('wake resumes a paused context outside a tap', async () => {
+  const { ctx, audio } = setup({ ctxOptions: { state: 'suspended' } });
+  audio.wake(); // no context yet: nothing
+  assert.equal(ctx.resumes, 0);
+  await audio.decode(new ArrayBuffer(8));
+  audio.wake();
+  assert.equal(ctx.resumes, 1);
+  ctx.state = 'running';
+  audio.wake();
+  assert.equal(ctx.resumes, 1);
 });

@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createRecorder, micError, MIC_CONSTRAINTS, START_EVENT_TIMEOUT_MS } from '../../js/audio/recorder.js';
+import { createRecorder, micError, micSettings, MIC_CONSTRAINTS, START_EVENT_TIMEOUT_MS } from '../../js/audio/recorder.js';
 
 function fakeStream() {
   const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
@@ -118,4 +118,15 @@ test('without MediaRecorder: not supported, and open refuses', async () => {
   const recorder = createRecorder({ mediaDevices: { getUserMedia: () => Promise.resolve(fakeStream()) }, MediaRecorderCtor: null });
   assert.equal(recorder.supported, false);
   await assert.rejects(recorder.open());
+});
+
+test('micSettings reports what the browser applied', () => {
+  const track = { getSettings: () => ({ echoCancellation: false, autoGainControl: true, sampleRate: 48000 }) };
+  assert.deepEqual(micSettings({ getAudioTracks: () => [track] }), { echo: false, agc: true, noise: '?', rate: 48000 });
+  assert.deepEqual(micSettings(null), { echo: '?', agc: '?', noise: '?', rate: '?' });
+});
+
+test('automatic gain is asked for, echo cancellation stays off', () => {
+  assert.equal(MIC_CONSTRAINTS.audio.autoGainControl, true);
+  assert.equal(MIC_CONSTRAINTS.audio.echoCancellation, false);
 });

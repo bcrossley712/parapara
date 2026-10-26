@@ -42,7 +42,17 @@ export const COUNTDOWN_SECONDS = 3;
 // no setting. 0 until measured.
 export const MIC_DELAY_SECONDS = 0;
 
+// Leveling a take (5c, after her first iPad takes came out very quiet:
+// with echo cancellation off, iOS doesn't boost the mic). Each recorded
+// clip gets a `gain` that lifts its loudest point to TAKE_TARGET_PEAK,
+// at most MAX_TAKE_GAIN times (so a near-silent take doesn't become
+// loud hiss), never below 1. Applied at playback (and step 6's export);
+// the file itself is never changed. Missing = 1 (imports, older clips).
+export const TAKE_TARGET_PEAK = 0.7;
+export const MAX_TAKE_GAIN = 8;
+
 const isTime = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+const isGain = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_TAKE_GAIN;
 
 // A saved `audioClips` made safe. Anything that isn't a usable clip is
 // dropped (a bad clip shouldn't fail the project); a missing or bad
@@ -66,6 +76,7 @@ export function sanitizeAudioClips(value) {
       trimStart: clip.trimStart,
       trimEnd: Math.min(clip.trimEnd, clip.trimStart + MAX_CLIP_SECONDS),
       offset: isTime(clip.offset) ? clip.offset : 0,
+      ...(isGain(clip.gain) && clip.gain !== 1 ? { gain: clip.gain } : {}),
     });
   }
   return CLIP_KINDS.filter((kind) => byKind.has(kind)).map((kind) => byKind.get(kind));
@@ -102,12 +113,26 @@ export function newClip({ id, blobRef, duration, kind = 'music' }) {
 // where the take began in the animation (the frame she started on).
 // null when nothing usable is left — shorter than `minLength` (one
 // frame).
-export function recordedClip({ id, blobRef, duration, leadIn, offset, minLength = 0, micDelay = MIC_DELAY_SECONDS }) {
+// `gain`: the take's leveling (takeGain); 1 is left out.
+export function recordedClip({ id, blobRef, duration, leadIn, offset, minLength = 0, micDelay = MIC_DELAY_SECONDS, gain = 1 }) {
   if (!(duration > 0)) return null;
   const trimStart = Math.min(Math.max(0, (leadIn || 0) + micDelay), duration);
   const trimEnd = Math.min(duration, trimStart + MAX_CLIP_SECONDS);
   if (!(trimEnd - trimStart > 0) || trimEnd - trimStart < minLength) return null;
-  return { id, kind: 'voice', blobRef, trimStart, trimEnd, offset: isTime(offset) ? offset : 0 };
+  const clip = { id, kind: 'voice', blobRef, trimStart, trimEnd, offset: isTime(offset) ? offset : 0 };
+  if (isGain(gain) && gain !== 1) clip.gain = gain;
+  return clip;
+}
+
+// The gain that levels a take whose loudest sample is `peak` (0–1).
+export function takeGain(peak) {
+  if (!(peak > 0)) return 1;
+  return Math.min(MAX_TAKE_GAIN, Math.max(1, TAKE_TARGET_PEAK / peak));
+}
+
+// A clip's gain (1 when it has none).
+export function clipGain(clip) {
+  return isGain(clip?.gain) ? clip.gain : 1;
 }
 
 // Whether a picked file may be imported, before reading it:
@@ -151,7 +176,8 @@ export function sameClips(a, b) {
   return x.every((c, i) => c.id === y[i].id && c.blobRef === y[i].blobRef
     && (c.kind ?? 'music') === (y[i].kind ?? 'music')
     && c.trimStart === y[i].trimStart && c.trimEnd === y[i].trimEnd
-    && (c.offset ?? 0) === (y[i].offset ?? 0));
+    && (c.offset ?? 0) === (y[i].offset ?? 0)
+    && clipGain(c) === clipGain(y[i]));
 }
 
 // --- editing in the sound panel (5b) ---

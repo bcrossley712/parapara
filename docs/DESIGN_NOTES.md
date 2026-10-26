@@ -752,7 +752,13 @@ device-only.
     like a phone call; the cost is that without headphones the speaker's
     music gets into the voice (and would play twice on export) — hence
     the headphones tip. If she never uses headphones, revisit (turning
-    it on is one constraint in `recorder.js`).
+    it on is one constraint in `recorder.js`). It also turns off iOS's
+    mic boost: her first takes were very quiet. Rather than give up the
+    natural sound, each take is **leveled** after recording — a gain
+    stored on the clip (capped at 8× so a near-silent take isn't all
+    hiss), applied at playback and export, the file untouched — and
+    automatic gain is asked for in case Safari allows it apart from echo
+    cancellation.
   - **The mic opens per hold**, not while the panel is open: a stream
     kept open shows iOS's mic dot and can switch its audio to call mode
     (quieter, maybe the earpiece).

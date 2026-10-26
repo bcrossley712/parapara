@@ -38,7 +38,7 @@
 // sound actually started: 'sound-start' { waitedMs }, 'sound-silent'
 // { reason, state }, and 'sound-unlock-failed' { error }.
 
-import { animationSeconds, clipPlacement } from './clip.js';
+import { animationSeconds, clipPlacement, clipGain } from './clip.js';
 
 // How far ahead the next loop pass is queued, in seconds.
 export const LOOKAHEAD = 1;
@@ -105,13 +105,21 @@ export function createAudio({
 
   // Plays buffer[from .. from+duration) at context time `when`. A start
   // already in the past is shifted (its beginning cut), never late.
-  function schedule(buffer, when, from, duration) {
+  // `gain` (a take's leveling, 1 = as recorded) goes through a GainNode.
+  function schedule(buffer, gain, when, from, duration) {
     const lateBy = Math.max(0, ctx.currentTime - when);
     const length = duration - lateBy;
     if (!(length > 0)) return;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    if (gain !== 1 && typeof ctx.createGain === 'function') {
+      const node = ctx.createGain();
+      node.gain.value = gain;
+      source.connect(node);
+      node.connect(ctx.destination);
+    } else {
+      source.connect(ctx.destination);
+    }
     source.start(when + lateBy, from + lateBy, length);
     run.sources.add(source);
     source.onended = () => run?.sources.delete(source);
@@ -125,8 +133,8 @@ export function createAudio({
     for (;;) {
       const passStart = run.startedAt + run.nextPass * length - run.position;
       if (passStart - ctx.currentTime > LOOKAHEAD) return;
-      for (const { buffer, placement } of parts) {
-        schedule(buffer, passStart + placement.at, placement.from, placement.to - placement.from);
+      for (const { buffer, gain, placement } of parts) {
+        schedule(buffer, gain, passStart + placement.at, placement.from, placement.to - placement.from);
       }
       run.nextPass += 1;
     }
@@ -167,7 +175,7 @@ export function createAudio({
       for (const { clip, buffer } of tracks) {
         if (skip.includes(clip.kind ?? 'music')) continue;
         const placement = clipPlacement(clip, length);
-        if (placement) parts.push({ buffer, placement });
+        if (placement) parts.push({ buffer, gain: clipGain(clip), placement });
       }
       run = { mode: 'wall', t0: wallNow(), sources: new Set() };
       // A suspended or interrupted context may be starting (the Play tap
@@ -190,11 +198,11 @@ export function createAudio({
         nextPass: 1,
       });
       // This pass: whatever's left of each clip from `position` on.
-      for (const { buffer, placement: { at, from, to } } of parts) {
+      for (const { buffer, gain, placement: { at, from, to } } of parts) {
         const into = position - at; // how far into the clip the run starts
         if (into < to - from) {
           const cut = Math.max(0, into);
-          schedule(buffer, run.startedAt + Math.max(0, -into), from + cut, to - from - cut);
+          schedule(buffer, gain, run.startedAt + Math.max(0, -into), from + cut, to - from - cut);
         }
       }
       pump();
@@ -251,6 +259,15 @@ export function createAudio({
           onEvent('sound-unlock-failed', { error: String(err?.message ?? err) });
         });
       }
+    },
+
+    // Asks a paused context to run again, outside a tap (5c: switching
+    // to 'play-and-record' as a take starts may pause it). iOS may
+    // refuse without a touch; that's logged, and the run's clock then
+    // goes silent after START_TIMEOUT_MS as usual.
+    wake() {
+      if (!ctx || !(ctx.state === 'suspended' || ctx.state === 'interrupted')) return;
+      ctx.resume()?.catch?.((err) => onEvent('sound-unlock-failed', { error: String(err?.message ?? err), during: 'wake' }));
     },
 
     // For the log: the context's state ('none' before one exists) and

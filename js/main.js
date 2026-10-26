@@ -104,9 +104,9 @@ import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
 import {
   sanitizeAudioClips, newClip, checkImportSize, sameClips, MAX_CLIP_SECONDS,
-  clipOfKind, withClip, recordedClip, timeAtFrame, minClipSeconds, COUNTDOWN_SECONDS,
+  clipOfKind, withClip, recordedClip, timeAtFrame, minClipSeconds, COUNTDOWN_SECONDS, takeGain,
 } from './audio/clip.js';
-import { createRecorder, micError } from './audio/recorder.js';
+import { createRecorder, micError, micSettings } from './audio/recorder.js';
 import { computePeaks } from './audio/peaks.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
@@ -2062,7 +2062,7 @@ function mountEditor(session, { canSave }) {
     const startIndex = index >= project.frames.length - 1 ? 0 : index;
     // Inside the press: iOS starts sound only from a touch.
     audio.unlock({ expectSound: Boolean(soundLoading) });
-    audio.setRecording(true);
+    setMicMode(true, 'hold');
     const current = {
       phase: 'countdown',
       startIndex,
@@ -2089,6 +2089,9 @@ function mountEditor(session, { canSave }) {
       micAllowed = true;
       if (take !== current || current.phase === 'finishing') {
         recorder.close(stream);
+        // Opened after the hold was let go: back to playback now that
+        // it's closed (unless another hold has started).
+        if (!take) setMicMode(false, 'late-close');
         return null;
       }
       current.stream = stream;
@@ -2098,6 +2101,7 @@ function mountEditor(session, { canSave }) {
       const why = micError(err);
       devLog.add('rec-mic-failed', { why, error: String(err?.name ?? err) });
       if (take === current) cancelTake('mic');
+      if (!take) setMicMode(false, 'mic-failed'); // no mic to wait for
       if (why === 'denied') {
         showNotice("Parapara! can't use the microphone. To record, allow the microphone for Parapara! in the iPad's Settings.");
       } else if (why === 'no-mic') {
@@ -2146,7 +2150,10 @@ function mountEditor(session, { canSave }) {
     }
     current.startedAt = started.startedAt;
     current.phase = 'recording';
-    devLog.add('rec-start', audio.debugState);
+    // Switching to record mode may have paused the sound (its music):
+    // ask it to run. The log says how it stood and what the mic got.
+    audio.wake();
+    devLog.add('rec-start', { ...audio.debugState, ...micSettings(stream) });
     renderSound();
     if (current.stopRequested) {
       endTake('released');
@@ -2204,11 +2211,15 @@ function mountEditor(session, { canSave }) {
     clearTimeout(current.timer);
     clearTimeout(current.capTimer);
     ui.countdown.hide();
-    if (current.stream) recorder.close(current.stream);
-    if (recorder.recording) recorder.stop();
-    audio.setRecording(false);
-    canvasApi.setPlaybackInput(playStatus.state !== 'idle');
     devLog.add('rec-cancel', { reason });
+    if (current.stream) recorder.close(current.stream);
+    const closing = recorder.recording ? recorder.stop() : null;
+    // Back to playback once the mic is closed. A stream still opening
+    // is closed (and switched back) when it arrives (startTake).
+    if (closing) closing.finally(() => { if (!take) setMicMode(false, 'cancel'); });
+    else if (current.stream || current.opened) setMicMode(false, 'cancel');
+    else if (!current.opening) setMicMode(false, 'cancel');
+    canvasApi.setPlaybackInput(playStatus.state !== 'idle');
     if (reason === 'released' || reason === 'interrupted') {
       showBanner('Keep holding until the countdown ends.');
     } else if (reason === 'prompt') {
@@ -2230,8 +2241,11 @@ function mountEditor(session, { canSave }) {
     current.phase = 'finishing';
     clearTimeout(current.capTimer);
     const stopped = recorder.stop();
-    audio.setRecording(false);
     devLog.add('rec-stop', { reason });
+    // Back to playback only once the recorder has stopped and closed the
+    // mic — switching earlier left the first loops in record mode's
+    // quieter output on her iPad.
+    stopped.finally(() => { if (!take || take === current) setMicMode(false, 'take-end'); });
     if (playback.active) stopPlayback();
     // After the current call stack, so a landing started by whoever
     // stopped playback is the one this waits for.
@@ -2275,14 +2289,19 @@ function mountEditor(session, { canSave }) {
         return;
       }
       const blobRef = newId();
-      const clip = recordedClip({
+      const placed = {
         id: newId(),
         blobRef,
         duration: decoded.duration,
         leadIn,
         offset: timeAtFrame(current.startIndex, current.fps),
         minLength: minClipSeconds(current.fps),
-      });
+      };
+      let clip = recordedClip(placed);
+      // Level the take (her first ones were very quiet): lift its
+      // loudest point in the part that plays (takeGain).
+      const peak = clip ? loudest(decoded, clip.trimStart, clip.trimEnd) : 0;
+      if (clip) clip = recordedClip({ ...placed, gain: takeGain(peak) });
       if (!clip) {
         showBanner('That was too short to keep. Hold the mic a little longer.');
         return;
@@ -2300,9 +2319,35 @@ function mountEditor(session, { canSave }) {
       devLog.add('recorded', {
         sound: short(blobRef), type: stored.type, bytes: stored.size,
         seconds: (clip.trimEnd - clip.trimStart).toFixed(2), leadIn: leadIn.toFixed(3),
+        peak: peak.toFixed(3), gain: (clip.gain ?? 1).toFixed(2),
       });
       showBanner('Voice recorded.');
     });
+  }
+
+  // The audio session's mode for the mic (see audio.setRecording), with
+  // a log line: iOS plays quieter in record mode, and the switch back
+  // seems to wait for the mic to close (her voice got louder after a
+  // loop or two), so when each switch happens matters.
+  function setMicMode(on, why) {
+    audio.setRecording(on);
+    devLog.add('rec-session', { mode: on ? 'record' : 'playback', why, ...audio.debugState });
+  }
+
+  // The loudest sample (any channel) between `from` and `to` seconds.
+  function loudest(buffer, from, to) {
+    const rate = buffer.sampleRate;
+    const start = Math.max(0, Math.floor(from * rate));
+    let max = 0;
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const data = buffer.getChannelData(ch);
+      const end = Math.min(data.length, Math.ceil(to * rate));
+      for (let i = start; i < end; i++) {
+        const v = data[i] < 0 ? -data[i] : data[i];
+        if (v > max) max = v;
+      }
+    }
+    return max;
   }
 
   // exclusive() skips a task while something else runs; a take must
@@ -2313,9 +2358,12 @@ function mountEditor(session, { canSave }) {
   }
 
   // DEV ONLY (5c): how late a sound she hears lands in a recording —
-  // the number for MIC_DELAY_SECONDS. Plays a click 0.6 s after the
-  // recorder starts and finds it in the file. Starts the sound inside
-  // the tap (gear menu), so it isn't wrapped in afterPlayback.
+  // the number for MIC_DELAY_SECONDS. Plays three clicks 0.4 s apart,
+  // starting 0.6 s after the recorder starts, and finds each in the file
+  // as a jump above the room's noise (measured in the first 0.3 s): the
+  // mic records quietly, so no fixed level would do (her first runs
+  // missed a click at 0.04). Starts the sound inside the tap (gear
+  // menu), so it isn't wrapped in afterPlayback.
   async function devMicDelayTest() {
     if (playback.active) stopPlayback();
     if (take || busy || !recorder.supported) return;
@@ -2324,54 +2372,89 @@ function mountEditor(session, { canSave }) {
       showNotice('Mic delay test: no Web Audio here.');
       return;
     }
-    audio.setRecording(true);
+    const CLICKS = [0.6, 1.0, 1.4];
+    setMicMode(true, 'mic-test');
     ctx.resume?.()?.catch?.(() => {});
     let stream = null;
     try {
       stream = await recorder.open();
+      const mic = micSettings(stream);
       const { startedAt } = await recorder.start(stream);
       stream = null;
+      // Record mode may have paused the sound: wait (briefly) for it.
+      audio.wake();
+      const waitFrom = performance.now();
+      while (ctx.state !== 'running' && performance.now() - waitFrom < 1500) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const ctxState = ctx.state;
       const rate = ctx.sampleRate;
-      const click = ctx.createBuffer(1, Math.round(rate * 0.02), rate);
+      const click = ctx.createBuffer(1, Math.round(rate * 0.03), rate);
       const data = click.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.sin((2 * Math.PI * 1000 * i) / rate) * 0.9;
-      const source = ctx.createBufferSource();
-      source.buffer = click;
-      source.connect(ctx.destination);
-      const when = ctx.currentTime + 0.6;
-      source.start(when);
-      // When the click reaches the speaker, on the page's clock.
-      const stamp = ctx.getOutputTimestamp?.();
-      const heardAt = stamp && stamp.performanceTime > 0
-        ? stamp.performanceTime + (when - stamp.contextTime) * 1000
-        : performance.now() + (when - ctx.currentTime + (ctx.outputLatency || ctx.baseLatency || 0)) * 1000;
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      for (let i = 0; i < data.length; i++) data[i] = Math.sin((2 * Math.PI * 1000 * i) / rate) > 0 ? 0.9 : -0.9;
+      // Each click's time on the page's clock, from when it's scheduled
+      // (+ the output delay, if Safari reports one).
+      const now = performance.now();
+      const base = ctx.currentTime;
+      const out = ctx.outputLatency || ctx.baseLatency || 0;
+      const sinceStart = (now - startedAt) / 1000;
+      const heard = [];
+      for (const at of CLICKS) {
+        const when = base + Math.max(0, at - sinceStart);
+        const source = ctx.createBufferSource();
+        source.buffer = click;
+        source.connect(ctx.destination);
+        source.start(when);
+        heard.push(now + (when - base + out) * 1000);
+      }
+      await new Promise((resolve) => setTimeout(resolve, (CLICKS.at(-1) + 0.8) * 1000));
       const blob = await recorder.stop();
       if (!blob) throw new Error('nothing was recorded');
       const decoded = await audio.decode(await blob.arrayBuffer());
       const samples = decoded.getChannelData(0);
-      let max = 0;
-      for (let i = 0; i < samples.length; i++) max = Math.max(max, Math.abs(samples[i]));
-      if (max < 0.02) {
-        showNotice("Mic delay test: the click wasn't heard. Turn the volume up, take off headphones, and try again.");
-        devLog.add('mic-delay', { result: 'not-heard', max: max.toFixed(3) });
+      const fileRate = decoded.sampleRate;
+      // Noise: the loudest of the first 0.3 s (before any click).
+      let noise = 0;
+      for (let i = 0; i < Math.min(samples.length, fileRate * 0.3); i++) noise = Math.max(noise, Math.abs(samples[i]));
+      const threshold = Math.max(noise * 3, 0.004);
+      // Each click: the first sample above the threshold, searching in
+      // order from just past the previous find (the delay is unknown,
+      // so there's no window to look in).
+      const results = [];
+      let from = Math.floor(fileRate * 0.3);
+      for (let k = 0; k < CLICKS.length; k++) {
+        let i = from;
+        while (i < samples.length && Math.abs(samples[i]) < threshold) i++;
+        if (i >= samples.length) break;
+        let level = 0;
+        for (let j = i; j < Math.min(samples.length, i + fileRate * 0.03); j++) level = Math.max(level, Math.abs(samples[j]));
+        const found = i / fileRate;
+        const expected = (heard[k] - startedAt) / 1000;
+        results.push({ ms: Math.round((found - expected) * 1000), found, level });
+        from = i + Math.floor(fileRate * 0.15); // past this click
+      }
+      const detail = {
+        ctx: ctxState,
+        out: Math.round(out * 1000),
+        noise: noise.toFixed(4),
+        ...mic,
+        clicks: results.map((r) => `${r.ms}ms@${r.found.toFixed(3)}/${r.level.toFixed(3)}`).join(' ') || 'none',
+        type: blob.type,
+      };
+      devLog.add('mic-delay', detail);
+      if (results.length < CLICKS.length) {
+        showNotice(`Mic delay test: heard ${results.length} of ${CLICKS.length} clicks (sound was ${ctxState}). Volume up, no headphones, quiet room, and try again.`);
         return;
       }
-      const threshold = Math.max(0.05, max * 0.5);
-      let onset = 0;
-      while (onset < samples.length && Math.abs(samples[onset]) < threshold) onset++;
-      const found = onset / decoded.sampleRate;
-      const expected = (heardAt - startedAt) / 1000;
-      const delayMs = Math.round((found - expected) * 1000);
-      devLog.add('mic-delay', { ms: delayMs, found: found.toFixed(3), expected: expected.toFixed(3), max: max.toFixed(2), type: blob.type });
-      showNotice(`Mic delay: ${delayMs} ms. Run it a few times; the numbers are in the activity log.`);
+      const spread = Math.max(...results.map((r) => r.ms)) - Math.min(...results.map((r) => r.ms));
+      showNotice(`Mic delay: ${results.map((r) => r.ms).join(', ')} ms${spread > 40 ? ' (uneven — run it again)' : ''}. The details are in the activity log.`);
     } catch (err) {
       if (stream) recorder.close(stream);
       if (recorder.recording) recorder.stop();
       devLog.add('mic-delay', { result: 'failed', error: String(err?.name ?? err?.message ?? err) });
       showNotice(`Mic delay test failed: ${err?.message ?? err}`);
     } finally {
-      audio.setRecording(false);
+      setMicMode(false, 'mic-test');
     }
   }
 

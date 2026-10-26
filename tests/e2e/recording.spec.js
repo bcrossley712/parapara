@@ -152,6 +152,11 @@ test('a take records from her frame, without the lead-in, and is one undo step',
   expect(voice.offset).toBeCloseTo(2 / 12, 3);
   expect(voice.trimStart).toBeGreaterThan(0); // the recorder ran before the first frame
   expect(voice.trimEnd - voice.trimStart).toBeGreaterThan(0.3);
+  // Leveled: a gain above 1 (capped at 8), or none if it's loud already.
+  if ('gain' in voice) {
+    expect(voice.gain).toBeGreaterThan(1);
+    expect(voice.gain).toBeLessThanOrEqual(8);
+  }
   const blobs = await readDb(page, 'blobs');
   const file = blobs.find((b) => b.id === voice.blobRef);
   expect(file.type).toMatch(/^audio\//);

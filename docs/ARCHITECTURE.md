@@ -478,7 +478,7 @@ The photo picker (Photos vs Files, HEIC arriving as JPEG), memory with large pho
 **Files:** `js/audio/clip.js` (pure clip rules, import caps, move/trim/slip,
 the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
 (AudioContext, decode, the audio clock, the audio session),
-`audio/recorder.js` (the mic and MediaRecorder, 5c),
+`audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
 `ui/sound-panel.js` (Sound button + panel, UI only), `ui/countdown.js`
 (the countdown before recording); the hold and the take in `main.js`.
 
@@ -561,13 +561,25 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
       the first frame shown, both on `performance.now()`) +
       `MIC_DELAY_SECONDS`; shorter than a frame → not kept (banner).
       The mic closes after every take.
+    - **Leveling:** with echo cancellation off, iOS doesn't boost the
+      mic, and her first takes were very quiet. Automatic gain is asked
+      for (Safari may ignore it; `rec-start` logs what it applied), and
+      each take gets a **`gain`** (`takeGain`: its loudest point lifted
+      to 0.7, at most 8×, never below 1) stored on the clip — missing =
+      1. Playback applies it through a GainNode, the waveform is drawn
+      with it, and step 6's export must apply it too. The file is never
+      changed.
+    - **Record mode may pause the sound:** as a take starts the engine
+      is asked to run again (`audio.wake()`); `rec-start` logs its
+      state, and the take's music logs `sound-start` / `sound-silent`.
     - **First hold:** iOS's mic prompt takes the touch; once she allows
       it, a banner says to hold again. Refused → a notice pointing to
       Settings.
     - **Mic delay:** measured with the dev "Mic delay test" (gear →
-      Developer: plays a click on the speaker, records it, compares when
-      it was heard with where it landed) and set once in
-      `MIC_DELAY_SECONDS`; 0 until measured.
+      Developer: three clicks on the speaker, 0.4 s apart, each found in
+      the recording as a jump above the room's noise and compared with
+      when it was heard) and set once in `MIC_DELAY_SECONDS`; 0 until
+      measured.
 
 ### Don't break
 
@@ -585,6 +597,10 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
   Play, the step buttons, a canvas tap and hiding the app call.
 - **`exclusive()` drops a task while another runs** — a finished take
   must not be dropped, so it waits its turn (`exclusiveTask`).
+- **Back to playback mode only after the mic has closed**
+  (`setMicMode(false)` once the recorder's stop resolves) — switching
+  earlier left the first loops after a take in record mode's quieter
+  output on her iPad. Every switch is logged (`rec-session`).
 - **The countdown overlay never takes touches** (`pointer-events:
   none`) — it would steal the held mic's pointer.
 

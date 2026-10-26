@@ -10,7 +10,11 @@
 //     when the hold is let go early): a stream kept open shows iOS's mic
 //     dot and can switch its audio to call mode.
 //   - Echo cancellation is off, so her voice sounds natural. Recording
-//     over music needs headphones (main.js says so).
+//     over music needs headphones (main.js says so). Automatic gain is
+//     asked for (her first takes were very quiet without it); Safari
+//     may tie it to echo cancellation and ignore it — micSettings()
+//     says what was applied, for the log. Takes are leveled afterwards
+//     either way (clip.js takeGain).
 //   - The file is MediaRecorder's default (AAC in MP4 on her iPad),
 //     never re-encoded. `start` resolves with when recording began
 //     (MediaRecorder's start event, on `now`'s clock), which main.js
@@ -18,8 +22,22 @@
 
 // What getUserMedia is asked for.
 export const MIC_CONSTRAINTS = Object.freeze({
-  audio: { echoCancellation: false },
+  audio: { echoCancellation: false, autoGainControl: true },
 });
+
+// What the browser actually applied to a stream from open(), for the
+// log: { echo, agc, noise, rate } (missing ones are '?').
+export function micSettings(stream) {
+  const track = stream?.getAudioTracks?.()[0] ?? stream?.getTracks?.()[0];
+  const settings = track?.getSettings?.() ?? {};
+  const show = (v) => (typeof v === 'boolean' || typeof v === 'number' ? v : '?');
+  return {
+    echo: show(settings.echoCancellation),
+    agc: show(settings.autoGainControl),
+    noise: show(settings.noiseSuppression),
+    rate: show(settings.sampleRate),
+  };
+}
 
 // If MediaRecorder never fires `start`, carry on after this long.
 export const START_EVENT_TIMEOUT_MS = 1000;

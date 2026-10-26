@@ -50,6 +50,7 @@ import {
   trimClipStart,
   trimClipEnd,
   slipClip,
+  clipGain,
 } from '../audio/clip.js';
 import { peakBetween } from '../audio/peaks.js';
 
@@ -332,11 +333,12 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
     const perPx = 1 / pxPerSecond();
     const mid = h / 2;
     const { peaks } = rowState(kind);
+    const gain = clipGain(clip); // a leveled take draws as loud as it plays
     ctx.fillStyle = c[kind];
     for (let x = Math.floor(x0); x < x1; x++) {
       const t = (x + geo.scrollLeft) * perPx; // animation time
       const fileT = clip.trimStart + (t - clip.offset);
-      const peak = peakBetween(peaks, fileT, fileT + perPx);
+      const peak = Math.min(1, peakBetween(peaks, fileT, fileT + perPx) * gain);
       const half = Math.max(0.5, peak * (mid - 4));
       ctx.fillRect(x, mid - half, 1, half * 2);
     }
