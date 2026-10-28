@@ -1,8 +1,8 @@
 // End-to-end tests for the Share sheet and video export (step 6a): Make
 // video → progress → Ready → Share (a download here: the test browser
 // has no share sheet), and the file really is the animation — read back
-// box by box and decoded frame by frame with the browser's own H.264
-// decoder. Plus Cancel, the app going to the background mid-export,
+// box by box (with a stand-in encoder, in every browser) and, where the
+// browser has H.264, decoded frame by frame with its own decoder. Plus Cancel, the app going to the background mid-export,
 // Share stopping playback, and a browser that can't make videos.
 // The muxer and the encode loop's rules are unit-tested
 // (tests/unit/mp4.test.js, export.test.js).
@@ -158,43 +158,91 @@ function decodeAndSample(page, video) {
   }, { video, marks: MARKS });
 }
 
-test('Make video → Ready → Share gives an MP4 of every frame, as played', async ({ page }) => {
-  await openApp(page);
-  await drawThreeFrames(page);
+// A stand-in VideoEncoder, so the sheet and the file's layout are
+// tested in every browser — CI's pinned Chromium has the WebCodecs API
+// but no H.264 encoder. Each "encoded" frame is 4 bytes, the frame's
+// number, so the file can be read box by box (not played). `held`:
+// flush waits for window.__letEncoderGo(), holding the sheet on
+// "Making video". The real encoder is tested below where it exists.
+async function useStandInEncoder(page, { held = false } = {}) {
+  await page.addInitScript((hold) => {
+    window.__releaseEncoder = hold
+      ? new Promise((resolve) => { window.__letEncoderGo = resolve; })
+      : Promise.resolve();
+    class StandInEncoder {
+      static async isConfigSupported(config) {
+        return { supported: config.codec.startsWith('avc1.'), config };
+      }
 
+      constructor({ output }) {
+        this.output = output;
+        this.state = 'unconfigured';
+        this.encodeQueueSize = 0;
+        this.count = 0;
+      }
+
+      configure() { this.state = 'configured'; }
+
+      encode(frame, { keyFrame }) {
+        const index = this.count++;
+        const timestamp = frame.timestamp;
+        const meta = index === 0 ? { decoderConfig: { description: new Uint8Array([1, 0x64, 0, 0x28, 0xff, 0xe1, 0, 0]) } } : {};
+        queueMicrotask(() => this.output({
+          timestamp,
+          type: keyFrame ? 'key' : 'delta',
+          byteLength: 4,
+          copyTo: (target) => new DataView(target.buffer, target.byteOffset).setUint32(0, index),
+        }, meta));
+      }
+
+      async flush() { await window.__releaseEncoder; }
+
+      close() { this.state = 'closed'; }
+    }
+    window.VideoEncoder = StandInEncoder;
+  }, held);
+}
+
+async function makeVideo(page) {
   await shareBtn(page).click();
   await expect(sheet(page)).toBeVisible();
-  await expect(sheet(page)).toContainText('3 frames');
   await page.getByRole('button', { name: 'Make video' }).click();
   // A failure here shows the sheet's error message in the report.
   await expect(sheet(page)).toHaveAttribute('data-phase', 'ready', { timeout: 30000 });
   await expect(sheet(page)).toContainText('Your video is ready');
+}
 
+async function shareAndDownload(page) {
   const downloading = page.waitForEvent('download');
   await sheet(page).getByRole('button', { name: 'Share' }).click();
   const download = await downloading;
-  expect(download.suggestedFilename()).toBe('Animation 1.mp4');
-  const bytes = new Uint8Array(await readFile(await download.path()));
+  return { name: download.suggestedFilename(), bytes: new Uint8Array(await readFile(await download.path())) };
+}
+
+test('Make video → Ready → Share gives an MP4 with every frame in order, at the project fps', async ({ page }) => {
+  await useStandInEncoder(page);
+  await openApp(page);
+  await drawThreeFrames(page);
+
+  await shareBtn(page).click();
+  await expect(sheet(page)).toContainText('3 frames');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet(page)).toHaveCount(0);
+  await makeVideo(page);
+  const { name, bytes } = await shareAndDownload(page);
+  expect(name).toBe('Animation 1.mp4');
 
   const video = readVideo(bytes);
   expect(video.order).toEqual(['ftyp', 'moov', 'mdat']); // index first: plays at once
   expect(video.codec).toBe('avc1');
   expect([video.width, video.height]).toEqual([1920, 1080]);
-  expect(video.samples).toHaveLength(3);
+  expect(video.description).toEqual([1, 0x64, 0, 0x28, 0xff, 0xe1, 0, 0]);
+  // The stand-in's bytes are each frame's number: all there, in order.
+  expect(video.samples).toEqual([[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 2]]);
   expect(video.timescale).toBe(12000); // 12 fps
   expect(video.sttsRuns).toBe(1);
   expect(video.sampleDuration).toBe(1000);
   expect(video.duration).toBe(3000);
-
-  // Frame n shows only mark n.
-  const darkest = await decodeAndSample(page, video);
-  expect(darkest).toHaveLength(3);
-  darkest.forEach((row, frame) => {
-    row.forEach((red, m) => {
-      if (m === frame) expect(red, `frame ${frame + 1} mark ${m + 1}`).toBeLessThan(100);
-      else expect(red, `frame ${frame + 1} mark ${m + 1}`).toBeGreaterThan(200);
-    });
-  });
 
   // Done closes it; the editor works again.
   await sheet(page).getByRole('button', { name: 'Done' }).click();
@@ -203,23 +251,8 @@ test('Make video → Ready → Share gives an MP4 of every frame, as played', as
   await expect(tile(page, 1)).toHaveClass(/is-current/);
 });
 
-// Holds the encoder's flush until the test lets go, so the sheet stays
-// on "Making video".
-async function holdEncoder(page) {
-  await page.addInitScript(() => {
-    let release;
-    window.__releaseEncoder = new Promise((resolve) => { release = resolve; });
-    window.__letEncoderGo = () => release();
-    const flush = VideoEncoder.prototype.flush;
-    VideoEncoder.prototype.flush = async function heldFlush() {
-      await window.__releaseEncoder;
-      return flush.call(this);
-    };
-  });
-}
-
 test('Cancel stops the video and closes the sheet; hiding the app stops it too', async ({ page }) => {
-  await holdEncoder(page);
+  await useStandInEncoder(page, { held: true });
   await openApp(page);
   await drawThreeFrames(page);
 
@@ -246,8 +279,41 @@ test('Cancel stops the video and closes the sheet; hiding the app stops it too',
   await expect(sheet(page)).toHaveAttribute('data-phase', 'error');
   await expect(sheet(page)).toContainText('went into the background');
   // Try again makes it.
+  await page.evaluate(() => { window.__releaseEncoder = Promise.resolve(); });
   await sheet(page).getByRole('button', { name: 'Try again' }).click();
   await expect(sheet(page)).toHaveAttribute('data-phase', 'ready', { timeout: 30000 });
+});
+
+// The real encoder, where the browser has one: decode the file frame by
+// frame and check each frame shows its own mark. Skipped, saying why,
+// where there's no H.264 encoder (CI's pinned Chromium); the sandbox's
+// browser has one, so it runs before every hand-off.
+test('with a real H.264 encoder, each video frame shows that frame’s drawing', async ({ page }) => {
+  await openApp(page);
+  const canEncode = await page.evaluate(async () => {
+    if (typeof VideoEncoder !== 'function' || typeof VideoDecoder !== 'function') return false;
+    const encode = await VideoEncoder.isConfigSupported({ codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 6e6, framerate: 12, avc: { format: 'avc' } })
+      .catch(() => ({ supported: false }));
+    const decode = await VideoDecoder.isConfigSupported({ codec: 'avc1.640028', codedWidth: 1920, codedHeight: 1080 })
+      .catch(() => ({ supported: false }));
+    return encode.supported && decode.supported;
+  });
+  test.skip(!canEncode, 'No H.264 encoder/decoder in this browser (expected in CI) — run in the sandbox');
+
+  await drawThreeFrames(page);
+  await makeVideo(page);
+  const { bytes } = await shareAndDownload(page);
+  const video = readVideo(bytes);
+  expect(video.samples).toHaveLength(3);
+
+  const darkest = await decodeAndSample(page, video);
+  expect(darkest).toHaveLength(3);
+  darkest.forEach((row, frame) => {
+    row.forEach((red, m) => {
+      if (m === frame) expect(red, `frame ${frame + 1} mark ${m + 1}`).toBeLessThan(100);
+      else expect(red, `frame ${frame + 1} mark ${m + 1}`).toBeGreaterThan(200);
+    });
+  });
 });
 
 test('Share stops playback first', async ({ page }) => {

@@ -734,12 +734,19 @@ encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
 
 ### Testing
 
-- `export.spec.js` reads the downloaded MP4 with its own box parser
-  and decodes each frame with Chromium's `VideoDecoder` to check the
-  marks. **Chromium has H.264 encode/decode but no AAC encoder**, so
-  6b's audio track can't be checked end to end in the test browser —
-  unit tests plus a file played on the iPad. To hold the sheet on
-  "Making video", the spec wraps `VideoEncoder.prototype.flush`.
+- **CI's pinned Chromium has the WebCodecs API but no H.264
+  encoder** (the first 6a push failed on it); the sandbox's newer
+  Chromium has one. So `export.spec.js` runs the sheet and the file's
+  layout with a **stand-in encoder** (`useStandInEncoder`: each frame
+  "encodes" to its number, so order and timing are checked, not
+  pictures; `held` keeps the sheet on "Making video") — in every
+  browser. **The real-encoder test** (decode each frame, check the
+  marks — the only one that catches the wrong picture in a frame)
+  **skips in CI, saying why; run it in the sandbox before every
+  hand-off that touches export.**
+- No AAC encoder in Chromium either, so 6b's audio track can't be
+  checked end to end in the test browser — unit tests plus a file
+  played on the iPad.
 - In a sandbox, ffprobe/ffmpeg are available for an extra look at a
   file (not in CI).
 
