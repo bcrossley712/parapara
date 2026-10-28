@@ -95,6 +95,15 @@ icon, manifest `name`/`short_name`, and repo copy.
   (`SOUND_FILE_TYPES` in `ui.js`), never `audio/*`** — iOS treats
   `audio/*` like video and shows Photo Library / Take Video / Choose
   File (seen on her iPad); extensions should open Files directly.
+- **Third-party code — one exception: gifenc** (step 6, MIT, no
+  dependencies) for GIF export: its 256-color reduction is the hard
+  part and better than a homemade one. **Vendored, never loaded from a
+  CDN**: its readable source files (not the minified build) are copied
+  into `js/export/vendor/gifenc/` with their license header and a
+  version comment (1.0.3), listed in `APP_SHELL`, and fixed by us if
+  needed — upstream changes never reach the app unless copied in by
+  hand. No dithering, so a photo in a GIF bands; accepted. Any other
+  library needs the same discussion first.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
@@ -105,65 +114,64 @@ icon, manifest `name`/`short_name`, and repo copy.
   saving, undo, layers, gallery, 2e's requests, reference image, frame
   cache, playback, onion skin, frame editing, a canvas tap closing an
   open menu, and sound (import, sound panel, hold-to-record over
-  music). How each works is in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
-  the buttons, not gestures. She knows songs from streaming apps can't
-  be imported (bought downloads can).
+  music), plus the last push's layers menu, mixer and Listen/Set start.
+  Headset checked with recording (no AirPods to test). How each works
+  is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
+  with the buttons, not gestures. She knows songs from streaming apps
+  can't be imported (bought downloads can).
 
-**Built, to check on the iPad (this push):**
-- **Erase-then-switch fix** (robot seed 115): an erase left the layer
-  in eraser mode, so the next frame load "erased" its drawing onto a
-  blank canvas. Real drawings tripped the guard (a needless fresh
-  canvas and the banner "…stopped showing, so it was loaded again" —
-  possibly some of what she's seen); a few small marks showed blank
-  and could be saved over. Check: erase as the last stroke, tap
-  another frame — no banner.
-- **Activity log:** Copy takes the last 60 lines; Copy all the rest.
-  Guard lines add `undo=` (MB), `cache=` (frames/MB) and `made=`
-  (offscreen canvases not freed, app-wide); `open` adds `made=`.
-- **Layers panel is a menu** (old Next item 4): any tap outside it
-  closes it (a canvas tap without drawing; a control tap still acts),
-  picking a layer keeps it open, not reopened at launch, a tap
-  mid-rename keeps the typed name.
-- **Mixer** (her request): MUSIC / VOICE labels are volume buttons —
-  Music 0–100%, Voice 0–200%, works while playing. New takes are
-  leveled by loudness (old takes unchanged) with a compressor; a
-  limiter on the mix. Check with headphones: is her voice now heard
-  over the music, any hiss or pumping? Numbers are first tries
-  (`TAKE_TARGET_LOUDNESS`, `TAKE_COMPRESSOR`, `LIMITER`); send the
-  `recorded` line (peak, loudness, gain) if it's off.
-- **Listen / Set start** beside the music bar: the song alone; Set
-  start's stop point becomes the start (no reaction delay — see if she
-  keeps correcting). A tap anywhere else stops it. Moving the song
-  when there's a Voice asks first, once per panel opening. Check:
-  sound starts on the first tap after opening the app.
+**Built, to check on the iPad (this push) — 6a, video export:**
+- **Share** (top bar, far right) → Make video → progress → Ready →
+  Share opens the iOS share sheet. Check: Save Video lands in Photos
+  and plays; sending in Messages plays for the friend; Files works.
+  The video has no sound yet (the sheet says so when there is some).
+- Check a 48-frame animation: how long it takes, that the editor is
+  fine after (no lost-canvas banner), and a 1–3 fps one plays right in
+  Photos. Switching apps mid-export stops it with a message.
+- If it fails, the sheet says so; send the activity log (`export`,
+  `exported` / `export-failed`, `share` lines — `exported` has the
+  time, size and codec).
+
+**Built, waiting on real use to confirm** (the app sees little use in
+development, so these may take a while):
+- **Erase-then-switch fix:** erase as the last stroke, tap another
+  frame — no "…loaded again" banner.
+- **Activity log fields:** guard lines carry `undo=`, `cache=`, `made=`
+  — useful only once a lost canvas recurs (see Open items).
 
 **Next, in this order** (each confirmed on the iPad before the next):
 
-1. **Lost canvas, still happening** — she sees "This frame's drawing
-   stopped showing…" now and then. Ask which ending she sees: "…loaded
-   again" alone is the load check (the erase bug above was one cause);
-   "…from your last save" is the save check. One log (2026-10-25,
-   before 5c): 16 s into a new one-layer project, just after closing
-   another — `copy-renewed`, then 0.8 s later `save-refused … had=1327
-   lost=976 canvases=1/4` → `recover`. Two canvases emptied within a
-   second points at iOS memory pressure. Leads: undo's ~150 MB budget,
-   what a closed project leaves behind, the frame cache's in-memory
-   PNGs — the new `undo=`/`cache=`/`made=` fields show which grows.
-   Get more logs and note what she did just before each.
-2. **5c checks still open on the iPad:** music while recording (record
-   mode may pause it — send the take's `rec-start`, `rec-session`,
-   `sound-start`/`sound-silent` lines), headphones vs not, AirPods,
-   the first-hold mic prompt, dragging handles with her stylus, a
-   3-minute song's memory/pause, whether the panel should reopen at
-   launch (it doesn't). **Mic delay** is set at -22 ms; if music during
-   a take ever sounds ~½ s late, look for `out=5` in the `rec-start` /
-   `mic-delay` lines and rerun the Mic delay test. iOS asks for the mic
-   after every relaunch — its choice, nothing to fix.
-3. **Step 6** export + native share sheet (format reasoning and the
-   WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features))
-   · **step 7** Cloudflare Worker + R2 (share links, Krita reference
+1. **Step 6** export + native share sheet (format reasoning and the
+   WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features)).
+   **Agreed scope (2026-10-27):**
+   - Formats as her apps offer: **MP4** (H.264 + AAC; WebCodecs + a
+     hand-written muxer), **GIF** (fixed ~640 wide — full size is too
+     big for Messages), **PNG sequence** (full size, one stored zip, so
+     frames don't flood Photos). No repeat option: length = frames ÷
+     fps, the song cut at the last frame.
+   - **Include images** choice in the export sheet, shown only when the
+     project has a photo, starting from Hide images (a tracing photo
+     usually stays out, a background goes in).
+   - **Share is a second tap** after encoding (iOS opens the share
+     sheet only from a tap); switching apps mid-export aborts it.
+   - Split: **6a** export sheet, progress, Share, MP4 video-only ·
+     **6b** sound in the MP4 (AAC workaround; only a file played in
+     Messages on her iPad proves it) · **6c** GIF + PNG zip · **6d**
+     Include images, remembered export choices, storage warning.
+   - **GIF encoder: vendored gifenc** (see Standing constraints).
+   - **6a built** (this push) — see ARCHITECTURE.md → Export and
+     sharing. 6b next once 6a works on the iPad.
+2. **Step 7** Cloudflare Worker + R2 (share links, Krita reference
    import) · then the requested extras under Open items.
+
+**5c checks still open, whenever convenient** (not blocking): music
+while recording (send the take's `rec-start`, `rec-session`,
+`sound-start`/`sound-silent` lines), the first-hold mic prompt,
+dragging handles with her stylus, a 3-minute song's memory/pause,
+whether the panel should reopen at launch (it doesn't). **Mic delay**
+is set at -22 ms; if music during a take ever sounds ~½ s late, look
+for `out=5` in the `rec-start` / `mic-delay` lines and rerun the Mic
+delay test. iOS asks for the mic after every relaunch — its choice.
 
 **Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
 does she want to draw/erase on the photo itself (→ "Make into layer"),
@@ -175,9 +183,29 @@ if it shows `load-renewed`, `load-broken`, `save-refused`,
 `check-failed`, `hold-refused`, `recover` (lost canvas — each line
 also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-failed … timed out`
 (a layer encode that never finished; the save gives up after 15 s
-instead of locking the editor).
+instead of locking the editor), or `export-failed` / `share-failed`.
 
 **Open items**
+- **Lost canvas — open bug, not recurring lately** (little use since
+  the last fixes). She saw "This frame's drawing stopped showing…" now
+  and then. Ask which ending she sees: "…loaded again" alone is the
+  load check (the erase bug was one cause); "…from your last save" is
+  the save check. One log (2026-10-25, before 5c): 16 s into a new
+  one-layer project, just after closing another — `copy-renewed`, then
+  0.8 s later `save-refused … had=1327 lost=976 canvases=1/4` →
+  `recover`. Two canvases emptied within a second points at iOS memory
+  pressure. Leads: undo's ~150 MB budget, what a closed project leaves
+  behind, the frame cache's in-memory PNGs — `undo=`/`cache=`/`made=`
+  show which grows. **Export (step 6) adds memory load — watch for it
+  after.** Get logs and note what she did just before each.
+- **Voice volume has little range upward** (seen after the mixer):
+  takes are leveled so their peaks reach 2× (`MAX_LEVELED_PEAK`), then
+  the take compressor (−14 dB, 3:1) and the limiter, so at 100% the
+  voice already sits at the ceiling and 200% is mostly squashed;
+  turning it down works. A fix likely means less leveling / more
+  headroom, which changes how takes sound — discuss before touching.
+- **Listen** — tabled: should it play from the set start or the
+  track's start, and does it need its own slider?
 - **Parked from step 4, unless she asks:** frame holds (a drawing
   lasting several beats, Rough Animator — later an optional
   `frame.hold`, missing = 1, read only by `frameAtBeat`); showing the
@@ -251,11 +279,6 @@ instead of locking the editor).
   that scrolls with the transport, smaller controls) as its own step.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
-- **Export format** (container/codec) — decide at step 6.
-- **Step 6: does the reference image go into the export?** A tracing
-  photo usually shouldn't, a background should. Today Hide images
-  decides both what she sees and what exports; consider an "include
-  images" choice when exporting.
 - **Storage warning** (~80% of quota) — deferred to step 6, when
   export gives it a remedy to point at.
 - **Onion skin extras — revisit in final touches**, once she knows
@@ -294,7 +317,8 @@ Applies to the whole app. How each area works is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — see [Areas](#areas).
 
 - **Stack:** vanilla JS, native ES modules, no framework, no bundler.
-  Nothing from npm ships; npm is test tooling only. CI tests, copies
+  Nothing from npm ships (vendored gifenc is the one exception — see
+  Standing constraints); npm is test tooling only. CI tests, copies
   app files, and stamps the service-worker version — never compiles.
   ([why](docs/DESIGN_NOTES.md#stack))
 - **Input:** Pointer Events only. Pressure/tilt deliberately unread, so
@@ -362,12 +386,13 @@ Don't break, Testing tips, iPad-only checks).
 | [Frames, playback and onion skin](docs/ARCHITECTURE.md#frames-playback-and-onion-skin) | `timeline/*`, `canvas/render-frame.js`, `frame-tiles.js`, `playback-frames.js`, `onion-view.js`, `thumbnail.js`, `ui/onion-badge.js` |
 | [Reference image](docs/ARCHITECTURE.md#reference-image) | `canvas/reference.js`, `transform.js`, `ui/image-menu.js`, `reference-bar.js` |
 | [Sound](docs/ARCHITECTURE.md#sound) | `audio/*`, `ui/sound-panel.js` |
+| [Export and sharing](docs/ARCHITECTURE.md#export-and-sharing) | `export/*`, `ui/export-sheet.js` |
 | [Colors and tool settings](docs/ARCHITECTURE.md#colors-and-tool-settings) | `ui/color-picker.js`, `storage/colors.js` |
 | [Editor UI, menus and screens](docs/ARCHITECTURE.md#editor-ui-menus-and-screens) | `ui/ui.js`, `gallery.js`, `confirm-dialog.js`, `icons.js`, `settings-panel.js`, `dev-log-view.js` |
 | [PWA, layout and updates](docs/ARCHITECTURE.md#pwa-layout-and-updates) | `index.html`, `manifest.json`, `style.css`, `sw.js`, `updater.js` |
 
 `main.js` is the glue between areas — read the section for whatever
-it's wiring. `export/` is a placeholder for step 6. Tests: `tests/unit/`,
+it's wiring. Tests: `tests/unit/`,
 `tests/e2e/` (see Testing). Test tooling: `package.json`,
 `playwright.config.js`.
 

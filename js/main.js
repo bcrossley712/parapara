@@ -99,6 +99,9 @@ import { createFrameCache, layerSignature } from './timeline/frame-cache.js';
 import { createPlayback } from './timeline/playback.js';
 import { sanitizeFps } from './timeline/clock.js';
 import { createPlaybackFrames } from './canvas/playback-frames.js';
+import {
+  exportVideo, evenSize, exportFileName, isAbort, isVideoExportSupported,
+} from './export/export.js';
 import { createOnionView } from './canvas/onion-view.js';
 import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
@@ -559,6 +562,19 @@ function mountEditor(session, { canSave }) {
       onLoop: () => setLoop(!project.loop),
       onFps: (fps) => setFps(fps),
     },
+    share: {
+      onOpen: () => openExport(),
+      onMake: () => makeExport(),
+      onCancel: () => {
+        stopExport('cancel');
+        ui.exportSheet.close();
+      },
+      onShare: () => shareExport(),
+      onClose: () => {
+        stopExport('closed');
+        exportFile = null;
+      },
+    },
     // A setting, like fps: doesn't stop playback.
     onion: {
       onToggle: () => setOnion({ on: !project.onionSkin.on }),
@@ -922,6 +938,178 @@ function mountEditor(session, { canSave }) {
       if (landing) landing.then(() => action(...args));
       else action(...args);
     };
+  }
+
+  // --- export (6a) ---
+  //
+  // The Share sheet (ui/export-sheet.js) makes an MP4 of every frame
+  // exactly as Play shows it — its own playback-frames instance over
+  // the frame cache, so paper, photo (unless Hide images) and layers
+  // can't drift from playback — then hands the file to the iOS share
+  // sheet on a second tap (iOS opens it only from a tap). The sheet
+  // covers the editor, so nothing changes while it's made; hiding the
+  // app cancels (hideEditor). A frame the cache couldn't flatten is
+  // flattened once more directly; if that fails the export stops.
+  let exporting = null;   // { controller, reason } while a video is being made
+  let exportFile = null;  // the finished File, until the sheet closes
+
+  function exportSummary() {
+    return {
+      phase: 'start',
+      supported: isVideoExportSupported(),
+      frames: project.frames.length,
+      seconds: project.frames.length / project.fps,
+      hasSound: project.audioClips.length > 0,
+    };
+  }
+
+  // The Share button: stops playback or a take first (like an edit),
+  // then opens the sheet.
+  function openExport() {
+    if (ui.exportSheet.isOpen) return;
+    afterPlayback(() => {
+      if (!canAct() || adjust || ui.exportSheet.isOpen) return;
+      finishListen('export');
+      devLog.add('export-open', { frames: project.frames.length, fps: project.fps });
+      ui.exportSheet.show(exportSummary());
+    })();
+  }
+
+  async function makeExport() {
+    if (exporting) return;
+    exportFile = null;
+    const run = { controller: new AbortController(), reason: null };
+    const { signal } = run.controller;
+    exporting = run;
+    const started = performance.now();
+    const frameIds = project.frames.slice();
+    const fps = project.fps;
+    const hidden = project.referenceHidden === true;
+    const size = evenSize(project.canvas);
+    devLog.add('export', { frames: frameIds.length, fps, size: `${size.width}x${size.height}` });
+    let canvas = null;
+    const retried = new Map(); // frameId -> PNG, for frames the cache couldn't flatten
+    const exportFrames = createPlaybackFrames({
+      canvasSize: project.canvas,
+      readLayers: (id) => retried.get(id) ?? frameCache.get(id)?.blob ?? null,
+      readPhoto: (ref) => readBitmap(ref),
+    });
+    try {
+      // Every frame flattened first, as Play waits for it.
+      if (frameCache.pendingCount > 0) {
+        ui.exportSheet.show({ phase: 'getting-ready' });
+        frameCache.rush();
+        while (frameCache.pendingCount > 0) {
+          if (signal.aborted) throw Object.assign(new Error('Export cancelled'), { name: 'AbortError' });
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      ui.exportSheet.show({ phase: 'making', done: 0, total: frameIds.length });
+      canvas = makeCanvas(size.width, size.height);
+      const result = await exportVideo({
+        frameCount: frameIds.length,
+        fps,
+        canvas,
+        signal,
+        drawFrame: async (index, ctx) => {
+          const id = frameIds[index];
+          const frame = session.frames.find((f) => f.id === id);
+          if (!frame) throw new Error(`No frame ${id}`);
+          if (!frameCache.get(id) && !retried.has(id)) {
+            const value = await flattenFrame(id);
+            freeCanvas(value.tile);
+            retried.set(id, value.blob);
+            devLog.add('export-reflatten', { frame: tag(id) });
+          }
+          const decoded = await exportFrames.decode(frame, { hidden });
+          try {
+            exportFrames.draw(ctx, decoded);
+          } finally {
+            exportFrames.release(decoded);
+          }
+        },
+        onProgress: (done, total) => {
+          if (exporting === run && ui.exportSheet.isOpen) ui.exportSheet.show({ phase: 'making', done, total });
+        },
+      });
+      exportFile = new File([result.blob], exportFileName(project.name, 'mp4'), { type: 'video/mp4' });
+      devLog.add('exported', { ms: Math.round(performance.now() - started), bytes: result.size, codec: result.codec });
+      ui.exportSheet.show({ phase: 'ready', size: result.size, seconds: frameIds.length / fps });
+    } catch (err) {
+      if (isAbort(err)) {
+        devLog.add('export-stopped', { why: run.reason ?? 'cancel' });
+        if (run.reason === 'hidden' && ui.exportSheet.isOpen) {
+          ui.exportSheet.show({
+            phase: 'error',
+            message: 'It stopped when Parapara! went into the background. Keep the app open while the video is made.',
+          });
+        }
+      } else {
+        devLog.add('export-failed', {
+          error: String(err?.message ?? err),
+          ...(err?.cause ? { cause: String(err.cause?.message ?? err.cause) } : {}),
+        });
+        console.warn('Parapara! export failed:', err);
+        if (ui.exportSheet.isOpen) ui.exportSheet.show({ phase: 'error', message: exportErrorMessage(err) });
+      }
+    } finally {
+      freeCanvas(canvas);
+      exportFrames.destroy();
+      retried.clear();
+      if (exporting === run) exporting = null;
+    }
+  }
+
+  function exportErrorMessage(err) {
+    if (err?.code === 'unsupported') return err.message;
+    if (err?.code === 'frame') return `${err.message} Try again — if it keeps happening, send the activity log.`;
+    return 'Something went wrong while making the video. Try again — if it keeps happening, send the activity log.';
+  }
+
+  function stopExport(reason) {
+    if (!exporting) return;
+    exporting.reason ??= reason;
+    exporting.controller.abort();
+  }
+
+  // The second tap: the iOS share sheet (Messages, Save Video, Files…).
+  // Must run synchronously in the tap. Where there's no share sheet (a
+  // computer's browser) the file downloads instead.
+  function shareExport() {
+    const file = exportFile;
+    if (!file) return;
+    const canShareFiles = typeof navigator.share === 'function'
+      && typeof navigator.canShare === 'function'
+      && navigator.canShare({ files: [file] });
+    devLog.add('share', { via: canShareFiles ? 'sheet' : 'download', bytes: file.size });
+    if (!canShareFiles) {
+      downloadFile(file);
+      return;
+    }
+    navigator.share({ files: [file] }).then(
+      () => devLog.add('shared'),
+      (err) => {
+        if (err?.name === 'AbortError') return; // she closed the share sheet
+        devLog.add('share-failed', { error: String(err?.message ?? err) });
+        if (exportFile === file && ui.exportSheet.phase === 'ready') {
+          ui.exportSheet.show({
+            phase: 'ready', size: file.size, seconds: project.frames.length / project.fps,
+            note: 'sharing didn’t open. Tap Share again.',
+          });
+        }
+      },
+    );
+  }
+
+  function downloadFile(file) {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   // Previous/next frame. While playing: stop and step from the frame
@@ -2915,6 +3103,7 @@ function mountEditor(session, { canSave }) {
   checkEditor = checkCanvases;
   // Hiding the app ends a recording (and keeps the take).
   hideEditor = () => {
+    stopExport('hidden');
     interruptTake();
     finishListen('hidden');
   };

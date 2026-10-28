@@ -788,6 +788,21 @@ device-only.
   (3) full project export/import, stretch goal. Export format was
   originally GIF/WebM stitching; ffmpeg.wasm was floated but is
   superseded unless reinstated. Container/codec decided at step 6.
+- **Export (step 6 scoping, 2026-10-27).** Formats as her apps offer:
+  MP4, GIF, PNG sequence. **MP4 is WebCodecs + our own muxer** rather
+  than MediaRecorder on a playing canvas (real time, drift) or a
+  vendored muxer (big for what we use) — and 6b needs control of the
+  AAC config for the WebKit bug anyway. **GIF uses vendored gifenc**:
+  the 256-color reduction is the hard part and a homemade one fringes
+  soft line edges; copied in, never from a CDN, so upstream changes
+  can't reach the app. GIF is fixed ~640 wide (full size runs tens of
+  MB, too big for Messages); PNGs go in one stored zip so frames don't
+  flood Photos. **Include images** is a choice in the sheet because one
+  switch for "what I see" and "what exports" makes a tracing photo easy
+  to leak into a video. **Two taps** (Make video, then Share) because
+  iOS opens the share sheet only from a tap. **No B-frames assumed** —
+  iOS's and Chromium's encoders don't reorder, so the muxer skips
+  `ctts`; a reorder is caught as an error.
 - **Krita reference import** (one-way PC → iPad) reuses the same
   Worker + R2 backend: `.kra` is a ZIP with a merged-preview image;
   import that as a reference layer, not a full layer-stack parser.

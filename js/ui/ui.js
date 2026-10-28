@@ -1,7 +1,7 @@
 // js/ui/ui.js
 //
-// Owns: the editor screen — top bar (Gallery, undo/redo, Image,
-// Layers), tool rail (draw/erase/fill/smudge/brush-size/color; later
+// Owns: the editor screen — top bar (Gallery, undo/redo, Sound, Image,
+// Layers, Share), tool rail (draw/erase/fill/smudge/brush-size/color; later
 // mic/pan), transport controls — plus toasts and banners, and DOM
 // glue between the other
 // modules. The gallery screen is gallery.js. Custom-styled dialogs only — no
@@ -24,6 +24,7 @@ import { createImageMenu } from './image-menu.js';
 import { createSoundPanel } from './sound-panel.js';
 import { createOnionBadge } from './onion-badge.js';
 import { createCountdown } from './countdown.js';
+import { createExportSheet } from './export-sheet.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
@@ -56,6 +57,9 @@ import { createCountdown } from './countdown.js';
 //   fires when she taps any other control while adjusting.
 // options.onion: the onion-skin badge's intents ({ onToggle,
 //   onChange(partial) }, see onion-badge.js).
+// options.share: the Share button and its sheet (step 6a; see
+//   export-sheet.js) — { onOpen (the button: main.js decides whether
+//   to open the sheet), onMake, onCancel, onShare, onClose }.
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
@@ -64,6 +68,7 @@ import { createCountdown } from './countdown.js';
 // (render(state)), onion (the badge: render(settings)), images
 // (the top bar's Image menu: render(state)), sound (the sound panel:
 // render(state), setPlayhead(index)), pickAudio(onFile),
+// exportSheet (the Share sheet: show(state), close(), isOpen),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
 // setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
 // setAdjustBusy(busy) (the adjust bar's controls off while a photo is
@@ -85,6 +90,7 @@ export function initUI(container, options = {}) {
     images: imagesCallbacks = {},
     sound: soundCallbacks = {},
     onion: onionCallbacks = {},
+    share: shareCallbacks = {},
     onGallery = null,
   } = options;
   container.innerHTML = '';
@@ -100,8 +106,7 @@ export function initUI(container, options = {}) {
 
   // Top bar: full width, and it extends up under the iPad status bar.
   // Keep it dark — the status bar's text is white (black-translucent).
-  // Undo/redo for now; Share and the rest of the planned top bar land
-  // with their steps.
+  // Share (6a) at the far right, where Flipaclip and iOS put it.
   // A tap on the canvas while a menu or popover is open only closes it
   // (Procreate's way) — no stroke, fill or pick; fingers joining it are
   // ignored too (canvas.js dismissTouch). Registered before the menus'
@@ -155,8 +160,12 @@ export function initUI(container, options = {}) {
   const imageMenu = createImageMenu({
     onImage: () => {}, onUseOnAllFrames: () => {}, onToggleImages: () => {}, ...imagesCallbacks,
   }, { container: shell, signal });
+  // Share (6a): the button opens the export sheet (export-sheet.js).
+  const shareBtn = createIconButton('Share', SHARE_ICON, () => shareCallbacks.onOpen?.());
+  shareBtn.classList.add('pp-share-btn');
+  const exportSheet = createExportSheet(shareCallbacks, { signal });
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
-  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn);
+  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn, shareBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';
@@ -548,6 +557,7 @@ export function initUI(container, options = {}) {
     images: imageMenu,
     sound: soundPanel,
     countdown,
+    exportSheet,
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),
@@ -638,6 +648,14 @@ function createToast(id, message, buttonLabel) {
 // Files instead of its photo/video menu. Covers mp3, AAC/m4a (Voice
 // Memos, iTunes, Amazon), WAV, AIFF and CAF (GarageBand).
 export const SOUND_FILE_TYPES = '.mp3,.m4a,.aac,.wav,.aif,.aiff,.caf';
+
+// Share: a tray with an arrow rising out of it (the iOS share shape).
+const SHARE_ICON = `
+<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
+  <path d="M8 10H6.5A1.5 1.5 0 0 0 5 11.5v8A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 17.5 10H16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 15V3.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M8 7 12 3l4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
 
 // Undo/redo arrows: a curved shaft and a head, mirrored for redo.
 const UNDO_ICON = `

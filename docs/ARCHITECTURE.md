@@ -11,7 +11,7 @@ decisions — UI specifics belong in code comments), **Don't break**
 (each rule is here because breaking it caused, or would cause, a real
 bug), and where useful **Testing** tips and **iPad-only checks**.
 
-Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying](#layers-undo-and-copying) · [Saving and storage](#saving-and-storage) · [Frames, playback and onion skin](#frames-playback-and-onion-skin) · [Reference image](#reference-image) · [Sound](#sound) · [Colors and tool settings](#colors-and-tool-settings) · [Editor UI, menus and screens](#editor-ui-menus-and-screens) · [PWA, layout and updates](#pwa-layout-and-updates)
+Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying](#layers-undo-and-copying) · [Saving and storage](#saving-and-storage) · [Frames, playback and onion skin](#frames-playback-and-onion-skin) · [Reference image](#reference-image) · [Sound](#sound) · [Export and sharing](#export-and-sharing) · [Colors and tool settings](#colors-and-tool-settings) · [Editor UI, menus and screens](#editor-ui-menus-and-screens) · [PWA, layout and updates](#pwa-layout-and-updates)
 
 ---
 
@@ -672,6 +672,84 @@ compressor and limiter by ear, hiss on a boosted quiet take; Listen and
 Set start starting from the tap (and with the screen's output delay,
 where Set start lands vs. what she heard); the volume slider with her
 stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding.
+
+---
+
+## Export and sharing
+
+**Files:** `js/export/mp4.js` (the MP4 muxer, pure), `export.js` (the
+encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
+(the Share sheet); the flow in `main.js` (`openExport`, `makeExport`,
+`shareExport`).
+
+### How it works
+
+- **6a — MP4, picture only** (scope agreed 2026-10-27, see
+  PROJECT_NOTES.md Next): Share (top bar, far right) → the sheet →
+  Make video → progress → Ready → **Share is a second tap** (iOS opens
+  its share sheet only from a tap — a departure from Flipaclip, agreed)
+  → `navigator.share({ files })`; with no share sheet (a computer's
+  browser, the tests) the file downloads. Dismissing the share sheet
+  isn't an error; a share that fails says so on the Ready screen.
+- **Pictures are exactly what Play shows:** a `playback-frames.js`
+  instance of its own over the frame cache (white paper, the photo
+  unless Hide images, the layers). It waits for the cache like Play
+  ("Getting ready"); a frame the cache couldn't flatten is flattened
+  once more directly (`export-reflatten`), and if that fails the export
+  stops naming the frame.
+- **Video:** full canvas size (rounded down to even — H.264), H.264
+  High → Main → Baseline (level 4.0, 5.1 above 1080p), `avc` format,
+  ≤ 6 Mbps, a keyframe every 2 s. Each drawing lasts exactly 1/fps
+  (timescale fps × 1000, 1000 ticks a sample). Length = frames ÷ fps;
+  no repeat option. File name = the project's name (`exportFileName`).
+- **MP4 layout:** ftyp, moov, mdat — index first so it plays at once;
+  one chunk per track. 6b adds the audio track through the same
+  `buildTrack` (only the sample entry and media header differ).
+- **While the sheet is open nothing else can be touched** (it's a
+  modal above everything), so the project can't change mid-export.
+  Opening it stops playback or a take first (`afterPlayback`). A tap on
+  the dim area closes it except while getting ready/making; Cancel
+  stops and closes; hiding the app stops it (`hideEditor`) with a
+  message and Try again. The finished file is dropped when the sheet
+  closes.
+- A project with sound says the video won't have it yet (until 6b).
+
+### Don't break
+
+- **`shareExport` stays synchronous in the Share tap** — no await
+  before `navigator.share`, or iOS refuses it (the picker rule).
+- **No more than `MAX_QUEUE` frames wait in the encoder**, and one
+  canvas is reused for every frame — memory must stay flat on the
+  iPad (the lost-canvas bug points at memory pressure).
+- **Frames come out of the encoder in the order they went in** — the
+  muxer writes no composition offsets (no `ctts`); a reordering
+  encoder is an error (`reordered`), never a scrambled file. Allowing
+  B-frames means adding `ctts` first.
+- **An encoder that stalls fails after `ENCODER_STALL_MS`** (15 s),
+  like `exportPNG` — never "Making video" forever.
+- **Export never composites frames itself** — it goes through
+  `playbackFrames.draw` (→ `drawFlattened`), so it can't drift from
+  playback (the one-compositing-path rule).
+- Step 6b must mix sound through `buildMix` (Sound → Don't break).
+
+### Testing
+
+- `export.spec.js` reads the downloaded MP4 with its own box parser
+  and decodes each frame with Chromium's `VideoDecoder` to check the
+  marks. **Chromium has H.264 encode/decode but no AAC encoder**, so
+  6b's audio track can't be checked end to end in the test browser —
+  unit tests plus a file played on the iPad. To hold the sheet on
+  "Making video", the spec wraps `VideoEncoder.prototype.flush`.
+- In a sandbox, ffprobe/ffmpeg are available for an extra look at a
+  file (not in CI).
+
+### iPad-only checks
+
+Safari's encoder taking the config (and giving `avc` output with a
+description), the share sheet offering Save Video / Messages / Files,
+the file playing in Photos and Messages (and at 1–3 fps), how long a
+48-frame export takes, memory during a long export, the app going to
+the background mid-export.
 
 ---
 

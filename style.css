@@ -1724,6 +1724,39 @@ html, body {
   cursor: default;
 }
 
+/* The Share sheet (js/ui/export-sheet.js, step 6a): a dialog with a
+   progress bar while the video is made. */
+.pp-export__progress {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--pp-ink-light);
+  overflow: hidden;
+}
+
+.pp-export__progress[hidden] {
+  display: none;
+}
+
+.pp-export__progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 4px;
+  background: var(--pp-accent);
+  transition: width 0.15s linear;
+}
+
+/* Getting ready: no count yet, so a stripe slides across. */
+.pp-export__progress.is-waiting .pp-export__progress-fill {
+  width: 30%;
+  animation: pp-export-wait 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes pp-export-wait {
+  from { transform: translateX(0); }
+  to { transform: translateX(233%); }
+}
+
 /* Developer playback tests (js/timeline/dev-stress.js, step 4a-i) —
    temporary, removed with the gear menu's Developer section. */
 .pp-dev-report {
