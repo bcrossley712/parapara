@@ -479,7 +479,8 @@ The photo picker (Photos vs Files, HEIC arriving as JPEG), memory with large pho
 **Files:** `js/audio/clip.js` (pure clip rules, import caps, move/trim/slip,
 the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
 (AudioContext, decode, the audio clock, the audio session),
-`audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
+`audio/offline-mix.js` (the export's mix, 6b — see Export and
+sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
 `ui/sound-panel.js` (Sound button + panel, UI only), `ui/countdown.js`
 (the countdown before recording); the hold and the take in `main.js`.
 
@@ -620,9 +621,10 @@ the recorded clip), `audio/peaks.js` (waveform peaks), `audio/audio.js`
 
 ### Don't break
 
-- **Step 6's export mixes through `buildMix`** on an
-  OfflineAudioContext — leveling, compressor, volumes and limiter —
-  or the file won't sound like playback.
+- **The export mixes through `buildMix`** on an OfflineAudioContext
+  (`offline-mix.js`, 6b) — leveling, compressor, volumes and limiter,
+  placed by `clipPlacement` — or the file won't sound like playback. A
+  change to the mix or placement changes both; keep it that way.
 - **Volume never stops playback**, and its commit is allowed while
   playing (`commitVolume` checks only busy) — unlike every other sound
   edit (`changeClip` refuses while playing).
@@ -678,9 +680,11 @@ stylus. Sound in sync by ear, Safari's output delay, which files the picker offe
 ## Export and sharing
 
 **Files:** `js/export/mp4.js` (the MP4 muxer, pure), `export.js` (the
-encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
-(the Share sheet); the flow in `main.js` (`openExport`, `makeExport`,
-`shareExport`).
+encode loop, pure with injected encoder; file names), `aac.js` (6b: the
+sound track's AAC encode and priming probe, injected codecs),
+`js/audio/offline-mix.js` (6b: the mix rendered offline — Sound area),
+`js/ui/export-sheet.js` (the Share sheet); the flow in `main.js`
+(`openExport`, `makeExport`, `makeSoundTrack`, `shareExport`).
 
 ### How it works
 
@@ -703,8 +707,38 @@ encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
   (timescale fps × 1000, 1000 ticks a sample). Length = frames ÷ fps;
   no repeat option. File name = the project's name (`exportFileName`).
 - **MP4 layout:** ftyp, moov, mdat — index first so it plays at once;
-  one chunk per track. 6b adds the audio track through the same
-  `buildTrack` (only the sample entry and media header differ).
+  one chunk per track (video's samples, then audio's). The audio track
+  goes through the same `buildTrack` (only the sample entry and media
+  header differ) plus an edit list.
+- **Sound (6b):** made before the pictures (quick, during "Getting
+  ready", which also waits for sound still decoding). The clips are
+  mixed on an OfflineAudioContext through `buildMix` with Play's
+  placement (`mixPlan` → `clipPlacement`), from frame 1, no loop, as
+  long as the video; row volumes set at once (`setVolume(…, {
+  immediate })`), not glided. Stereo, 48 kHz (44.1 if the encoder
+  refuses 48), AAC-LC 128 kbps, raw frames. Nothing that would play
+  (no sound, all of it after the last frame, files that failed to
+  decode) → no audio track, no note.
+- **The AAC config is ours** (`audioSpecificConfig`, 2 bytes), never
+  the encoder's — the WebKit bug (design notes, Planned features). The
+  encoder's own config is logged next to ours (`export-audio`
+  `config=` / `encoderConfig=`) so the bug shows on her iPad.
+- **Priming (agreed 2026-10-27: start the sound exactly as she set
+  it):** AAC encoders put silence first. `measurePriming` encodes a
+  short burst on this device, decodes it with our config and finds it
+  again (against the probe's own threshold crossing, so the sine's
+  rise cancels); the audio track's edit list (`edts/elst`) starts that
+  many samples in and ends with the video. Unmeasurable (no
+  AudioDecoder, an error, > 4096) → the edit skips nothing (logged
+  `priming=unmeasured`): sound may trail ~20–45 ms, never lead.
+- **Sound that can't be made** (no AudioEncoder, AAC refused, an
+  encode error) leaves a **silent video** with a note on the Ready
+  screen ("the sound couldn't be added…"), never a failed export
+  (`export-audio-failed` in the log). Cancel and hiding the app stop it
+  like the pictures.
+- **The limiter delays the mix ~6 ms** (a DynamicsCompressorNode's
+  lookahead) — in Play too, so the export matches what she hears; not
+  compensated in either.
 - **While the sheet is open nothing else can be touched** (it's a
   modal above everything), so the project can't change mid-export.
   Opening it stops playback or a take first (`afterPlayback`). A tap on
@@ -712,7 +746,8 @@ encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
   stops and closes; hiding the app stops it (`hideEditor`) with a
   message and Try again. The finished file is dropped when the sheet
   closes.
-- A project with sound says the video won't have it yet (until 6b).
+- The sheet's first screen says "with its sound" when the project has
+  clips.
 
 ### Don't break
 
@@ -730,7 +765,15 @@ encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
 - **Export never composites frames itself** — it goes through
   `playbackFrames.draw` (→ `drawFlattened`), so it can't drift from
   playback (the one-compositing-path rule).
-- Step 6b must mix sound through `buildMix` (Sound → Don't break).
+- **The sound mixes through `buildMix` with `clipPlacement`**
+  (`offline-mix.js`), never its own copy of the graph or placement
+  (Sound → Don't break).
+- **Never mux the encoder's AAC config** — always
+  `audioSpecificConfig` (the WebKit bug). Strip ADTS if it appears.
+- **Sound failing never fails the export** — a silent video with the
+  note. A cancel (AbortError) still stops everything.
+- **The edit list never skips a guessed priming** — only a measured
+  one; unmeasured means 0.
 
 ### Testing
 
@@ -744,11 +787,22 @@ encode loop, pure with injected encoder; file names), `js/ui/export-sheet.js`
   marks — the only one that catches the wrong picture in a frame)
   **skips in CI, saying why; run it in the sandbox before every
   hand-off that touches export.**
-- No AAC encoder in Chromium either, so 6b's audio track can't be
-  checked end to end in the test browser — unit tests plus a file
-  played on the iPad.
+- **No AAC encoder in any test Chromium** (CI's or the sandbox's; the
+  sandbox's has an AAC *decoder*). `export.spec.js` uses a **stand-in
+  AAC codec** (`useStandInAudio`): the encoder passes channel 0's floats
+  through after `priming` zeros and reports a junk config, the decoder
+  gives them back — so the probe, our config, the edit and where the
+  sound lands (checked to the millisecond) are tested in every browser.
+  Unit: `aac.test.js`, `offline-mix.test.js`, `mp4.test.js`.
 - In a sandbox, ffprobe/ffmpeg are available for an extra look at a
-  file (not in CI).
+  file (not in CI). **6b's real-file check** (done at the 6b hand-off;
+  redo after touching the muxer or aac.js): a throwaway spec whose
+  stand-in AudioEncoder hands back real ffmpeg AAC frames (ADTS) for
+  the probe and the mix, with the real H.264 encoder and Chromium's
+  real AAC decoder; then ffprobe sees both tracks at the video's length
+  and ffmpeg's decode (which honors the edit) puts the sound's onset
+  where it was placed (100.02 ms for 100 ms; priming measured 1025 for
+  ffmpeg's 1024).
 
 ### iPad-only checks
 
@@ -756,7 +810,11 @@ Safari's encoder taking the config (and giving `avc` output with a
 description), the share sheet offering Save Video / Messages / Files,
 the file playing in Photos and Messages (and at 1–3 fps), how long a
 48-frame export takes, memory during a long export, the app going to
-the background mid-export.
+the background mid-export. **6b:** Safari's AudioEncoder taking the AAC
+config, our config sidestepping WebKit's bug (sound actually heard in
+Photos and in Messages on a friend's phone — the only proof), the
+measured priming (`export-audio priming=`), sound in sync and as loud as
+in Play, with Music and Voice both.
 
 ---
 

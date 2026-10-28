@@ -2,7 +2,8 @@
 //
 // Owns: turning a project's frames into an MP4 (step 6a): one canvas,
 // one frame at a time, into WebCodecs' H.264 VideoEncoder, then mp4.js
-// lays the encoded frames out as a file. The share-sheet hand-off and
+// lays the encoded frames out as a file — with the sound track (6b),
+// encoded beforehand by aac.js, beside them. The share-sheet hand-off and
 // the UI live elsewhere (ui/export-sheet.js, main.js).
 //
 // Knows nothing about projects, storage or the DOM: the caller passes
@@ -84,11 +85,14 @@ export function isVideoExportSupported() {
 //   drawFrame(index, ctx): Promise — draws frame `index`.
 //   onProgress(done, total): after each frame is handed to the encoder.
 //   signal: AbortSignal — cancel; rejects with an AbortError.
+//   audio: the sound track, already encoded (6b, aac.js + the edit's
+//     priming and length — see muxMP4), or null for a silent video.
 export async function exportVideo({
   frameCount,
   fps,
   canvas,
   drawFrame,
+  audio = null,
   onProgress = () => {},
   signal = null,
   createEncoder = (init) => new globalThis.VideoEncoder(init),
@@ -169,6 +173,7 @@ export async function exportVideo({
     if (!description) throw new ExportError('config', 'The video encoder gave no H.264 configuration.');
     const { parts, size } = muxMP4({
       video: { width, height, timescale: fps * TICKS_PER_FRAME, description, samples },
+      audio,
     });
     const blob = new Blob(parts, { type: 'video/mp4' });
     return { blob, size, codec: config.codec };

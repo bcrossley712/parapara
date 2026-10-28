@@ -84,9 +84,8 @@ export function createExportSheet(callbacks = {}, { signal } = {}) {
           buttons.append(closeBtn('Close'));
           break;
         }
-        const lines = [`A video of the whole animation: ${plural(s.frames, 'frame')}, ${formatSeconds(s.seconds)}.`];
-        if (s.hasSound) lines.push('It won’t have its sound yet — that’s coming in an update.');
-        message.textContent = lines.join(' ');
+        const what = s.hasSound ? 'A video of the whole animation, with its sound' : 'A video of the whole animation';
+        message.textContent = `${what}: ${plural(s.frames, 'frame')}, ${formatSeconds(s.seconds)}.`;
         const make = button('Make video', true, () => onMake());
         buttons.append(closeBtn('Cancel'), make);
         make.focus();

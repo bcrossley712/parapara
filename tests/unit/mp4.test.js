@@ -20,7 +20,7 @@ function join(parts) {
   return out;
 }
 
-const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl', 'dinf']);
+const CONTAINERS = new Set(['moov', 'trak', 'edts', 'mdia', 'minf', 'stbl', 'dinf']);
 
 // [{ type, start, size, body (start..end of payload), children? }]
 function parse(bytes, start = 0, end = bytes.length) {
@@ -164,4 +164,118 @@ test('size and decoder config go into tkhd and the avc1 entry', () => {
 test('refuses no frames or a missing decoder config', () => {
   assert.throws(() => muxMP4({ video: video({ samples: [] }) }), /No video frames/);
   assert.throws(() => muxMP4({ video: video({ description: null }) }), /decoder configuration/);
+});
+
+// --- the audio track (6b) ---
+
+const ASC = Uint8Array.of(0x11, 0x90);
+
+function audio(overrides = {}) {
+  return {
+    sampleRate: 48000,
+    channels: 2,
+    description: ASC,
+    samples: Array.from({ length: 60 }, (_, i) => ({ data: new Uint8Array(10 + (i % 3)).fill(100 + (i % 50)), duration: 1024 })),
+    priming: 2112,
+    playSeconds: 1,
+    ...overrides,
+  };
+}
+
+function traks(bytes) {
+  return parse(bytes).find((b) => b.type === 'moov').children.filter((b) => b.type === 'trak');
+}
+
+// Finds a box by type anywhere under `start..end` by scanning (for
+// boxes inside sample entries, which parse() doesn't open).
+function scanFor(bytes, type, start, end) {
+  for (let at = start; at < end - 8; at++) {
+    if (String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === type) return at;
+  }
+  return -1;
+}
+
+test('audio: a second trak with mp4a, our AudioSpecificConfig in esds, sound handler', () => {
+  const { parts } = muxMP4({ video: video(), audio: audio() });
+  const bytes = join(parts);
+  const [, soundTrak] = traks(bytes);
+  assert.ok(soundTrak, 'two tracks');
+  const hdlr = find(soundTrak.children, 'mdia/hdlr');
+  assert.equal(String.fromCharCode(...bytes.subarray(hdlr.bodyStart + 8, hdlr.bodyStart + 12)), 'soun');
+  assert.ok(find(soundTrak.children, 'mdia/minf/smhd'), 'sound media header');
+  const stsd = find(soundTrak.children, 'mdia/minf/stbl/stsd');
+  const entry = stsd.bodyStart + 8;
+  assert.equal(String.fromCharCode(...bytes.subarray(entry + 4, entry + 8)), 'mp4a');
+  assert.equal(u16At(bytes, entry + 8 + 16), 2);                 // channels
+  assert.equal(u16At(bytes, entry + 8 + 18), 16);                // sample size
+  assert.equal(u32At(bytes, entry + 8 + 24), 48000 * 0x10000);   // rate 16.16
+  const esds = scanFor(bytes, 'esds', entry, stsd.start + stsd.size);
+  assert.ok(esds > 0, 'esds present');
+  const esdsEnd = esds + u32At(bytes, esds);
+  // DecoderSpecificInfo: tag 5, length 2, then the config.
+  const dsi = bytes.subarray(esds, esdsEnd).findIndex((b, i, a) => b === 5 && a[i + 1] === 2);
+  assert.deepEqual([...bytes.subarray(esds + dsi + 2, esds + dsi + 4)], [0x11, 0x90]);
+  // Object type 0x40 (MPEG-4 audio), stream type audio.
+  assert.ok(bytes.subarray(esds, esdsEnd).some((b, i, a) => b === 0x40 && a[i + 1] === 0x15));
+  // Every AAC frame is a sync sample: no stss.
+  assert.equal(find(soundTrak.children, 'mdia/minf/stbl/stss'), undefined);
+});
+
+test('audio: timescale = sample rate; the edit skips the priming and ends with the video', () => {
+  const { parts } = muxMP4({ video: video(), audio: audio({ priming: 2112, playSeconds: 1 }) });
+  const bytes = join(parts);
+  const [videoTrak, soundTrak] = traks(bytes);
+  const mdhd = find(soundTrak.children, 'mdia/mdhd');
+  assert.equal(u32At(bytes, mdhd.bodyStart + 12), 48000);
+  assert.equal(u32At(bytes, mdhd.bodyStart + 16), 60 * 1024);    // all that was encoded
+  const elst = find(soundTrak.children, 'edts/elst');
+  assert.ok(elst, 'edit list');
+  assert.equal(u32At(bytes, elst.bodyStart + 4), 1);             // one edit
+  assert.equal(u32At(bytes, elst.bodyStart + 8), 1000);          // 1 s, in movie ms
+  assert.equal(u32At(bytes, elst.bodyStart + 12), 2112);         // starts past the priming
+  assert.equal(u16At(bytes, elst.bodyStart + 16), 1);            // rate 1
+  const tkhd = find(soundTrak.children, 'tkhd');
+  assert.equal(u32At(bytes, tkhd.bodyStart + 20), 1000);         // presented length
+  assert.equal(u16At(bytes, tkhd.bodyStart + 36), 0x0100);       // volume 1
+  // The video has no edit; the movie is the longer of the two.
+  assert.equal(find(videoTrak.children, 'edts'), undefined);
+  const mvhd = find(parse(bytes), 'moov/mvhd');
+  assert.equal(u32At(bytes, mvhd.bodyStart + 16), 1000);
+  assert.equal(u32At(bytes, mvhd.bodyStart + 96), 3);            // next track id
+});
+
+test('audio: the edit never runs past what was encoded; no priming = from the start', () => {
+  const short = join(muxMP4({ video: video(), audio: audio({ priming: 1024, playSeconds: 5 }) }).parts);
+  const elst = find(traks(short)[1].children, 'edts/elst');
+  assert.equal(u32At(short, elst.bodyStart + 12), 1024);
+  assert.equal(u32At(short, elst.bodyStart + 8), Math.round(((60 * 1024 - 1024) / 48000) * 1000));
+  const none = join(muxMP4({ video: video(), audio: audio({ priming: 0 }) }).parts);
+  assert.equal(u32At(none, find(traks(none)[1].children, 'edts/elst').bodyStart + 12), 0);
+});
+
+test('audio samples sit in mdat after the video’s, where stco + stsz say', () => {
+  const v = video();
+  const a = audio();
+  const bytes = join(muxMP4({ video: v, audio: a }).parts);
+  const [videoTrak, soundTrak] = traks(bytes);
+  const videoStco = find(videoTrak.children, 'mdia/minf/stbl/stco');
+  const soundStco = find(soundTrak.children, 'mdia/minf/stbl/stco');
+  const soundStsz = find(soundTrak.children, 'mdia/minf/stbl/stsz');
+  const videoBytes = v.samples.reduce((sum, s) => sum + s.data.length, 0);
+  let at = u32At(bytes, soundStco.bodyStart + 8);
+  assert.equal(at, u32At(bytes, videoStco.bodyStart + 8) + videoBytes);
+  assert.equal(u32At(bytes, soundStsz.bodyStart + 8), a.samples.length);
+  a.samples.forEach((s, i) => {
+    const size = u32At(bytes, soundStsz.bodyStart + 12 + i * 4);
+    assert.equal(size, s.data.length);
+    assert.deepEqual(bytes.subarray(at, at + size), s.data);
+    at += size;
+  });
+  assert.equal(at, bytes.length);
+});
+
+test('audio without frames or a config is refused; none at all is a video-only file', () => {
+  assert.throws(() => muxMP4({ video: video(), audio: audio({ samples: [] }) }), /audio frames/);
+  assert.throws(() => muxMP4({ video: video(), audio: audio({ description: new Uint8Array() }) }), /AAC/);
+  assert.equal(traks(join(muxMP4({ video: video(), audio: null }).parts)).length, 1);
 });

@@ -73,8 +73,8 @@ function compressor(ctx, settings) {
   return node;
 }
 
-// The mix on `ctx` (see the header): { input(kind), setVolume(kind, v),
-// connect(source, clip) }. Without GainNodes (very old engines), sources
+// The mix on `ctx` (see the header): { input(kind), setVolume(kind, v,
+// { immediate }), connect(source, clip) }. Without GainNodes (very old engines), sources
 // go straight to the speaker.
 export function buildMix(ctx) {
   const canGain = typeof ctx.createGain === 'function';
@@ -92,11 +92,13 @@ export function buildMix(ctx) {
   const input = (kind) => buses.get(kind) ?? out;
   return {
     input,
-    setVolume(kind, value) {
+    // immediate: set at once, no glide (the export's offline render,
+    // which must start at the saved volume, not ramp to it).
+    setVolume(kind, value, { immediate = false } = {}) {
       const bus = buses.get(kind);
       if (!bus) return;
       const at = ctx.currentTime ?? 0;
-      if (typeof bus.gain.setTargetAtTime === 'function') {
+      if (!immediate && typeof bus.gain.setTargetAtTime === 'function') {
         bus.gain.cancelScheduledValues?.(at);
         bus.gain.setTargetAtTime(value, at, 0.02); // no click
       } else {

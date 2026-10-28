@@ -102,6 +102,10 @@ import { createPlaybackFrames } from './canvas/playback-frames.js';
 import {
   exportVideo, evenSize, exportFileName, isAbort, isVideoExportSupported,
 } from './export/export.js';
+import {
+  pickAudioConfig, encodeAAC, measurePriming, isAudioExportSupported, hex,
+} from './export/aac.js';
+import { renderMix } from './audio/offline-mix.js';
 import { createOnionView } from './canvas/onion-view.js';
 import { sanitizeOnion, ghostFrames } from './timeline/onion.js';
 import { createAudio } from './audio/audio.js';
@@ -994,16 +998,37 @@ function mountEditor(session, { canSave }) {
       readLayers: (id) => retried.get(id) ?? frameCache.get(id)?.blob ?? null,
       readPhoto: (ref) => readBitmap(ref),
     });
+    let audioTrack = null;
+    let audioResult = 'none'; // for the log: 'aac' | 'none' | 'failed'
+    let audioNote = null;
     try {
-      // Every frame flattened first, as Play waits for it.
-      if (frameCache.pendingCount > 0) {
+      // Every frame flattened and the sound decoded first, as Play waits
+      // for them.
+      if (frameCache.pendingCount > 0 || soundLoading) {
         ui.exportSheet.show({ phase: 'getting-ready' });
         frameCache.rush();
-        while (frameCache.pendingCount > 0) {
-          if (signal.aborted) throw Object.assign(new Error('Export cancelled'), { name: 'AbortError' });
+        while (frameCache.pendingCount > 0 || soundLoading) {
+          throwIfAborted(signal);
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
       }
+      // The sound track (6b), before the pictures: quick, and a failure
+      // leaves a silent video rather than no video.
+      const entries = project.audioClips.map((clip) => ({ clip, buffer: soundBuffers.get(clip.blobRef) ?? null }));
+      if (entries.some((e) => e.buffer)) {
+        ui.exportSheet.show({ phase: 'getting-ready' });
+        try {
+          audioTrack = await makeSoundTrack(entries, frameIds.length / fps, signal);
+          audioResult = audioTrack ? 'aac' : 'none';
+        } catch (err) {
+          if (isAbort(err)) throw err;
+          audioResult = 'failed';
+          audioNote = 'the sound couldn’t be added, so it’s silent. Send the activity log.';
+          devLog.add('export-audio-failed', { error: String(err?.message ?? err) });
+          console.warn('Parapara! the export’s sound failed:', err);
+        }
+      }
+      throwIfAborted(signal);
       ui.exportSheet.show({ phase: 'making', done: 0, total: frameIds.length });
       canvas = makeCanvas(size.width, size.height);
       const result = await exportVideo({
@@ -1011,6 +1036,7 @@ function mountEditor(session, { canSave }) {
         fps,
         canvas,
         signal,
+        audio: audioTrack,
         drawFrame: async (index, ctx) => {
           const id = frameIds[index];
           const frame = session.frames.find((f) => f.id === id);
@@ -1033,8 +1059,10 @@ function mountEditor(session, { canSave }) {
         },
       });
       exportFile = new File([result.blob], exportFileName(project.name, 'mp4'), { type: 'video/mp4' });
-      devLog.add('exported', { ms: Math.round(performance.now() - started), bytes: result.size, codec: result.codec });
-      ui.exportSheet.show({ phase: 'ready', size: result.size, seconds: frameIds.length / fps });
+      devLog.add('exported', {
+        ms: Math.round(performance.now() - started), bytes: result.size, codec: result.codec, audio: audioResult,
+      });
+      ui.exportSheet.show({ phase: 'ready', size: result.size, seconds: frameIds.length / fps, note: audioNote });
     } catch (err) {
       if (isAbort(err)) {
         devLog.add('export-stopped', { why: run.reason ?? 'cancel' });
@@ -1058,6 +1086,45 @@ function mountEditor(session, { canSave }) {
       retried.clear();
       if (exporting === run) exporting = null;
     }
+  }
+
+  // The export's sound (6b): the clips mixed like Play (offline-mix.js),
+  // the encoder's priming measured on this device, then AAC (aac.js).
+  // Resolves the track for muxMP4, or null when nothing would play.
+  async function makeSoundTrack(entries, seconds, signal) {
+    const started = performance.now();
+    if (!isAudioExportSupported()) throw new Error('No AudioEncoder on this device');
+    const config = await pickAudioConfig();
+    if (!config) throw new Error('This device can’t encode AAC');
+    throwIfAborted(signal);
+    const mixed = await renderMix({
+      entries, seconds, sampleRate: config.sampleRate, channels: config.numberOfChannels,
+    });
+    if (!mixed) return null;
+    throwIfAborted(signal);
+    const priming = await measurePriming({ config });
+    throwIfAborted(signal);
+    const encoded = await encodeAAC({ buffer: mixed, config, signal });
+    devLog.add('export-audio', {
+      ms: Math.round(performance.now() - started),
+      rate: config.sampleRate,
+      priming: priming ?? 'unmeasured',
+      blocks: encoded.samples.length,
+      config: hex(encoded.description),
+      encoderConfig: hex(encoded.encoderDescription) || 'none',
+    });
+    return {
+      sampleRate: config.sampleRate,
+      channels: config.numberOfChannels,
+      description: encoded.description,
+      samples: encoded.samples,
+      priming: priming ?? 0,
+      playSeconds: seconds,
+    };
+  }
+
+  function throwIfAborted(signal) {
+    if (signal.aborted) throw Object.assign(new Error('Export cancelled'), { name: 'AbortError' });
   }
 
   function exportErrorMessage(err) {

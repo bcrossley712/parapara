@@ -114,23 +114,32 @@ icon, manifest `name`/`short_name`, and repo copy.
   saving, undo, layers, gallery, 2e's requests, reference image, frame
   cache, playback, onion skin, frame editing, a canvas tap closing an
   open menu, and sound (import, sound panel, hold-to-record over
-  music), plus the last push's layers menu, mixer and Listen/Set start.
+  music), plus the last push's layers menu, mixer and Listen/Set start,
+  and **6a** (video export, picture only): Share opens the iOS share
+  sheet and Save Video saved a playable video to the iPad.
   Headset checked with recording (no AirPods to test). How each works
   is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
 
-**Built, to check on the iPad (this push) — 6a, video export:**
-- **Share** (top bar, far right) → Make video → progress → Ready →
-  Share opens the iOS share sheet. Check: Save Video lands in Photos
-  and plays; sending in Messages plays for the friend; Files works.
-  The video has no sound yet (the sheet says so when there is some).
-- Check a 48-frame animation: how long it takes, that the editor is
-  fine after (no lost-canvas banner), and a 1–3 fps one plays right in
-  Photos. Switching apps mid-export stops it with a message.
-- If it fails, the sheet says so; send the activity log (`export`,
-  `exported` / `export-failed`, `share` lines — `exported` has the
-  time, size and codec).
+**Built, to check on the iPad (this push) — 6b, sound in the video:**
+- A project with sound: the Share sheet says "with its sound". Make
+  video → Save Video → **the sound plays in Photos**, and **send it in
+  Messages — it plays with sound for the friend** (only a real file
+  proves WebKit's AAC bug is sidestepped).
+- Sound in sync with the drawings, Music and Voice both, as loud as in
+  Play. A song placed to start on a later frame starts there.
+- If the Ready screen says "the sound couldn't be added", or the
+  video is silent, send the activity log: `export-audio` (`priming=`,
+  `config=1190`, `encoderConfig=` — WebKit's own, for the bug) or
+  `export-audio-failed`, and `exported … audio=`.
+
+**6a checks still open, whenever convenient** (not blocking):
+sending in Messages plays for the friend; Files works; a 48-frame
+export's time and the editor fine after (no lost-canvas banner); a 1–3
+fps video plays right in Photos; switching apps mid-export stops it
+with a message. On a failure, send the activity log (`export`,
+`exported` / `export-failed`, `share` lines).
 
 **Built, waiting on real use to confirm** (the app sees little use in
 development, so these may take a while):
@@ -159,8 +168,13 @@ development, so these may take a while):
      Messages on her iPad proves it) · **6c** GIF + PNG zip · **6d**
      Include images, remembered export choices, storage warning.
    - **GIF encoder: vendored gifenc** (see Standing constraints).
-   - **6a built** (this push) — see ARCHITECTURE.md → Export and
-     sharing. 6b next once 6a works on the iPad.
+   - **6a done** (confirmed on the iPad). **6b built** (this push) —
+     see ARCHITECTURE.md → Export and sharing. Agreed in scoping: a
+     silent video with a note if sound fails; wait for sound still
+     loading; no include-sound switch (Flipaclip has none — add in 6d if
+     she asks); the edit list skips the encoder's priming, measured on
+     the device, so sound starts exactly where she set it. 6c next once
+     6b works on the iPad.
 2. **Step 7** Cloudflare Worker + R2 (share links, Krita reference
    import) · then the requested extras under Open items.
 
@@ -180,7 +194,7 @@ and does starting a photo at 50% bother her when it's a background
 
 **Watch the activity log** (gear → Developer → Activity log). Get it
 if it shows `load-renewed`, `load-broken`, `save-refused`,
-`check-failed`, `hold-refused`, `recover` (lost canvas — each line
+`check-failed`, `hold-refused`, `export-audio-failed`, `recover` (lost canvas — each line
 also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-failed … timed out`
 (a layer encode that never finished; the save gives up after 15 s
 instead of locking the editor), or `export-failed` / `share-failed`.

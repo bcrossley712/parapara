@@ -65,8 +65,10 @@ const APP_SHELL = [
   './js/audio/clip.js',
   './js/audio/recorder.js',
   './js/audio/peaks.js',
+  './js/audio/offline-mix.js',
   './js/export/export.js',
   './js/export/mp4.js',
+  './js/export/aac.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

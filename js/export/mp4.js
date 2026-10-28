@@ -13,9 +13,16 @@
 // are one chunk in mdat, tracks one after another — no interleaving;
 // short files don't need it.
 //
-// Tracks: video (H.264 'avc1') now; step 6b adds an audio track
-// ('mp4a') beside it — `buildTrack` is shared, only the sample entry
-// and the media header differ. 32-bit offsets (stco): fine below 4 GB.
+// Tracks: video (H.264 'avc1') and, when the animation has sound
+// (6b), audio (AAC 'mp4a' + 'esds') — `buildTrack` is shared, only the
+// sample entry and the media header differ. 32-bit offsets (stco):
+// fine below 4 GB.
+//
+// The audio track has an edit list (edts/elst, 6b): an AAC encoder
+// puts some silence ("priming") before the sound, so the edit starts
+// the track `priming` samples in — the sound starts with frame 1, as
+// she set it — and ends it with the video (the last block is padded).
+// Players skip the priming by the edit; Apple's honor it.
 
 const MOVIE_TIMESCALE = 1000; // mvhd/tkhd durations in ms
 
@@ -26,14 +33,35 @@ const MOVIE_TIMESCALE = 1000; // mvhd/tkhd durations in ms
 //                             //   (WebCodecs' decoderConfig.description)
 //   samples: [{ data: Uint8Array, duration, key }],  // in decode order
 // }
+// audio (optional, 6b): {
+//   sampleRate, channels,     // as encoded; sampleRate is the timescale
+//   description,              // Uint8Array: the AudioSpecificConfig
+//   samples: [{ data, duration }],  // AAC frames, duration in samples (1024)
+//   priming,                  // samples of encoder silence to skip (≥ 0)
+//   playSeconds,              // how long the sound should play (the video's length)
+// }
 // Returns { parts: Uint8Array[], size } — the file, in order, as parts
 // so the caller can make a Blob without copying every sample again.
-export function muxMP4({ video }) {
+export function muxMP4({ video, audio = null }) {
   if (!video || !video.samples?.length) throw new Error('No video frames to save');
   if (!(video.description instanceof Uint8Array) || video.description.length === 0) {
     throw new Error('Missing H.264 decoder configuration');
   }
   const tracks = [{ ...video, kind: 'video', id: 1 }];
+  if (audio) {
+    if (!audio.samples?.length) throw new Error('No audio frames to save');
+    if (!(audio.description instanceof Uint8Array) || audio.description.length === 0) {
+      throw new Error('Missing AAC decoder configuration');
+    }
+    tracks.push({
+      ...audio,
+      kind: 'audio',
+      id: 2,
+      timescale: audio.sampleRate,
+      samples: audio.samples.map((s) => ({ ...s, key: true })),
+      edit: audioEdit(audio),
+    });
+  }
 
   const ftyp = box('ftyp', [
     str4('isom'), u32(0x200),
@@ -64,8 +92,25 @@ export function muxMP4({ video }) {
 
 // --- moov ---
 
+// The audio track's edit: start `priming` samples in, play
+// `playSeconds` (never past the end of what was encoded).
+function audioEdit({ sampleRate, samples, priming = 0, playSeconds }) {
+  const total = samples.reduce((sum, s) => sum + s.duration, 0);
+  const start = Math.max(0, Math.min(Math.round(priming) || 0, total - 1));
+  const available = total - start;
+  const wanted = Number.isFinite(playSeconds) && playSeconds > 0
+    ? Math.round(playSeconds * sampleRate)
+    : available;
+  return { mediaTime: start, duration: Math.max(1, Math.min(wanted, available)) };
+}
+
+// The track's length as presented, in its own ticks: the edit's, if any.
+function presentedDuration(track) {
+  return track.edit ? track.edit.duration : trackDuration(track);
+}
+
 function buildMoov(tracks, chunkOffsets) {
-  const movieDuration = Math.max(...tracks.map((t) => toMovieTime(trackDuration(t), t.timescale)));
+  const movieDuration = Math.max(...tracks.map((t) => toMovieTime(presentedDuration(t), t.timescale)));
   const mvhd = fullBox('mvhd', 0, 0, [
     u32(0), u32(0),                // creation, modification time
     u32(MOVIE_TIMESCALE), u32(movieDuration),
@@ -82,10 +127,11 @@ function buildMoov(tracks, chunkOffsets) {
 function buildTrack(track, chunkOffset) {
   const video = track.kind === 'video';
   const duration = trackDuration(track);
+  const presented = toMovieTime(presentedDuration(track), track.timescale);
   const tkhd = fullBox('tkhd', 0, 0x3, [ // enabled | in movie
     u32(0), u32(0),
     u32(track.id), zeros(4),
-    u32(toMovieTime(duration, track.timescale)),
+    u32(presented),
     zeros(8),
     u16(0), u16(0),                // layer, alternate group
     u16(video ? 0 : 0x0100), zeros(2), // volume (audio only)
@@ -119,10 +165,18 @@ function buildTrack(track, chunkOffset) {
     fullBox('stsz', 0, 0, [u32(0), u32(track.samples.length), ...track.samples.map((s) => u32(s.data.length))]),
     fullBox('stco', 0, 0, [u32(1), u32(chunkOffset)]),
   ]);
-  return box('trak', [tkhd, box('mdia', [mdhd, hdlr, box('minf', [mediaHeader, dinf, stbl])])]);
+  // edts/elst: one edit — `presented` ms of the track, from mediaTime
+  // (in the track's ticks), at normal speed.
+  const edts = track.edit
+    ? [box('edts', [fullBox('elst', 0, 0, [
+      u32(1), u32(presented), u32(track.edit.mediaTime), u16(1), u16(0),
+    ])])]
+    : [];
+  return box('trak', [tkhd, ...edts, box('mdia', [mdhd, hdlr, box('minf', [mediaHeader, dinf, stbl])])]);
 }
 
 function sampleEntry(track) {
+  if (track.kind === 'audio') return audioSampleEntry(track);
   if (track.kind !== 'video') throw new Error(`Unsupported track kind ${track.kind}`);
   return box('avc1', [
     zeros(6), u16(1),              // reserved, data reference index
@@ -135,6 +189,47 @@ function sampleEntry(track) {
     u16(0x0018), u16(0xffff),      // depth, pre_defined -1
     box('avcC', [track.description]),
   ]);
+}
+
+// AAC: 'mp4a' with an 'esds' carrying the AudioSpecificConfig (our
+// own — see aac.js for why the encoder's isn't used).
+function audioSampleEntry(track) {
+  const bytes = track.samples.map((s) => s.data.length);
+  const seconds = trackDuration(track) / track.timescale;
+  const avgBitrate = seconds > 0 ? Math.round((bytes.reduce((a, b) => a + b, 0) * 8) / seconds) : 0;
+  const maxFrame = Math.max(...bytes);
+  const maxBitrate = Math.round((maxFrame * 8 * track.timescale) / 1024);
+  const decoderSpecific = descriptor(5, [track.description]);
+  const decoderConfig = descriptor(4, [
+    u8(0x40),                      // object type: MPEG-4 Audio
+    u8((0x05 << 2) | 1),           // stream type: audio, reserved bit
+    u24(maxFrame), u32(maxBitrate), u32(avgBitrate),
+    decoderSpecific,
+  ]);
+  const es = descriptor(3, [
+    u16(0),                        // ES_ID
+    u8(0),                         // no dependency, URL or OCR
+    decoderConfig,
+    descriptor(6, [u8(2)]),        // SLConfig: predefined for MP4
+  ]);
+  return box('mp4a', [
+    zeros(6), u16(1),              // reserved, data reference index
+    zeros(8),                      // reserved
+    u16(track.channels), u16(16),  // channel count, sample size
+    u16(0), u16(0),                // pre_defined, reserved
+    u32(track.timescale * 0x10000), // sample rate, 16.16
+    fullBox('esds', 0, 0, [es]),
+  ]);
+}
+
+// An MPEG-4 descriptor: tag, size (one byte while < 128, else the
+// 4-byte form), body.
+function descriptor(tag, children) {
+  const body = concat(children);
+  const size = body.length < 0x80
+    ? [body.length]
+    : [0x80 | ((body.length >> 21) & 0x7f), 0x80 | ((body.length >> 14) & 0x7f), 0x80 | ((body.length >> 7) & 0x7f), body.length & 0x7f];
+  return concat([Uint8Array.from([tag, ...size]), body]);
 }
 
 // Sample durations, run-length coded.
@@ -186,6 +281,14 @@ function u32(n) {
   const b = new Uint8Array(4);
   new DataView(b.buffer).setUint32(0, n >>> 0);
   return b;
+}
+
+function u8(n) {
+  return Uint8Array.of(n & 0xff);
+}
+
+function u24(n) {
+  return Uint8Array.of((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
 }
 
 function u16(n) {

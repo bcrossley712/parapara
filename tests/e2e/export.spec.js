@@ -1,9 +1,12 @@
-// End-to-end tests for the Share sheet and video export (step 6a): Make
+// End-to-end tests for the Share sheet and video export (steps 6a–6b): Make
 // video → progress → Ready → Share (a download here: the test browser
 // has no share sheet), and the file really is the animation — read back
 // box by box (with a stand-in encoder, in every browser) and, where the
 // browser has H.264, decoded frame by frame with its own decoder. Plus Cancel, the app going to the background mid-export,
-// Share stopping playback, and a browser that can't make videos.
+// Share stopping playback, and a browser that can't make videos. 6b:
+// the sound track — mixed, placed and trimmed by its edit list so the
+// sound starts with frame 1 (stand-in AAC codec: no browser here has an
+// AAC encoder), and a silent video with a note when sound can't be made.
 // The muxer and the encode loop's rules are unit-tested
 // (tests/unit/mp4.test.js, export.test.js).
 //
@@ -67,7 +70,7 @@ async function drawThreeFrames(page) {
 
 // --- reading the MP4 back (independent of js/export/mp4.js) ---
 
-const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl']);
+const CONTAINERS = new Set(['moov', 'trak', 'edts', 'mdia', 'minf', 'stbl']);
 
 function boxes(bytes, start = 0, end = bytes.length) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -119,6 +122,45 @@ function readVideo(bytes) {
     width: view.getUint16(entry + 8 + 24),
     height: view.getUint16(entry + 8 + 26),
     description: Array.from(bytes.subarray(avcC + 8, avcC + avcCSize)),
+    samples,
+  };
+}
+
+// The sound track (6b), read back: its sample entry, our
+// AudioSpecificConfig, the edit, and each sample's bytes. null if
+// there's no second track.
+function readSound(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const traks = boxes(bytes).find((b) => b.type === 'moov').children.filter((b) => b.type === 'trak');
+  if (traks.length < 2) return null;
+  const trak = { children: traks[1].children };
+  const stbl = child(trak.children, 'mdia/minf/stbl');
+  const mdhd = child(trak.children, 'mdia/mdhd');
+  const elst = child(trak.children, 'edts/elst');
+  const stsz = stbl.children.find((b) => b.type === 'stsz');
+  const stco = stbl.children.find((b) => b.type === 'stco');
+  const stsd = stbl.children.find((b) => b.type === 'stsd');
+  const entry = stsd.body + 8;
+  const entryEnd = entry + view.getUint32(entry);
+  const count = view.getUint32(stsz.body + 8);
+  let offset = view.getUint32(stco.body + 8);
+  const samples = [];
+  for (let i = 0; i < count; i++) {
+    const size = view.getUint32(stsz.body + 12 + i * 4);
+    samples.push(bytes.slice(offset, offset + size));
+    offset += size;
+  }
+  // DecoderSpecificInfo: tag 5, then a one-byte length, then the config.
+  let config = null;
+  for (let at = entry; at < entryEnd - 2; at++) {
+    if (bytes[at] === 5 && bytes[at + 1] === 2 && bytes[at - 1] !== 5) config = Array.from(bytes.subarray(at + 2, at + 4));
+  }
+  return {
+    codec: String.fromCharCode(...bytes.subarray(entry + 4, entry + 8)),
+    timescale: view.getUint32(mdhd.body + 12),
+    config,
+    editMs: view.getUint32(elst.body + 8),
+    editStart: view.getUint32(elst.body + 12),
     samples,
   };
 }
@@ -201,6 +243,118 @@ async function useStandInEncoder(page, { held = false } = {}) {
     }
     window.VideoEncoder = StandInEncoder;
   }, held);
+}
+
+// A stand-in AAC codec (6b): no browser here has an AAC encoder (CI's
+// and the sandbox's Chromium). The encoder passes channel 0 through —
+// `priming` zeros first, then 1024-sample "frames" of raw floats — and
+// reports a junk config, like WebKit's; the decoder gives the floats
+// back, so the app's priming probe measures `priming`.
+async function useStandInAudio(page, { priming = 1024 } = {}) {
+  await page.addInitScript((primingSamples) => {
+    class StandInAudioEncoder {
+      static async isConfigSupported(config) {
+        return { supported: config.codec === 'mp4a.40.2' && config.sampleRate === 48000, config };
+      }
+
+      constructor({ output }) {
+        this.output = output;
+        this.state = 'unconfigured';
+        this.encodeQueueSize = 0;
+        this.pending = [];
+        this.sentConfig = false;
+      }
+
+      configure() {
+        this.state = 'configured';
+        this.pending = new Array(primingSamples).fill(0);
+      }
+
+      encode(data) {
+        const block = new Float32Array(data.numberOfFrames);
+        data.copyTo(block, { planeIndex: 0 });
+        for (const v of block) this.pending.push(v);
+        this.emit(false);
+      }
+
+      emit(final) {
+        while (this.pending.length >= 1024 || (final && this.pending.length > 0)) {
+          const frame = new Float32Array(1024);
+          frame.set(this.pending.splice(0, 1024));
+          const bytes = new Uint8Array(frame.buffer);
+          const meta = this.sentConfig ? {} : { decoderConfig: { description: new Uint8Array([0xde, 0xad]) } };
+          this.sentConfig = true;
+          this.output({ byteLength: bytes.length, copyTo: (t) => t.set(bytes) }, meta);
+        }
+      }
+
+      async flush() { this.emit(true); }
+
+      close() { this.state = 'closed'; }
+    }
+
+    class StandInAudioDecoder {
+      constructor({ output }) { this.output = output; this.state = 'unconfigured'; }
+
+      configure(config) { window.__decoderConfig = Array.from(new Uint8Array(config.description)); this.state = 'configured'; }
+
+      decode(chunk) {
+        const bytes = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(bytes);
+        const floats = new Float32Array(bytes.buffer);
+        this.output({
+          numberOfFrames: floats.length,
+          numberOfChannels: 2,
+          format: 'f32-planar',
+          copyTo: (target) => target.set(floats),
+          close() {},
+        });
+      }
+
+      async flush() {}
+
+      close() { this.state = 'closed'; }
+    }
+    window.AudioEncoder = StandInAudioEncoder;
+    window.AudioDecoder = StandInAudioDecoder;
+  }, priming);
+}
+
+// A mono 16-bit WAV at 8 kHz: `silence` seconds of nothing, then a
+// 440 Hz tone at about -6 dB to `seconds`.
+function wav(seconds, silence = 0, rate = 8000) {
+  const samples = Math.round(seconds * rate);
+  const buf = Buffer.alloc(44 + samples * 2);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + samples * 2, 4);
+  buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(samples * 2, 40);
+  const start = Math.round(silence * rate);
+  for (let i = start; i < samples; i++) {
+    buf.writeInt16LE(Math.round(16000 * Math.sin((2 * Math.PI * 440 * (i - start)) / rate)), 44 + i * 2);
+  }
+  return buf;
+}
+
+async function importSound(page, buffer) {
+  const soundBtn = page.locator('.pp-sound-btn');
+  await expect(soundBtn).toBeEnabled();
+  await soundBtn.click();
+  const importBtn = page.locator('.pp-sound-panel').getByRole('button', { name: /^(Import|Replace) sound$/ });
+  await expect(importBtn).toBeEnabled();
+  const chooser = page.waitForEvent('filechooser');
+  await importBtn.click();
+  await (await chooser).setFiles({ name: 'tone.wav', mimeType: 'audio/wav', buffer });
+  await expect(soundBtn).toHaveClass(/has-sound/);
+  await soundBtn.click(); // close the panel
 }
 
 async function makeVideo(page) {
@@ -334,4 +488,58 @@ test('a browser that can’t make videos says so instead of offering it', async 
   await expect(page.getByRole('button', { name: 'Make video' })).toHaveCount(0);
   await page.mouse.click(5, 400); // the dim area closes it
   await expect(sheet(page)).toHaveCount(0);
+});
+
+test('with sound: an AAC track, our config, the priming skipped — the sound starts with frame 1', async ({ page }) => {
+  await useStandInEncoder(page);
+  await useStandInAudio(page, { priming: 1024 });
+  await openApp(page);
+  await drawThreeFrames(page); // 3 frames at 12 fps = 250 ms
+  await importSound(page, wav(1, 0.1)); // tone from 100 ms
+
+  await shareBtn(page).click();
+  await expect(sheet(page)).toContainText('with its sound');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await makeVideo(page);
+  await expect(sheet(page)).not.toContainText('silent');
+  const { bytes } = await shareAndDownload(page);
+
+  expect(readVideo(bytes).samples).toHaveLength(3);
+  const sound = readSound(bytes);
+  expect(sound).not.toBeNull();
+  expect(sound.codec).toBe('mp4a');
+  expect(sound.timescale).toBe(48000);
+  expect(sound.config).toEqual([0x11, 0x90]); // ours, not the encoder's 'dead'
+  expect(await page.evaluate(() => window.__decoderConfig)).toEqual([0x11, 0x90]); // the probe decoded with ours
+  // The edit: from the measured priming, as long as the video.
+  expect(sound.editStart).toBe(1024);
+  expect(sound.editMs).toBe(250);
+
+  // The stand-in's samples are channel 0's floats: find the tone.
+  const floats = [];
+  for (const s of sound.samples) floats.push(...new Float32Array(s.buffer, s.byteOffset, s.byteLength / 4));
+  const onset = floats.findIndex((v) => Math.abs(v) > 0.05);
+  expect(onset).toBeGreaterThan(0);
+  // Presented time = (index − edit start) / rate: the tone at 100 ms,
+  // plus the limiter's lookahead (a DynamicsCompressorNode delays ~6 ms
+  // — Play goes through the same limiter, so it's what she hears).
+  const presentedMs = ((onset - sound.editStart) / 48000) * 1000;
+  expect(presentedMs).toBeGreaterThan(99);
+  expect(presentedMs).toBeLessThan(110);
+  // The skipped part is the encoder's silence, not her sound.
+  expect(floats.slice(0, sound.editStart).every((v) => v === 0)).toBe(true);
+});
+
+test('with sound but no AAC encoder: a silent video, and the sheet says so', async ({ page }) => {
+  await useStandInEncoder(page);
+  await page.addInitScript(() => { delete window.AudioEncoder; });
+  await openApp(page);
+  await drawThreeFrames(page);
+  await importSound(page, wav(1));
+
+  await makeVideo(page);
+  await expect(sheet(page)).toContainText('the sound couldn’t be added');
+  const { bytes } = await shareAndDownload(page);
+  expect(readVideo(bytes).samples).toHaveLength(3);
+  expect(readSound(bytes)).toBeNull();
 });
