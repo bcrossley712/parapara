@@ -115,27 +115,31 @@ icon, manifest `name`/`short_name`, and repo copy.
   cache, playback, onion skin, frame editing, a canvas tap closing an
   open menu, and sound (import, sound panel, hold-to-record over
   music), plus the last push's layers menu, mixer and Listen/Set start,
-  and **6a** (video export, picture only): Share opens the iOS share
-  sheet and Save Video saved a playable video to the iPad.
-  Headset checked with recording (no AirPods to test). How each works
+  **6a** (video export: Share opens the iOS share sheet, Save Video
+  plays) and **6b** (sound in the video: plays in Photos and, sent in
+  Messages, for the friend — the WebKit AAC workaround proven). Music /
+  Voice balance checked by him: workable as is (a slight lean to music;
+  lowering Music brings the voice forward). Headset checked with recording (no AirPods to test). How each works
   is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
 
-**Built, to check on the iPad (this push) — 6b, sound in the video:**
-- A project with sound: the Share sheet says "with its sound". Make
-  video → Save Video → **the sound plays in Photos**, and **send it in
-  Messages — it plays with sound for the friend** (only a real file
-  proves WebKit's AAC bug is sidestepped).
-- Sound in sync with the drawings, Music and Voice both, as loud as in
-  Play. A song placed to start on a later frame starts there.
-- If the Ready screen says "the sound couldn't be added", or the
-  video is silent, send the activity log: `export-audio` (`priming=`,
-  `config=1190`, `encoderConfig=` — WebKit's own, for the bug) or
-  `export-audio-failed`, and `exported … audio=`.
+**Built, to check on the iPad (this push) — Play freezing after
+Bluetooth headphones connect** (seen twice after 6b: Play showed no
+movement and no sound until the app was relaunched; the log said
+`sound-start` each time — the context said 'running' but its clock had
+stopped). Now a stalled clock is caught within ½ s: the drawings play on
+silently, a notice says "The sound stopped. Tap Play again…", and the
+next Play makes a fresh audio context. Check, when it happens again:
+the drawings keep moving, and the next Play has sound. Send the log
+either way: `sound-stalled`, `sound-renew why=…`, `sound-device-change`
+(whether iOS reports the headphones at all), `sound-state` and the
+`play` line's `rate=` / `out=` (a sample-rate change is one suspect). If
+the next Play is still silent, a fresh context isn't enough on iOS —
+say so; the fallback still keeps the drawings playing.
 
-**6a checks still open, whenever convenient** (not blocking):
-sending in Messages plays for the friend; Files works; a 48-frame
+**6a checks still open, whenever convenient** (not blocking): Files
+works; a 48-frame
 export's time and the editor fine after (no lost-canvas banner); a 1–3
 fps video plays right in Photos; switching apps mid-export stops it
 with a message. On a failure, send the activity log (`export`,
@@ -168,13 +172,9 @@ development, so these may take a while):
      Messages on her iPad proves it) · **6c** GIF + PNG zip · **6d**
      Include images, remembered export choices, storage warning.
    - **GIF encoder: vendored gifenc** (see Standing constraints).
-   - **6a done** (confirmed on the iPad). **6b built** (this push) —
-     see ARCHITECTURE.md → Export and sharing. Agreed in scoping: a
-     silent video with a note if sound fails; wait for sound still
-     loading; no include-sound switch (Flipaclip has none — add in 6d if
-     she asks); the edit list skips the encoder's priming, measured on
-     the device, so sound starts exactly where she set it. 6c next once
-     6b works on the iPad.
+   - **6a, 6b done** (confirmed on the iPad) — see ARCHITECTURE.md →
+     Export and sharing. No include-sound switch (Flipaclip has none —
+     add in 6d if she asks). **6c next — scoping.**
 2. **Step 7** Cloudflare Worker + R2 (share links, Krita reference
    import) · then the requested extras under Open items.
 
@@ -194,7 +194,7 @@ and does starting a photo at 50% bother her when it's a background
 
 **Watch the activity log** (gear → Developer → Activity log). Get it
 if it shows `load-renewed`, `load-broken`, `save-refused`,
-`check-failed`, `hold-refused`, `export-audio-failed`, `recover` (lost canvas — each line
+`check-failed`, `hold-refused`, `export-audio-failed`, `sound-stalled`, `recover` (lost canvas — each line
 also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-failed … timed out`
 (a layer encode that never finished; the save gives up after 15 s
 instead of locking the editor), or `export-failed` / `share-failed`.
@@ -212,12 +212,11 @@ instead of locking the editor), or `export-failed` / `share-failed`.
   behind, the frame cache's in-memory PNGs — `undo=`/`cache=`/`made=`
   show which grows. **Export (step 6) adds memory load — watch for it
   after.** Get logs and note what she did just before each.
-- **Voice volume has little range upward** (seen after the mixer):
-  takes are leveled so their peaks reach 2× (`MAX_LEVELED_PEAK`), then
-  the take compressor (−14 dB, 3:1) and the limiter, so at 100% the
-  voice already sits at the ceiling and 200% is mostly squashed;
-  turning it down works. A fix likely means less leveling / more
-  headroom, which changes how takes sound — discuss before touching.
+- **Voice volume range** — he found the balance workable after 6b
+  (lower Music to bring the voice forward); leveling left as is.
+  Revisit only if she finds the voice hard to bring up: at 100% it
+  sits near the ceiling (`MAX_LEVELED_PEAK`, take compressor, limiter),
+  so 200% is mostly squashed — a fix changes how takes sound.
 - **Listen** — tabled: should it play from the set start or the
   track's start, and does it need its own slider?
 - **Parked from step 4, unless she asks:** frame holds (a drawing

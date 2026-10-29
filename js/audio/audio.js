@@ -27,6 +27,16 @@
 //     A context still starting (resume() is asked for in the Play tap)
 //     holds the first frame until sound begins; if it hasn't begun
 //     within START_TIMEOUT_MS, the run carries on silently.
+//   - A context that says 'running' but whose clock has stopped (seen
+//     on her iPad after Bluetooth headphones connected: the frames froze
+//     and nothing played until the app was relaunched) is caught too:
+//     no clock movement for STALL_MS → 'sound-stalled', the run carries
+//     on silently from where it was, and the context is marked stale.
+//   - A stale context (stalled, or iOS said the audio devices changed)
+//     is replaced in the next tap's unlock(): the old one is closed, a
+//     new one made with the mix — the decoded sound is kept — so the
+//     next Play has sound again ('sound-renew'). A new context can only
+//     start inside a tap, hence the wait for one.
 //
 // Silent mode (5a, checked on her iPad): iOS mutes web sound in Silent
 // mode unless the page says its sound is media. The audio session is
@@ -57,6 +67,9 @@ import { animationSeconds, clipPlacement, clipGain, clipVolume, CLIP_KINDS } fro
 export const LOOKAHEAD = 1;
 // How long a run waits for a starting context before going silent.
 export const START_TIMEOUT_MS = 1000;
+// How long a running context's clock may stand still before the run
+// counts as stalled (its clock moves every few ms when it's working).
+export const STALL_MS = 500;
 
 // The mix's limiter and a loudness-leveled take's compressor. First-try
 // settings, to tune by ear on her iPad. (A DynamicsCompressorNode adds
@@ -133,6 +146,11 @@ function defaultContext() {
   return Ctor ? new Ctor() : null;
 }
 
+// For 'devicechange' (headphones in or out), or null.
+function defaultMediaDevices() {
+  return globalThis.navigator?.mediaDevices ?? null;
+}
+
 // The page's audio session (Safari 16.4+), or null elsewhere.
 function defaultSession() {
   return globalThis.navigator?.audioSession ?? null;
@@ -146,10 +164,12 @@ export function createAudio({
   createContext = defaultContext,
   wallNow = () => performance.now(),
   audioSession = defaultSession(),
+  mediaDevices = defaultMediaDevices(),
   onEvent = () => {},
 } = {}) {
   let ctx = null;
   let contextFailed = false;
+  let stale = null; // why the context should be replaced at the next tap, or null
   // The project's clips with their decoded sound: [{ clip, buffer }].
   let tracks = [];
   let run = null;       // the playing run (see start)
@@ -180,9 +200,56 @@ export function createAudio({
     else {
       mix = buildMix(ctx);
       applyVolumes();
+      watchState(ctx);
     }
     return ctx;
   }
+
+  // For the log: each change of the context's state (iOS's 'interrupted'
+  // shows a route change or a call), with its rate.
+  function watchState(watched) {
+    const report = () => {
+      if (watched !== ctx) return;
+      onEvent('sound-state', { state: watched.state, ...rateInfo(watched) });
+    };
+    if (typeof watched.addEventListener === 'function') watched.addEventListener('statechange', report);
+    else if ('onstatechange' in watched) watched.onstatechange = report;
+  }
+
+  function rateInfo(c) {
+    const ms = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1000) : '?');
+    return { rate: c.sampleRate ?? '?', out: ms(c.outputLatency), base: ms(c.baseLatency) };
+  }
+
+  // The context should be replaced at the next tap (see the header).
+  function markStale(why) {
+    if (!ctx || stale) return;
+    stale = why;
+  }
+
+  // Closes a stale context and makes a new one. Only inside a tap
+  // (unlock), never while the mic is on, and only between runs.
+  function renewContext() {
+    const why = stale;
+    stale = null;
+    clock.stop();
+    stopListening();
+    const old = ctx;
+    ctx = null;
+    mix = null;
+    contextFailed = false;
+    old?.close?.()?.catch?.(() => {});
+    context();
+    onEvent('sound-renew', { why, state: ctx?.state ?? 'none', ...(ctx ? rateInfo(ctx) : {}) });
+  }
+
+  // iOS's audio devices changed (headphones in or out): the context may
+  // be left on the old route, so it's renewed at the next tap.
+  const onDeviceChange = () => {
+    onEvent('sound-device-change', { ctx: ctx?.state ?? 'none' });
+    markStale('device');
+  };
+  mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
 
   // Each row's bus to its clip's volume.
   function applyVolumes() {
@@ -287,6 +354,8 @@ export function createAudio({
         parts,
         startedAt: ctx.currentTime,
         waitingSince: ctx.state === 'running' ? null : wallNow(),
+        lastCtxTime: ctx.currentTime, // the stall check: when it last moved
+        lastMovedAt: wallNow(),
         nextPass: 1,
       });
       // This pass: whatever's left of each clip from `position` on.
@@ -305,6 +374,9 @@ export function createAudio({
       if (run.mode === 'wall') return wallNow() - run.t0;
       if (ctx.state !== 'running') {
         // Still starting (or iOS stopped it): hold, then go silent.
+        // The stall check counts from when it runs.
+        run.lastCtxTime = ctx.currentTime;
+        run.lastMovedAt = wallNow();
         if (run.waitingSince === null) run.waitingSince = wallNow();
         if (wallNow() - run.waitingSince > START_TIMEOUT_MS) {
           const elapsed = Math.max(0, (ctx.currentTime - run.startedAt) * 1000);
@@ -317,9 +389,23 @@ export function createAudio({
         return Math.max(0, (ctx.currentTime - run.startedAt) * 1000);
       }
       run.waitingSince = null;
+      // The clock must move: running but stuck is a stall (see header).
+      const t = ctx.currentTime;
+      if (t > run.lastCtxTime) {
+        run.lastCtxTime = t;
+        run.lastMovedAt = wallNow();
+      } else if (wallNow() - run.lastMovedAt > STALL_MS) {
+        const elapsed = Math.max(0, (t - outputDelay() - run.startedAt) * 1000);
+        onEvent('sound-stalled', {
+          started: run.reported, at: Math.round(elapsed), ctxTime: Math.round(t * 1000), ...rateInfo(ctx),
+        });
+        markStale('stalled');
+        goWall(elapsed);
+        return elapsed;
+      }
       reportStarted();
       pump();
-      return (ctx.currentTime - outputDelay() - run.startedAt) * 1000;
+      return (t - outputDelay() - run.startedAt) * 1000;
     },
 
     stop() {
@@ -399,6 +485,8 @@ export function createAudio({
     // start the context for it.
     unlock({ expectSound = false } = {}) {
       if (!(tracks.length > 0 || expectSound) || !context()) return;
+      if (stale && !recording) renewContext();
+      if (!ctx) return;
       if (!recording) setSession('playback');
       if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
         const resumed = ctx.resume();
@@ -421,7 +509,12 @@ export function createAudio({
     // For the log: the context's state ('none' before one exists) and
     // the audio session's type ('none' without one).
     get debugState() {
-      return { ctx: ctx?.state ?? 'none', session: audioSession?.type ?? 'none' };
+      return {
+        ctx: ctx?.state ?? 'none',
+        session: audioSession?.type ?? 'none',
+        ...(ctx ? rateInfo(ctx) : {}),
+        ...(stale ? { stale } : {}),
+      };
     },
 
     // Decodes a stored file's bytes (ArrayBuffer) into sound. Rejects if
@@ -476,6 +569,7 @@ export function createAudio({
     },
 
     destroy() {
+      mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
       clock.stop();
       stopListening();
       tracks = [];

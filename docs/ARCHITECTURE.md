@@ -511,6 +511,19 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
     never drift. **The animation's length wins:** only the part inside
     frames ÷ fps plays. Nothing to play, or a context that doesn't
     start within 1 s: the wall clock, silently.
+  - **A stalled clock** (after 6b, her iPad, twice: Bluetooth
+    headphones connected and the context kept saying `'running'` while
+    `currentTime` stood still — Play froze, silent, until a relaunch):
+    no clock movement for `STALL_MS` (500 ms, counted from Play or
+    from when it starts running) → `sound-stalled`, the run carries on
+    silently on the wall clock from where it was, and a notice tells
+    her to tap Play again. The context is then **stale** — also after
+    iOS reports a device change (`devicechange`, `sound-device-change`)
+    — and the next tap's `unlock()` closes it and makes a new one with
+    the mix (decoded sound kept; `sound-renew why=…`). Never while the
+    mic is on. The log also gets each context state change
+    (`sound-state`) and the rate/latency on `play`, `listen`,
+    `rec-start`.
   - **Plays in Silent mode:** the audio session (Safari's
     `navigator.audioSession`) is `'playback'` before the context
     starts — iOS otherwise mutes web sound in Silent mode (seen on her
@@ -633,6 +646,11 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
   for a stroke or a playback stop. **Its waveform canvases are only as
   wide as the track**, redrawn on scroll — never one canvas the length
   of the song (iOS canvas limits and memory).
+- **The audio clock never trusts `'running'` alone** — a run on a
+  clock that doesn't move must fall back to the wall clock (the stall
+  check in `now()`), or Play freezes. **A context is only renewed
+  inside a tap** (`unlock`), never mid-run or while the mic is on — a
+  new context outside a tap won't start on iOS.
 - **`audio.unlock()` stays synchronous in the Play tap and the mic
   press, before any await**, and is called even when the sound is still
   loading — a touch is the only chance iOS gives to start the context.
@@ -660,6 +678,11 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
   it when scrolled) and start from frame 1 — a drag ending near the
   track's left end edge-scrolls and moves the clip further. Row
   locators are scoped (`.pp-sound-panel__row--music` / `--voice`).
+- **A stalled clock in e2e** (`sound.spec.js`): `currentTime` is
+  overridden on `BaseAudioContext.prototype` to stand still (Chromium's
+  never stops by itself) and `AudioContext` wrapped to count contexts;
+  the frames the playhead visits are recorded in-page (one frame is
+  83 ms — too brief to poll for).
 - **Recording in e2e** (`recording.spec.js`): Chromium's fake mic
   (`--use-fake-device-for-media-stream`, allowed by
   `--use-fake-ui-for-media-stream`) records WebM/Opus. The countdown
@@ -673,7 +696,7 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
 compressor and limiter by ear, hiss on a boosted quiet take; Listen and
 Set start starting from the tap (and with the screen's output delay,
 where Set start lands vs. what she heard); the volume slider with her
-stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding.
+stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding. (after 6b) Bluetooth headphones connecting mid-session: a stall caught (the drawings keep moving), the next Play bringing sound back on a fresh context, whether iOS fires `devicechange` for them.
 
 ---
 

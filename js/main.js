@@ -800,8 +800,12 @@ function mountEditor(session, { canSave }) {
   // playback runs on when there is one (audio/audio.js). Decoding is
   // async; until it's done, Play shows "Getting ready".
   const audio = createAudio({
-    // DEV ONLY (activity log): whether each run's sound really started.
-    onEvent: (name, detail) => devLog.add(name, detail),
+    // The activity log (DEV ONLY) hears whether each run's sound really
+    // started; a stalled one also tells her (the next Play renews it).
+    onEvent: (name, detail) => {
+      devLog.add(name, detail);
+      if (name === 'sound-stalled') showNotice('The sound stopped. Tap Play again to bring it back.');
+    },
   });
   let soundLoading = null; // promise while any clip is being decoded
   // The current clips' decoded sound by blobRef (only theirs is kept),

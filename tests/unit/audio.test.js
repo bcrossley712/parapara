@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAudio, LOOKAHEAD, START_TIMEOUT_MS } from '../../js/audio/audio.js';
+import { createAudio, LOOKAHEAD, START_TIMEOUT_MS, STALL_MS } from '../../js/audio/audio.js';
 
 // A fake AudioContext: currentTime and state are set by the test;
 // every scheduled source is recorded as [when, offset, duration].
@@ -224,7 +224,7 @@ test('the audio session is set to playback, so Silent mode does not mute it', as
   session.type = 'auto'; // something else changed it
   audio.unlock();
   assert.equal(session.type, 'playback');
-  assert.deepEqual(audio.debugState, { ctx: 'suspended', session: 'playback' });
+  assert.deepEqual(audio.debugState, { ctx: 'suspended', session: 'playback', rate: '?', out: 0, base: '?' });
 });
 
 test('an audio session that refuses the type does not stop the sound', async () => {
@@ -439,4 +439,139 @@ test('listen ends at the file\'s end; playback stops it', () => {
 test('listen with no music plays nothing', () => {
   const { audio } = setup({ clipFields: { kind: 'voice' } });
   assert.equal(audio.listen({ from: 0 }), false);
+});
+
+// --- a clock that stops while 'running' (Bluetooth headphones, after 6b) ---
+
+// setup() with a context factory that makes a new fake each time, and
+// a fake mediaDevices whose 'devicechange' the test fires.
+function setupRenewable() {
+  const contexts = [];
+  let wall = 0;
+  const events = [];
+  const listeners = new Set();
+  const mediaDevices = {
+    addEventListener: (type, fn) => { if (type === 'devicechange') listeners.add(fn); },
+    removeEventListener: (type, fn) => listeners.delete(fn),
+  };
+  const audio = createAudio({
+    createContext: () => { const c = fakeContext(); c.sampleRate = 48000; contexts.push(c); return c; },
+    wallNow: () => wall,
+    audioSession: null,
+    mediaDevices,
+    onEvent: (name, detail) => events.push([name, detail]),
+  });
+  const probe = fakeContext();
+  audio.setClips([{ clip: clip(), buffer: probe.createBuffer(1, 400, 100) }]);
+  return {
+    audio, events, contexts, listeners,
+    setWall: (ms) => { wall = ms; },
+    fireDeviceChange: () => listeners.forEach((fn) => fn()),
+  };
+}
+
+test('a running context whose clock stops: the run carries on silently from where it was', () => {
+  const { audio, events, contexts, setWall } = setupRenewable();
+  audio.unlock();
+  const ctx = contexts[0];
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  ctx.currentTime = 0.3;
+  setWall(300);
+  assert.equal(Math.round(audio.clock.now()), 300);
+  // The clock stands still; the wall clock doesn't.
+  setWall(300 + STALL_MS);
+  assert.equal(Math.round(audio.clock.now()), 300); // not yet
+  assert.equal(audio.clock.mode, 'audio');
+  setWall(300 + STALL_MS + 1);
+  assert.equal(Math.round(audio.clock.now()), 300);
+  assert.equal(audio.clock.mode, 'wall');
+  assert.ok(ctx.stopped > 0, 'its sources stopped');
+  // From there it moves on the wall clock: the drawings keep playing.
+  setWall(300 + STALL_MS + 201);
+  assert.equal(Math.round(audio.clock.now()), 500);
+  const stalled = events.find(([name]) => name === 'sound-stalled');
+  assert.ok(stalled, 'logged');
+  assert.equal(stalled[1].at, 300);
+  assert.equal(stalled[1].rate, 48000);
+  assert.equal(audio.debugState.stale, 'stalled');
+});
+
+test('a clock that never moved after starting stalls too (frame 1 held, not frozen forever)', () => {
+  const { audio, contexts, setWall } = setupRenewable();
+  audio.unlock();
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  assert.equal(contexts[0].state, 'running');
+  setWall(STALL_MS + 1);
+  audio.clock.now();
+  setWall(STALL_MS + 2);
+  audio.clock.now();
+  assert.equal(audio.clock.mode, 'wall');
+});
+
+test('after a stall, the next tap makes a new context (sound kept), and it plays', () => {
+  const { audio, events, contexts, setWall } = setupRenewable();
+  audio.unlock();
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  setWall(1);
+  audio.clock.now();
+  setWall(STALL_MS + 2);
+  audio.clock.now();
+  assert.equal(audio.clock.mode, 'wall');
+  audio.clock.stop();
+
+  audio.unlock(); // the next Play tap
+  assert.equal(contexts.length, 2);
+  assert.equal(contexts[0].closed, true);
+  const renew = events.find(([name]) => name === 'sound-renew');
+  assert.equal(renew[1].why, 'stalled');
+  assert.equal(audio.debugState.stale, undefined);
+  // The run is on the new context, with the same sound.
+  audio.clock.start({ position: 0, fps: 10, frameCount: 20 });
+  assert.equal(audio.clock.mode, 'audio');
+  assert.equal(contexts[1].started.length, 1);
+  assert.equal(contexts[0].started.length, 1, 'the old one got nothing new');
+  // Volumes are on the new mix.
+  assert.ok(contexts[1].compressors.length >= 1, 'limiter on the new context');
+});
+
+test('a device change (headphones) renews at the next tap; without one, the context is kept', () => {
+  const { audio, events, contexts, fireDeviceChange } = setupRenewable();
+  audio.unlock();
+  audio.unlock();
+  assert.equal(contexts.length, 1, 'kept between taps');
+  fireDeviceChange();
+  assert.ok(events.some(([name]) => name === 'sound-device-change'));
+  assert.equal(audio.debugState.stale, 'device');
+  audio.unlock();
+  assert.equal(contexts.length, 2);
+  assert.equal(events.find(([name]) => name === 'sound-renew')[1].why, 'device');
+});
+
+test('never renewed while the mic is on; destroy stops listening for devices', () => {
+  const { audio, contexts, listeners, fireDeviceChange } = setupRenewable();
+  audio.unlock();
+  audio.setRecording(true);
+  fireDeviceChange();
+  audio.unlock(); // the mic press
+  assert.equal(contexts.length, 1);
+  audio.setRecording(false);
+  audio.unlock();
+  assert.equal(contexts.length, 2);
+  audio.destroy();
+  assert.equal(listeners.size, 0);
+});
+
+test('the log hears each state change, with the rate', () => {
+  const { audio, events, contexts } = setupRenewable();
+  const ctx = fakeContext();
+  let handler = null;
+  ctx.addEventListener = (type, fn) => { if (type === 'statechange') handler = fn; };
+  ctx.sampleRate = 44100;
+  const a = createAudio({ createContext: () => ctx, audioSession: null, mediaDevices: null, onEvent: (n, d) => events.push([n, d]) });
+  a.setClips([{ clip: clip(), buffer: ctx.createBuffer(1, 400, 100) }]);
+  a.unlock();
+  ctx.state = 'interrupted';
+  handler();
+  assert.deepEqual(events.find(([name]) => name === 'sound-state')[1], { state: 'interrupted', rate: 44100, out: 0, base: '?' });
+  void audio; void contexts;
 });

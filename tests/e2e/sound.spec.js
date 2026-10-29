@@ -534,3 +534,84 @@ test('a canvas tap while listening only stops it', async ({ page }) => {
   await expect(listenBtn(page)).toHaveText('Listen');
   expect(await ink(page)).toBe(0);
 });
+
+// After 6b, on her iPad: Bluetooth headphones connected, and the audio
+// context kept saying 'running' while its clock stood still — Play froze
+// with no sound until the app was relaunched. Here the clock is frozen
+// by hand (Chromium's never stops on its own).
+async function freezableAudio(page) {
+  await page.addInitScript(() => {
+    const real = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'currentTime');
+    window.__frozen = new Map();
+    Object.defineProperty(BaseAudioContext.prototype, 'currentTime', {
+      configurable: true,
+      get() { return window.__frozen.has(this) ? window.__frozen.get(this) : real.get.call(this); },
+    });
+    window.__contexts = [];
+    const Real = window.AudioContext;
+    window.AudioContext = class extends Real {
+      constructor(...args) { super(...args); window.__contexts.push(this); }
+    };
+    window.__freezeAudio = () => {
+      for (const c of window.__contexts) window.__frozen.set(c, real.get.call(c));
+    };
+  });
+}
+
+const devLogText = (page) => page.evaluate(() => localStorage.getItem('parapara-dev-log') ?? '');
+
+test('a sound clock that stops while running: the drawings keep playing, and the next Play brings the sound back', async ({ page }) => {
+  await freezableAudio(page);
+  await watchSound(page);
+  await openApp(page);
+  await frames(page, 3);
+  await tiles(page).nth(0).click();
+  await expect(tiles(page).nth(0)).toHaveClass(/is-current/);
+  await importSound(page, { buffer: wav(2) });
+  await soundBtn(page).click(); // close the panel
+
+  // One good run makes the context.
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__soundStarts.length)).toBeGreaterThan(0);
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeHidden();
+  await tiles(page).nth(0).click();
+  await expect(tiles(page).nth(0)).toHaveClass(/is-current/);
+
+  // The headphones connect: the clock stops, the state stays 'running'.
+  await page.evaluate(() => window.__freezeAudio());
+  expect(await page.evaluate(() => window.__contexts[0].state)).toBe('running');
+  // Every frame the playhead visits, seen from inside the page (one
+  // frame lasts 83 ms — too brief to poll for).
+  await page.evaluate(() => {
+    window.__visited = new Set();
+    const strip = document.querySelector('.pp-frame-strip__tile').parentElement;
+    new MutationObserver(() => {
+      const current = document.querySelector('.pp-frame-strip__tile.is-current');
+      if (current) window.__visited.add(current.getAttribute('aria-label'));
+    }).observe(strip, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  });
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await expect(toast(page)).toContainText('Tap Play again');
+  // Not frozen: the playhead moves on (silently).
+  await expect.poll(() => page.evaluate(() => [...window.__visited].sort()), { timeout: 5000 })
+    .toEqual(expect.arrayContaining(['Frame 2', 'Frame 3']));
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeHidden();
+  await expect.poll(() => devLogText(page)).toContain('sound-stalled');
+
+  // The next Play: a new context, the old one closed, sound scheduled on it.
+  const before = await page.evaluate(() => window.__soundStarts.length);
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  expect(await page.evaluate(() => window.__contexts.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__contexts[0].state)).toBe('closed');
+  await expect.poll(() => page.evaluate(() => window.__soundStarts.length)).toBeGreaterThan(before);
+  await expect.poll(() => devLogText(page)).toContain('sound-renew why=stalled');
+  // And it runs on that clock without stalling.
+  await page.waitForTimeout(800); // proving a stall doesn't happen
+  expect((await devLogText(page)).match(/sound-stalled/g)).toHaveLength(1);
+  await playBtn(page).click();
+});
