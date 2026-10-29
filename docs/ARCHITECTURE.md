@@ -817,15 +817,18 @@ sound track's AAC encode and priming probe, injected codecs),
   gives them back — so the probe, our config, the edit and where the
   sound lands (checked to the millisecond) are tested in every browser.
   Unit: `aac.test.js`, `offline-mix.test.js`, `mp4.test.js`.
-- In a sandbox, ffprobe/ffmpeg are available for an extra look at a
-  file (not in CI). **6b's real-file check** (done at the 6b hand-off;
-  redo after touching the muxer or aac.js): a throwaway spec whose
-  stand-in AudioEncoder hands back real ffmpeg AAC frames (ADTS) for
-  the probe and the mix, with the real H.264 encoder and Chromium's
-  real AAC decoder; then ffprobe sees both tracks at the video's length
-  and ffmpeg's decode (which honors the edit) puts the sound's onset
-  where it was placed (100.02 ms for 100 ms; priming measured 1025 for
-  ffmpeg's 1024).
+- **The real-file check — `export-real-aac.spec.js`:** a stand-in
+  AudioEncoder hands the app real AAC frames made by ffmpeg at test
+  time (the probe's stream to the first encoder opened, the mix's to
+  the second), with the real H.264 encoder and Chromium's real AAC
+  decoder; ffprobe then sees both tracks at the video's length, the
+  measured priming is within a sample of ffmpeg's 1024, and ffmpeg's
+  decode (honoring the edit list) puts a tone placed at 100 ms within
+  1 ms of it (121 ms without the edit). It proves layout and timing,
+  not the mix (ffmpeg's tone stands in for it). **Skips without
+  ffmpeg/ffprobe, an H.264 encoder or an AAC decoder — so in CI; run
+  it in the sandbox before any hand-off that touches `mp4.js`,
+  `aac.js` or `offline-mix.js`.**
 
 ### iPad-only checks
 

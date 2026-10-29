@@ -556,6 +556,10 @@ with no story of how it got there.
     exception: proving something *doesn't* happen.
   - **Check a new test fails without its fix**, or note that it
     doesn't.
+  - **A check the notes tell a later conversation to rerun must be a
+    committed spec** (skipping, with its reason, where it can't run —
+    CI lacks ffmpeg and H.264/AAC encoders), never a throwaway: a
+    deleted one has to be rebuilt from a description.
   - `openApp` (helpers) starts from the empty gallery on a fresh
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
