@@ -340,6 +340,7 @@ for (const seed of SEEDS) {
         if (model.layers.length < 2) return false;
         const id = pick(model.layers);
         if (id === (await activeLayer(page))) return false;
+        await idle(page); // a layer row isn't disabled while busy, so a tap then is dropped
         await setPanel(page, true);
         await page.locator(`.pp-layers__row[data-layer-id="${id}"] .pp-layers__name`).click();
         await expect(page.locator('.pp-layer--active')).toHaveAttribute('data-layer-id', id);
