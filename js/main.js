@@ -22,6 +22,8 @@ import { devLog } from './storage/dev-log.js';
 import { showDevLog } from './ui/dev-log-view.js';
 import {
   initStorage,
+  storageEstimate,
+  storageLogFields,
   loadLastProject,
   loadProject,
   saveLastProjectId,
@@ -228,8 +230,14 @@ async function launch() {
   devLog.add('launch');
   appActions.getVersionLabel().then((v) => devLog.add('version', v), () => {});
   try {
-    await initStorage();
+    const { persisted } = await initStorage();
     storageWorks = true;
+    // How much is stored and whether iOS agreed to keep it (6d) — a
+    // reference point; no warning is shown. Not awaited.
+    storageEstimate().then(
+      (estimate) => devLog.add('storage', storageLogFields(estimate, persisted)),
+      () => {},
+    );
   } catch (err) {
     // No database at all: she can still draw (on an in-memory project)
     // but nothing is written.
@@ -491,6 +499,8 @@ function mountEditor(session, { canSave }) {
   // Sound (step 5): older projects have none; an unusable clip record
   // is dropped (its file stays until the sweep), never a failed open.
   project.audioClips = sanitizeAudioClips(project.audioClips);
+  // Include images (6d): older projects have none (missing = off).
+  project.exportImages = project.exportImages === true;
 
   // Activity log (dev only): a frame as "f3#1a2b" (its position, then
   // the end of its id, which never changes), a layer or blob id short.
@@ -574,6 +584,7 @@ function mountEditor(session, { canSave }) {
         ui.exportSheet.close();
       },
       onShare: () => shareExport(),
+      onIncludeImages: (on) => setExportImages(on),
       onClose: () => {
         stopExport('closed');
         exportFile = null;
@@ -968,7 +979,19 @@ function mountEditor(session, { canSave }) {
       frames: project.frames.length,
       seconds: project.frames.length / project.fps,
       hasSound: project.audioClips.length > 0,
+      hasImages: session.frames.some((f) => Boolean(f.image?.blobRef)),
+      includeImages: project.exportImages,
     };
+  }
+
+  // Include images (6d), from the sheet's switch: saved on the project
+  // (a tracing project and a background one want opposite answers).
+  // Separate from Hide images, which is only what she sees.
+  function setExportImages(on) {
+    if (exporting || ui.exportSheet.phase !== 'start') return;
+    project.exportImages = on;
+    scheduleProjectSave();
+    ui.exportSheet.show(exportSummary());
   }
 
   // The Share button: stops playback or a take first (like an edit),
@@ -992,9 +1015,11 @@ function mountEditor(session, { canSave }) {
     const started = performance.now();
     const frameIds = project.frames.slice();
     const fps = project.fps;
-    const hidden = project.referenceHidden === true;
+    const hidden = !project.exportImages; // Include images (6d), not Hide images
     const size = evenSize(project.canvas);
-    devLog.add('export', { frames: frameIds.length, fps, size: `${size.width}x${size.height}` });
+    devLog.add('export', {
+      frames: frameIds.length, fps, size: `${size.width}x${size.height}`, images: hidden ? 'out' : 'in',
+    });
     let canvas = null;
     const retried = new Map(); // frameId -> PNG, for frames the cache couldn't flatten
     const exportFrames = createPlaybackFrames({

@@ -34,7 +34,7 @@ js/
   canvas/               pointer input, brush engine, rendering
   timeline/              frame array, thumbnails, reorder logic
   storage/                IndexedDB wrapper
-  export/                 GIF/WebM stitching
+  export/                 MP4 video (H.264 + AAC) and its muxer
   audio/                  record/import, trim, Web Audio playback
   ui/                     toolbar, buttons, DOM glue
 icons/                  app icon set (manifest + apple-touch-icon)

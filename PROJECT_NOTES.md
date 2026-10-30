@@ -95,15 +95,16 @@ icon, manifest `name`/`short_name`, and repo copy.
   (`SOUND_FILE_TYPES` in `ui.js`), never `audio/*`** — iOS treats
   `audio/*` like video and shows Photo Library / Take Video / Choose
   File (seen on her iPad); extensions should open Files directly.
-- **Third-party code — one exception: gifenc** (step 6, MIT, no
-  dependencies) for GIF export: its 256-color reduction is the hard
-  part and better than a homemade one. **Vendored, never loaded from a
-  CDN**: its readable source files (not the minified build) are copied
-  into `js/export/vendor/gifenc/` with their license header and a
-  version comment (1.0.3), listed in `APP_SHELL`, and fixed by us if
-  needed — upstream changes never reach the app unless copied in by
-  hand. No dithering, so a photo in a GIF bands; accepted. Any other
-  library needs the same discussion first.
+- **Third-party code — one agreed exception: gifenc** (MIT, no
+  dependencies), **for GIF export if it's built — not vendored yet**
+  (GIF was cut from step 6; see Open items). Its 256-color reduction
+  is the hard part and better than a homemade one. **Vendored, never
+  loaded from a CDN**: its readable `src/` files (not the minified
+  build) copied into `js/export/vendor/gifenc/` with their license
+  header and a version comment (1.0.3), listed in `APP_SHELL`, and
+  fixed by us if needed — upstream changes never reach the app unless
+  copied in by hand. No dithering, so a photo in a GIF bands; accepted.
+  Any other library needs the same discussion first.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
@@ -138,6 +139,16 @@ either way: `sound-stalled`, `sound-renew why=…`, `sound-device-change`
 the next Play is still silent, a fresh context isn't enough on iOS —
 say so; the fallback still keeps the drawings playing.
 
+**Built, to check on the iPad (this push) — 6d.** **Include images:**
+the Share sheet shows an Include images switch only when a frame has
+a photo; it starts off, so a photo stays out of the video even while
+she sees it. Check: off → no photo in the video; on → the photo is in,
+whatever Hide images says; the switch is still on after closing and
+reopening the project (it's per project). Remind her a background
+photo now needs the switch on once. **Storage log:** each launch adds
+a `storage` line (`used=`, `quota=`, `pct=`, `persisted=`) — send one
+from her iPad so we have a reference point (no warning is shown).
+
 **6a checks still open, whenever convenient** (not blocking): Files
 works; a 48-frame
 export's time and the editor fine after (no lost-canvas banner); a 1–3
@@ -157,24 +168,25 @@ development, so these may take a while):
 1. **Step 6** export + native share sheet (format reasoning and the
    WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features)).
    **Agreed scope (2026-10-27):**
-   - Formats as her apps offer: **MP4** (H.264 + AAC; WebCodecs + a
-     hand-written muxer), **GIF** (fixed ~640 wide — full size is too
-     big for Messages), **PNG sequence** (full size, one stored zip, so
-     frames don't flood Photos). No repeat option: length = frames ÷
-     fps, the song cut at the last frame.
-   - **Include images** choice in the export sheet, shown only when the
-     project has a photo, starting from Hide images (a tracing photo
-     usually stays out, a background goes in).
+   - **MP4 only** (H.264 + AAC; WebCodecs + a hand-written muxer). Her
+     apps also offer GIF and PNG sequence; **both cut from step 6
+     (2026-10-29), a deliberate departure** — see Open items. No repeat
+     option: length = frames ÷ fps, the song cut at the last frame.
+   - **Include images** switch in the export sheet, shown only when the
+     project has a photo; off to start (a tracing photo usually stays
+     out), remembered per project, separate from Hide images (6d,
+     2026-10-29).
    - **Share is a second tap** after encoding (iOS opens the share
      sheet only from a tap); switching apps mid-export aborts it.
    - Split: **6a** export sheet, progress, Share, MP4 video-only ·
      **6b** sound in the MP4 (AAC workaround; only a file played in
-     Messages on her iPad proves it) · **6c** GIF + PNG zip · **6d**
-     Include images, remembered export choices, storage warning.
-   - **GIF encoder: vendored gifenc** (see Standing constraints).
+     Messages on her iPad proves it) · ~~6c GIF + PNG zip~~ (cut) ·
+     **6d** Include images (remembered per project) + a launch storage
+     log line; the storage warning dropped (see Open items).
    - **6a, 6b done** (confirmed on the iPad) — see ARCHITECTURE.md →
      Export and sharing. No include-sound switch (Flipaclip has none —
-     add in 6d if she asks). **6c next — scoping.**
+     add if she asks). **6d built** — confirm on the iPad (above);
+     then step 6 is done.
 2. **Step 7** Cloudflare Worker + R2 (share links, Krita reference
    import) · then the requested extras under Open items.
 
@@ -200,6 +212,15 @@ also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-
 instead of locking the editor), or `export-failed` / `share-failed`.
 
 **Open items**
+- **GIF and PNG sequence export — cut from step 6 (2026-10-29), revisit
+  after the main build; ask her.** A departure from her apps (all offer
+  both), chosen on purpose: MP4 with sound covers "send it to a
+  friend", GIFs cost a recipient more than the video does, and adding
+  either later costs no more than now (nothing in the schema or 6d
+  depends on them). **Trigger:** she asks for either. The 6c scoping
+  (sheet choice, size, palette, timing, loop, code layout, tests) is in
+  [design notes](docs/DESIGN_NOTES.md#planned-features) → "GIF and PNG
+  sequence (6c, cut)" — start from there, not from scratch.
 - **Lost canvas — open bug, not recurring lately** (little use since
   the last fixes). She saw "This frame's drawing stopped showing…" now
   and then. Ask which ending she sees: "…loaded again" alone is the
@@ -292,8 +313,13 @@ instead of locking the editor), or `export-failed` / `share-failed`.
   that scrolls with the transport, smaller controls) as its own step.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks.
-- **Storage warning** (~80% of quota) — deferred to step 6, when
-  export gives it a remedy to point at.
+- **Storage warning — dropped (6d scoping, 2026-10-29).** Without a
+  project backup her only remedy is deleting drawings (a video can't be
+  opened as a project again), and ~80% of Safari's quota likely never
+  fires on her iPad — eviction follows the iPad's free space, not the
+  app's quota. Instead each launch logs a `storage` line. **Revisit**
+  when project backup (export tier 3) exists, or if the log shows usage
+  climbing or `persisted=no`. ([why](docs/DESIGN_NOTES.md#planned-features))
 - **Onion skin extras — revisit in final touches**, once she knows
   onion skins (she's too new to judge them now): wrap-around with
   loop, ghosts of the active layer only.
@@ -330,8 +356,9 @@ Applies to the whole app. How each area works is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — see [Areas](#areas).
 
 - **Stack:** vanilla JS, native ES modules, no framework, no bundler.
-  Nothing from npm ships (vendored gifenc is the one exception — see
-  Standing constraints); npm is test tooling only. CI tests, copies
+  Nothing from npm ships (gifenc, if GIF export is ever built, is the
+  one agreed exception — see Standing constraints); npm is test tooling
+  only. CI tests, copies
   app files, and stamps the service-worker version — never compiles.
   ([why](docs/DESIGN_NOTES.md#stack))
 - **Input:** Pointer Events only. Pressure/tilt deliberately unread, so
@@ -351,9 +378,8 @@ Applies to the whole app. How each area works is in
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  export to video + Web Share,
-  then share links and Krita import via Worker + R2; storage warning at
-  ~80% quota (with step 6).
+  share links and Krita import via Worker + R2 (step 7). Video export
+  + Web Share is step 6; the storage warning was dropped (Open items).
 
 ## Global rules
 
@@ -421,7 +447,9 @@ their `sw.js` entries, `tests/unit/dev-log.test.js`,
 `tests/e2e/dev-log.spec.js`, the `devLog.add` calls, `guardContext`
 and the `showNotice` wrapper in `main.js` (and the guard-context
 assertions in `canvas-loss.spec.js`), `frameCache.memory`,
-`liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`, and the
+`liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`,
+`storageLogFields` in `storage.js` (6d; keep `storageEstimate` if a
+storage warning is ever built), and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
 (`parapara-dev-log`); Copy takes the last 60 (`DEV_LOG_COPY_LINES`).
 
@@ -445,6 +473,7 @@ bitmap. Planned fields are marked. Extend additively.
       currentFrameId,                         // the frame she was on
       palette: [ '#rrggbb', ... ],            // 2e, max 10; older projects: missing = []
       referenceHidden: false,                 // 3a, Hide images; missing = false
+      exportImages: false,                    // 6d, Include images in the video; missing = false
       symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset, gain, leveling, volume } ]

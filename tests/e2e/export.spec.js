@@ -18,13 +18,14 @@
 
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { openApp, setVisibility } from './helpers.js';
+import { openApp, reloadApp, readDb, setVisibility } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
 const addFrameBtn = (page) => page.getByRole('button', { name: 'Add frame' });
 const shareBtn = (page) => page.locator('.pp-share-btn');
 const sheet = (page) => page.locator('.pp-export');
+const includeImages = (page) => page.getByRole('switch', { name: 'Include images' });
 
 async function settled(page) {
   await expect(addFrameBtn(page)).toBeEnabled();
@@ -205,12 +206,16 @@ function decodeAndSample(page, video) {
 // but no H.264 encoder. Each "encoded" frame is 4 bytes, the frame's
 // number, so the file can be read box by box (not played). `held`:
 // flush waits for window.__letEncoderGo(), holding the sheet on
-// "Making video". The real encoder is tested below where it exists.
-async function useStandInEncoder(page, { held = false } = {}) {
-  await page.addInitScript((hold) => {
+// "Making video". `sample` ({ x, y }, canvas pixels): each frame's
+// color there goes in window.__sampled as [r, g, b], so what's in the
+// picture is checked without H.264 (6d's Include images). The real
+// encoder is tested below where it exists.
+async function useStandInEncoder(page, { held = false, sample = null } = {}) {
+  await page.addInitScript(({ hold, point }) => {
     window.__releaseEncoder = hold
       ? new Promise((resolve) => { window.__letEncoderGo = resolve; })
       : Promise.resolve();
+    window.__sampled = [];
     class StandInEncoder {
       static async isConfigSupported(config) {
         return { supported: config.codec.startsWith('avc1.'), config };
@@ -227,6 +232,11 @@ async function useStandInEncoder(page, { held = false } = {}) {
 
       encode(frame, { keyFrame }) {
         const index = this.count++;
+        if (point) {
+          const probe = new OffscreenCanvas(1, 1).getContext('2d');
+          probe.drawImage(frame, point.x, point.y, 1, 1, 0, 0, 1, 1);
+          window.__sampled.push(Array.from(probe.getImageData(0, 0, 1, 1).data.slice(0, 3)));
+        }
         const timestamp = frame.timestamp;
         const meta = index === 0 ? { decoderConfig: { description: new Uint8Array([1, 0x64, 0, 0x28, 0xff, 0xe1, 0, 0]) } } : {};
         queueMicrotask(() => this.output({
@@ -242,7 +252,7 @@ async function useStandInEncoder(page, { held = false } = {}) {
       close() { this.state = 'closed'; }
     }
     window.VideoEncoder = StandInEncoder;
-  }, held);
+  }, { hold: held, point: sample });
 }
 
 // A stand-in AAC codec (6b): no browser here has an AAC encoder (CI's
@@ -380,6 +390,7 @@ test('Make video → Ready → Share gives an MP4 with every frame in order, at 
 
   await shareBtn(page).click();
   await expect(sheet(page)).toContainText('3 frames');
+  await expect(includeImages(page)).toBeHidden(); // no photo, no switch (6d)
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(sheet(page)).toHaveCount(0);
   await makeVideo(page);
@@ -542,4 +553,89 @@ test('with sound but no AAC encoder: a silent video, and the sheet says so', asy
   const { bytes } = await shareAndDownload(page);
   expect(readVideo(bytes).samples).toHaveLength(3);
   expect(readSound(bytes)).toBeNull();
+});
+
+// --- 6d: Include images ---
+
+// A 200×100 all-red PNG. Fit to the canvas it covers y 60–1020; a new
+// photo shows at 50%, so its pixels read about (255, 128, 128).
+async function redPhoto(page) {
+  const base64 = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 200;
+    c.height = 100;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, 200, 100);
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  return { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(base64, 'base64') };
+}
+
+async function addPhoto(page) {
+  await settled(page);
+  await page.locator('.pp-image-btn').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'Add image' }).click();
+  await (await chooser).setFiles(await redPhoto(page));
+  const bar = page.locator('.pp-reference-bar');
+  await expect(bar).toBeVisible();
+  await expect(page.locator('.pp-reference__image')).toHaveCount(1);
+  await settled(page);
+  await bar.getByRole('button', { name: 'Done' }).click();
+  await expect(bar).toHaveCount(0);
+  await settled(page);
+}
+
+// The video's one frame at the sample point: true if the photo's red
+// is there, false if it's white paper.
+async function photoInVideo(page) {
+  await page.evaluate(() => { window.__sampled = []; });
+  await sheet(page).getByRole('button', { name: 'Make video' }).click();
+  await expect(sheet(page)).toHaveAttribute('data-phase', 'ready', { timeout: 30000 });
+  const sampled = await page.evaluate(() => window.__sampled);
+  expect(sampled).toHaveLength(1);
+  const [r, g, b] = sampled[0];
+  expect(r).toBeGreaterThan(240);
+  if (g > 240 && b > 240) return false;
+  expect(g).toBeLessThan(200);
+  return true;
+}
+
+test('Include images: off to start, separate from Hide images, remembered by the project', async ({ page }) => {
+  await useStandInEncoder(page, { sample: { x: 100, y: 540 } });
+  await openApp(page);
+  await addPhoto(page);
+
+  // Off to start: the photo she sees stays out of the video.
+  await shareBtn(page).click();
+  await expect(includeImages(page)).toBeVisible();
+  await expect(includeImages(page)).toHaveAttribute('aria-checked', 'false');
+  expect(await photoInVideo(page)).toBe(false);
+  await sheet(page).getByRole('button', { name: 'Done' }).click();
+
+  // On: the photo goes in, and the project remembers it.
+  await shareBtn(page).click();
+  await includeImages(page).click();
+  await expect(includeImages(page)).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(async () => (await readDb(page, 'projects'))[0]?.exportImages).toBe(true);
+  expect(await photoInVideo(page)).toBe(true);
+  await sheet(page).getByRole('button', { name: 'Done' }).click();
+
+  // Hide images (what she sees) doesn't change it.
+  await settled(page);
+  await page.locator('.pp-image-btn').click();
+  await page.getByRole('menuitem', { name: 'Hide images' }).click();
+  await expect(page.locator('.pp-image-menu')).toHaveCount(0);
+  await expect.poll(async () => (await readDb(page, 'projects'))[0]?.referenceHidden).toBe(true);
+  await shareBtn(page).click();
+  await expect(includeImages(page)).toHaveAttribute('aria-checked', 'true');
+  expect(await photoInVideo(page)).toBe(true);
+  await sheet(page).getByRole('button', { name: 'Done' }).click();
+
+  // Still on after a relaunch.
+  await reloadApp(page);
+  await settled(page);
+  await shareBtn(page).click();
+  await expect(includeImages(page)).toHaveAttribute('aria-checked', 'true');
 });

@@ -117,6 +117,7 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     frames: [],
     palette: [],                   // saved swatches (2e) — see colors.js
     referenceHidden: false,        // Hide images (3a); missing = false
+    exportImages: false,           // Include images in the video (6d); missing = false
     audioClips: [],
   };
 }
@@ -339,19 +340,49 @@ async function withTransaction(storeNames, mode, work) {
 // Opens the database and asks the browser to keep this app's storage
 // (see PROJECT_NOTES.md — iOS can evict PWA data under pressure). The
 // persistence request may be silently denied; the app works the same
-// either way.
+// either way. Resolves { persisted: true | false | null } — null when
+// the browser can't say (for the launch's activity-log line, 6d).
 export async function initStorage() {
   await openDatabase();
 
+  let persisted = null;
   if (globalThis.navigator?.storage?.persist) {
     try {
       const already = await navigator.storage.persisted();
-      const granted = already || await navigator.storage.persist();
-      console.info(`Parapara! storage persistence: ${granted ? 'granted' : 'not granted'}`);
+      persisted = already || await navigator.storage.persist();
+      console.info(`Parapara! storage persistence: ${persisted ? 'granted' : 'not granted'}`);
     } catch (err) {
       console.warn('Storage persistence request failed:', err);
     }
   }
+  return { persisted };
+}
+
+// How much the app stores and what the browser allows it (6d: logged
+// at launch, a reference point for whether a storage warning is ever
+// worth building — see PROJECT_NOTES.md Open items). Resolves
+// { usage, quota } in bytes, or null when the browser can't say.
+export async function storageEstimate() {
+  if (!globalThis.navigator?.storage?.estimate) return null;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (!Number.isFinite(usage) || !Number.isFinite(quota)) return null;
+    return { usage, quota };
+  } catch {
+    return null;
+  }
+}
+
+// The activity log's `storage` line: MB to one decimal, quota's share
+// used as a percent, and the persistence answer.
+export function storageLogFields(estimate, persisted) {
+  const mb = (bytes) => Math.round(bytes / 1e5) / 10;
+  return {
+    used: estimate ? `${mb(estimate.usage)}MB` : 'unknown',
+    quota: estimate ? `${mb(estimate.quota)}MB` : 'unknown',
+    pct: estimate && estimate.quota > 0 ? Math.round((estimate.usage / estimate.quota) * 1000) / 10 : 'unknown',
+    persisted: persisted === null ? 'unknown' : persisted ? 'yes' : 'no',
+  };
 }
 
 // Creates and saves a new project with one blank layer and one frame,

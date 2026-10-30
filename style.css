@@ -1726,6 +1726,56 @@ html, body {
 
 /* The Share sheet (js/ui/export-sheet.js, step 6a): a dialog with a
    progress bar while the video is made. */
+/* Include images (6d): a label and an on/off switch. */
+.pp-export__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.pp-export__option[hidden] {
+  display: none;
+}
+
+.pp-export__option-label {
+  font-size: 16px;
+}
+
+/* An on/off switch (role="switch", aria-checked). */
+.pp-switch {
+  flex: none;
+  position: relative;
+  width: 52px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: rgba(250, 244, 235, 0.25); /* off: visible on the dialog's brown */
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pp-switch[aria-checked="true"] {
+  background: var(--pp-accent);
+}
+
+.pp-switch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--pp-bg);
+  transition: transform 0.15s;
+}
+
+.pp-switch[aria-checked="true"] .pp-switch__knob {
+  transform: translateX(20px);
+}
+
 .pp-export__progress {
   position: relative;
   height: 8px;

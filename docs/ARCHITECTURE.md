@@ -227,6 +227,11 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
 - **Storage:** IndexedDB, fully client-side. Layer bitmaps as PNG.
   Autosave after a stroke ends, never mid-stroke. Requests
   `navigator.storage.persist()`. ([why](DESIGN_NOTES.md#storage))
+- **Launch `storage` log line (6d, dev only):** usage, quota, percent
+  and whether `persist()` was granted (`initStorage` resolves
+  `{ persisted }`, `storageEstimate()` the numbers). A reference point
+  only — **no storage warning is shown** (dropped; PROJECT_NOTES.md
+  Open items).
 
 ### Don't break
 
@@ -445,8 +450,10 @@ Playback smoothness at 24–30 fps with real line art, the stop tap with her sty
     JPEG 0.7 unless pixels are actually transparent (then PNG). Space
     wins over sharpness — her iPad runs near full.
   - Everything that shows "the frame" includes it via one path:
-    `readVisible`, the thumbnail, and later export; Hide images drops
-    it from all of them. **Onion-skin ghosts never include it** (4c;
+    `readVisible`, the thumbnail and export; Hide images drops it from
+    what she sees (canvas, tiles, thumbnail, Play). **Export goes by
+    Include images instead** (6d, `project.exportImages`), never Hide
+    images — Export and sharing. **Onion-skin ghosts never include it** (4c;
     a ghosted photo is busy).
 
 ### Don't break
@@ -720,7 +727,7 @@ sound track's AAC encode and priming probe, injected codecs),
   isn't an error; a share that fails says so on the Ready screen.
 - **Pictures are exactly what Play shows:** a `playback-frames.js`
   instance of its own over the frame cache (white paper, the photo
-  unless Hide images, the layers). It waits for the cache like Play
+  if Include images, the layers). It waits for the cache like Play
   ("Getting ready"); a frame the cache couldn't flatten is flattened
   once more directly (`export-reflatten`), and if that fails the export
   stops naming the frame.
@@ -771,6 +778,13 @@ sound track's AAC encode and priming probe, injected codecs),
   closes.
 - The sheet's first screen says "with its sound" when the project has
   clips.
+- **Include images (6d, agreed 2026-10-29):** a switch on the first
+  screen, shown only when some frame has a photo. **Off to start**
+  (a tracing photo usually stays out); **saved per project**
+  (`project.exportImages`, missing = off — a tracing project and a
+  background one want opposite answers); **separate from Hide images**
+  (one switch for "what I see" and "what exports" makes a tracing photo
+  easy to leak). The `export` log line says `images=in|out`.
 
 ### Don't break
 
@@ -797,6 +811,8 @@ sound track's AAC encode and priming probe, injected codecs),
   note. A cancel (AbortError) still stops everything.
 - **The edit list never skips a guessed priming** — only a measured
   one; unmeasured means 0.
+- **The photo in the video follows `project.exportImages` only** —
+  never `referenceHidden` (6d).
 
 ### Testing
 
@@ -817,6 +833,10 @@ sound track's AAC encode and priming probe, injected codecs),
   gives them back — so the probe, our config, the edit and where the
   sound lands (checked to the millisecond) are tested in every browser.
   Unit: `aac.test.js`, `offline-mix.test.js`, `mp4.test.js`.
+- **What's in the picture without H.264:** `useStandInEncoder(page,
+  { sample: { x, y } })` records each frame's color at a point
+  (`window.__sampled`) — the Include images test uses it, so it runs in
+  CI.
 - **The real-file check — `export-real-aac.spec.js`:** a stand-in
   AudioEncoder hands the app real AAC frames made by ffmpeg at test
   time (the probe's stream to the first encoder opened, the mix's to
@@ -840,7 +860,8 @@ the background mid-export. **6b:** Safari's AudioEncoder taking the AAC
 config, our config sidestepping WebKit's bug (sound actually heard in
 Photos and in Messages on a friend's phone — the only proof), the
 measured priming (`export-audio priming=`), sound in sync and as loud as
-in Play, with Music and Voice both.
+in Play, with Music and Voice both. **6d:** the switch's look and tap
+on her iPad; a background photo in the video once it's on.
 
 ---
 

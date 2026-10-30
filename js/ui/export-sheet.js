@@ -13,7 +13,9 @@
 //
 // Knows nothing about video: main.js runs the export and moves the
 // sheet between phases with show(state).
-//   phase 'start'    — summary, Make video (or why it can't)
+//   phase 'start'    — summary, Make video (or why it can't), and the
+//                      Include images switch when a frame has a photo
+//                      (`hasImages`, `includeImages`; 6d)
 //   phase 'getting-ready' — frames still being flattened
 //   phase 'making'   — progress, Cancel
 //   phase 'ready'    — size and length (and `note`, e.g. sharing
@@ -22,11 +24,16 @@
 // A tap on the dim area closes it, except while getting ready or
 // making (only Cancel stops that).
 //
-// callbacks: { onMake, onCancel, onShare, onClose } — onShare runs
-// synchronously in the Share tap (iOS).
+// callbacks: { onMake, onCancel, onShare, onClose, onIncludeImages }
+// — onShare runs synchronously in the Share tap (iOS);
+// onIncludeImages(on) when the switch is flipped (main.js saves it on
+// the project and shows the sheet again).
 
 export function createExportSheet(callbacks = {}, { signal } = {}) {
-  const { onMake = () => {}, onCancel = () => {}, onShare = () => {}, onClose = () => {} } = callbacks;
+  const {
+    onMake = () => {}, onCancel = () => {}, onShare = () => {}, onClose = () => {},
+    onIncludeImages = () => {},
+  } = callbacks;
 
   const backdrop = document.createElement('div');
   backdrop.className = 'pp-dialog-backdrop pp-export';
@@ -51,10 +58,29 @@ export function createExportSheet(callbacks = {}, { signal } = {}) {
   progressFill.className = 'pp-export__progress-fill';
   progress.appendChild(progressFill);
 
+  // Include images (6d): whether the photos go in the video — separate
+  // from Hide images, which is only what she sees while drawing.
+  const imagesRow = document.createElement('div');
+  imagesRow.className = 'pp-export__option';
+  const imagesLabel = document.createElement('span');
+  imagesLabel.className = 'pp-export__option-label';
+  imagesLabel.id = 'pp-export-images-label';
+  imagesLabel.textContent = 'Include images';
+  const imagesSwitch = document.createElement('button');
+  imagesSwitch.type = 'button';
+  imagesSwitch.className = 'pp-switch pp-export__images';
+  imagesSwitch.setAttribute('role', 'switch');
+  imagesSwitch.setAttribute('aria-labelledby', imagesLabel.id);
+  imagesSwitch.appendChild(document.createElement('span')).className = 'pp-switch__knob';
+  imagesSwitch.addEventListener('click', () => {
+    if (state.phase === 'start') onIncludeImages(!state.includeImages);
+  });
+  imagesRow.append(imagesLabel, imagesSwitch);
+
   const buttons = document.createElement('div');
   buttons.className = 'pp-dialog__buttons';
 
-  dialog.append(title, message, progress, buttons);
+  dialog.append(title, message, imagesRow, progress, buttons);
   backdrop.appendChild(dialog);
 
   let state = { phase: 'closed' };
@@ -76,6 +102,8 @@ export function createExportSheet(callbacks = {}, { signal } = {}) {
     progress.classList.toggle('is-waiting', s.phase === 'getting-ready');
     buttons.replaceChildren();
     backdrop.dataset.phase = s.phase;
+    imagesRow.hidden = !(s.phase === 'start' && s.supported && s.hasImages);
+    imagesSwitch.setAttribute('aria-checked', String(s.includeImages === true));
     switch (s.phase) {
       case 'start': {
         title.textContent = 'Share';
@@ -88,7 +116,8 @@ export function createExportSheet(callbacks = {}, { signal } = {}) {
         message.textContent = `${what}: ${plural(s.frames, 'frame')}, ${formatSeconds(s.seconds)}.`;
         const make = button('Make video', true, () => onMake());
         buttons.append(closeBtn('Cancel'), make);
-        make.focus();
+        // Not when the switch was just tapped — focus stays there.
+        if (document.activeElement !== imagesSwitch) make.focus();
         break;
       }
       case 'getting-ready':

@@ -483,3 +483,29 @@ test('a sound file without a type is refused, not stored as a PNG', async () => 
   await assert.rejects(storage.saveAudioBlob(project.id, 'sound-2', new Blob([new Uint8Array([1])])));
   assert.equal(await storage.loadLayerBitmap('sound-2'), null);
 });
+
+// --- 6d: Include images, the launch storage line ---
+
+test('a new project leaves photos out of the video (exportImages false)', () => {
+  assert.equal(storage.createProjectRecord().exportImages, false);
+});
+
+test('storageLogFields: MB to one decimal, percent of quota, persistence', () => {
+  assert.deepEqual(
+    storage.storageLogFields({ usage: 12_345_678, quota: 1_000_000_000 }, true),
+    { used: '12.3MB', quota: '1000MB', pct: 1.2, persisted: 'yes' },
+  );
+  assert.deepEqual(
+    storage.storageLogFields({ usage: 0, quota: 0 }, false),
+    { used: '0MB', quota: '0MB', pct: 'unknown', persisted: 'no' },
+  );
+  assert.deepEqual(
+    storage.storageLogFields(null, null),
+    { used: 'unknown', quota: 'unknown', pct: 'unknown', persisted: 'unknown' },
+  );
+});
+
+test('storageEstimate: null when the browser can’t say', async () => {
+  // Node's navigator has no storage manager.
+  assert.equal(await storage.storageEstimate(), null);
+});

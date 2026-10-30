@@ -803,11 +803,80 @@ device-only.
   iOS opens the share sheet only from a tap. **No B-frames assumed** —
   iOS's and Chromium's encoders don't reorder, so the muxer skips
   `ctts`; a reorder is caught as an error.
+- **GIF and PNG sequence (6c, cut 2026-10-29).** Both dropped from
+  step 6 on purpose, though her apps offer them. **Why:** MP4 with
+  sound covers the main use (send it to a friend); a GIF is the worse
+  deal for the recipient — at 640 wide probably 1–3 MB for 48 frames,
+  often bigger than our full-size MP4 (GIF compresses each frame on
+  its own, video only what changes) and decoded by the CPU rather than
+  video hardware — and it loops endlessly, which he dislikes. Adding
+  either later costs no more than now. A GIF that plays once
+  (`repeat: -1`) exists in the format, but whether Messages honors it
+  was never checked — assume it loops. **Kept for a future build — the
+  GIF plan as scoped:**
+  - Sheet: a Video / GIF choice on the first screen (Flipaclip shows
+    formats side by side); words follow it (Make GIF, Making GIF, Your
+    GIF is ready, The GIF wasn't made); with sound, the summary says
+    GIFs have none. GIF needs no WebCodecs, so it works on an iPad too
+    old for video.
+  - 640 wide, height to match (640×360); a canvas narrower stays full
+    size. Each frame drawn full size through `playbackFrames.draw`
+    (one compositing path), then scaled down — thin lines lighten at
+    ⅓, an iPad check.
+  - A 256-color palette per frame (gifenc `quantize` each frame),
+    preferred over one shared palette for line-art accuracy (open
+    question when built). Delays in centiseconds with the rounding
+    carried (12 fps → 8, 8, 9 …) so the total stays frames ÷ fps.
+    Loops forever whatever the project's loop toggle (open question).
+    White paper, no transparency; photos per Hide images / Include
+    images.
+  - Main thread, yielding between frames (progress, Cancel and hiding
+    the app still work); no worker. Log `exported ms=`.
+  - Code: gifenc 1.0.3's 8 `src/` files + LICENSE into
+    `js/export/vendor/gifenc/` (they already import with `.js`, so they
+    load as-is) and `APP_SHELL`; `js/export/gif.js` pure (fed by
+    `readPixels(index)`, unit-tested in Node: delays, size, abort);
+    `makeExport` takes the format and skips the sound. Tests: an e2e
+    that decodes the GIF with Chromium's `ImageDecoder` (frame count,
+    durations, marks) — no H.264 needed, so it runs in CI.
+  - iPad checks: share sheet offers Messages / Save Image / Files;
+    animated in Photos and a friend's Messages; thin lines at 640; a
+    48-frame GIF's time.
+  - **PNG sequence:** full size, one stored (uncompressed) zip so
+    frames don't flood Photos; not scoped further.
 - **Krita reference import** (one-way PC → iPad) reuses the same
   Worker + R2 backend: `.kra` is a ZIP with a merged-preview image;
   import that as a reference layer, not a full layer-stack parser.
 - **Storage warning** at ~80% of estimated quota, prompting her to
   export/back up — iOS can evict PWA storage under pressure.
+  **Dropped at 6d scoping (2026-10-29):**
+  - **No remedy to point at.** An MP4 can't be opened as a project
+    again, so "export" isn't a backup; without project backup (export
+    tier 3) her only option is deleting drawings — a warning would
+    just make her nervous.
+  - **It likely never fires.** Safari gives a home-screen app a large
+    quota (a share of the disk); eviction follows the iPad's free
+    space, not this app's share, so 80% of quota says little about
+    the risk on a near-full iPad. How `storage.estimate()` behaves
+    there is unverified.
+  - **Instead: a `storage` line in the activity log at each launch**
+    (used, quota, percent, whether `persist()` was granted — before
+    6d that only reached the console), for a reference point while she
+    uses the app lightly in development.
+  - **Discussed, not built: each project's size in the gallery**, so
+    she'd know what deleting frees. Useful with a warning or with
+    backup; skipped for now. It'd sum the project's blobs (the
+    `projectId` index makes that one query).
+  - **Revisit** with project backup, or if the log shows usage
+    climbing or `persisted=no`.
+- **Include images (6d, 2026-10-29)** — remembered **per project**, not
+  app-wide: a tracing project wants it off and a background project on,
+  so one app-wide setting would be wrong half the time. Off to start.
+  Taken in the sheet, not from Hide images, so what she sees while
+  drawing never decides what a friend gets. A change from 6a (the video
+  then followed Hide images): a background photo needs the switch on
+  once. Her apps have no equivalent (their photos are layers); what
+  Flipaclip's export screen remembers wasn't checked.
 - **Default fps 12 ("on twos")** matches Flipaclip/Rough Animator.
   **Canvas 1920×1080 landscape**, stored per project so changing it is
   config, not a rebuild.
