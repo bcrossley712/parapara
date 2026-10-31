@@ -524,11 +524,23 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
     no clock movement for `STALL_MS` (500 ms, counted from Play or
     from when it starts running) → `sound-stalled`, the run carries on
     silently on the wall clock from where it was, and a notice tells
-    her to tap Play again. The context is then **stale** — also after
-    iOS reports a device change (`devicechange`, `sound-device-change`)
-    — and the next tap's `unlock()` closes it and makes a new one with
-    the mix (decoded sound kept; `sound-renew why=…`). Never while the
-    mic is on. The log also gets each context state change
+    her to **close the app and open it again** — the only thing that
+    brought the sound back on her iPad (2026-10-31: a new context and a
+    page reload both stayed silent). The context is then **stale** —
+    also after iOS reports a device change (`devicechange`,
+    `sound-device-change`) — and the next tap's `unlock()` closes it
+    and makes a new one with the mix (decoded sound kept;
+    `sound-renew why=…`); kept though it didn't help there. Never while
+    the mic is on.
+  - **Paused on the way to the background** (2026-10-31): `hideEditor`
+    stops playback and calls `audio.sleep()`, which stops any sound and
+    suspends a running context (`sound-sleep state=… paused=…`; not
+    while the mic is on). The next Play tap resumes it (`unlock`).
+    Why: a WebKit bug leaves a home-screen app's Web Audio silent after
+    a return from the background — `'running'`, clock moving, nothing
+    heard, so the stall check can't see it (WebKit 291892; also 276016,
+    276687). Pausing first is the reported workaround; **unproven on
+    her iPad** (PROJECT_NOTES.md Open items). The log also gets each context state change
     (`sound-state`) and the rate/latency on `play`, `listen`,
     `rec-start`.
   - **Plays in Silent mode:** the audio session (Safari's
@@ -658,6 +670,9 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
   check in `now()`), or Play freezes. **A context is only renewed
   inside a tap** (`unlock`), never mid-run or while the mic is on — a
   new context outside a tap won't start on iOS.
+- **Going to the background pauses the context (`audio.sleep()` in
+  `hideEditor`); coming back never resumes it** — only the next Play
+  tap does (the WebKit silent-sound workaround).
 - **`audio.unlock()` stays synchronous in the Play tap and the mic
   press, before any await**, and is called even when the sound is still
   loading — a touch is the only chance iOS gives to start the context.
@@ -703,7 +718,7 @@ sharing), `audio/recorder.js` (the mic and MediaRecorder, `micSettings`, 5c),
 compressor and limiter by ear, hiss on a boosted quiet take; Listen and
 Set start starting from the tap (and with the screen's output delay,
 where Set start lands vs. what she heard); the volume slider with her
-stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding. (after 6b) Bluetooth headphones connecting mid-session: a stall caught (the drawings keep moving), the next Play bringing sound back on a fresh context, whether iOS fires `devicechange` for them.
+stylus. Sound in sync by ear, Safari's output delay, which files the picker offers, Silent mode, sound starting on the first Play after opening, dragging the clip and handles with her stylus, the track scrolling smoothly with the tiles, memory/pause with a long song's waveform; (5c) mic permission in the installed app and the interrupted first hold, the countdown and hold with her finger/stylus (no callout or text selection), recording latency and the Mic delay test, echo with and without headphones, music volume and routing while the mic is on, AirPods' call-quality drop, the recorded file decoding. (after 6b) Bluetooth headphones connecting mid-session: a stall caught (the drawings keep moving), whether iOS fires `devicechange` for them (a fresh context did *not* bring sound back after a background stall). (after 6) Sound surviving the background with `sound-sleep`.
 
 ---
 

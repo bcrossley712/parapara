@@ -719,6 +719,23 @@ device-only.
   in Safari 27.0.1, so on her iPad for a while). Workaround: build the
   2-byte AAC AudioSpecificConfig ourselves and ignore the encoder's.
   Only a real exported file played on a phone proves it.
+- **WebKit's silent Web Audio after the background (found after step
+  6, 2026-10-31).** Two logs: after saving a video and backgrounding,
+  the clock froze (`sound-stalled` caught it, the drawings played on);
+  after backgrounding alone, the clock kept moving and nothing was
+  heard — undetectable from the page. Tested on her iPad: a new
+  context ✗, a page reload ✗ (the reload's new context started from
+  `'suspended'` exactly like a working launch, yet stayed silent),
+  closing the app ✓ — so the break is below the page, in the app's
+  process. Known and open upstream (WebKit 291892 for home-screen apps,
+  276016, 276687). **Chosen:** pause the context on `visibilitychange`
+  → hidden and resume it in the Play tap — the workaround reported to
+  help (not for everyone; an old iOS 13 report saw the opposite), a few
+  lines, easy to undo. The stall notice says "close and reopen",
+  because that's the only proven fix. **Not chosen yet:** playing
+  through an `<audio>` element from an offline-mixed file — large
+  (timing is driven by the audio clock) and reportedly broken in
+  iOS 26 home-screen apps too.
 - **Where her songs can come from (5a scoping).** Streaming apps
   (Apple Music, Spotify, Amazon Music) keep even "downloaded" songs
   encrypted inside the app, so no app outside them — native or web —

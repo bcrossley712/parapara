@@ -810,12 +810,16 @@ function mountEditor(session, { canSave }) {
   // Sound (step 5): the project's clip, decoded, and the audio clock
   // playback runs on when there is one (audio/audio.js). Decoding is
   // async; until it's done, Play shows "Getting ready".
+  // A stalled sound clock: on her iPad neither a new context (the next
+  // Play renews it) nor a reload brings the sound back — only closing
+  // the app does (the WebKit bug, audio.js header).
+  const SOUND_STOPPED_NOTICE = 'The sound stopped. Close Parapara! and open it again to bring it back.';
   const audio = createAudio({
     // The activity log (DEV ONLY) hears whether each run's sound really
-    // started; a stalled one also tells her (the next Play renews it).
+    // started; a stalled one also tells her what helps.
     onEvent: (name, detail) => {
       devLog.add(name, detail);
-      if (name === 'sound-stalled') showNotice('The sound stopped. Tap Play again to bring it back.');
+      if (name === 'sound-stalled') showNotice(SOUND_STOPPED_NOTICE);
     },
   });
   let soundLoading = null; // promise while any clip is being decoded
@@ -3202,6 +3206,11 @@ function mountEditor(session, { canSave }) {
     stopExport('hidden');
     interruptTake();
     finishListen('hidden');
+    // Pause the sound before iOS does (WebKit bug: a home-screen app's
+    // Web Audio can come back silent — audio.js header). Playback stops
+    // first, as the flush that follows would stop it anyway.
+    stopPlayback();
+    audio.sleep();
   };
 
   // The project's sound decodes in the background; Play waits for it.

@@ -36,7 +36,16 @@
 //     is replaced in the next tap's unlock(): the old one is closed, a
 //     new one made with the mix — the decoded sound is kept — so the
 //     next Play has sound again ('sound-renew'). A new context can only
-//     start inside a tap, hence the wait for one.
+//     start inside a tap, hence the wait for one. **On her iPad a new
+//     context did not bring the sound back** (nor did a page reload —
+//     only closing the app); kept because it's harmless and may help
+//     elsewhere.
+//   - When the app goes to the background, sleep() pauses the context
+//     ('sound-sleep'), and the next Play tap resumes it (unlock). A
+//     WebKit bug leaves a home-screen app's Web Audio silent after a
+//     return from the background — 'running', clock moving, nothing
+//     heard (WebKit 291892, also 276016/276687) — and pausing it
+//     before iOS does is the reported workaround. Unproven on her iPad.
 //
 // Silent mode (5a, checked on her iPad): iOS mutes web sound in Silent
 // mode unless the page says its sound is media. The audio session is
@@ -552,6 +561,26 @@ export function createAudio({
     // Whether any clip's sound is loaded (for the log).
     get hasSound() {
       return tracks.length > 0;
+    },
+
+    // The app is going to the background (see the header): stop any
+    // sound and pause a running context, so the next Play tap resumes
+    // it rather than playing on one iOS left silent. Not while the mic
+    // is on (the take is ended first).
+    sleep() {
+      clock.stop();
+      stopListening();
+      if (!ctx || recording) {
+        onEvent('sound-sleep', { state: ctx?.state ?? 'none', paused: false, ...(recording ? { why: 'recording' } : {}) });
+        return;
+      }
+      const was = ctx.state;
+      if (was !== 'running' || typeof ctx.suspend !== 'function') {
+        onEvent('sound-sleep', { state: was, paused: false });
+        return;
+      }
+      onEvent('sound-sleep', { state: was, paused: true });
+      ctx.suspend()?.catch?.((err) => onEvent('sound-sleep-failed', { error: String(err?.message ?? err) }));
     },
 
     // While the mic is recording (5c): the audio session says so

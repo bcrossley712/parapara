@@ -11,7 +11,7 @@
 // the tiles.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb } from './helpers.js';
+import { openApp, reloadApp, readDb, setVisibility } from './helpers.js';
 
 const soundBtn = (page) => page.locator('.pp-sound-btn');
 const banner = (page) => page.locator('#pp-banner');
@@ -560,7 +560,7 @@ async function freezableAudio(page) {
 
 const devLogText = (page) => page.evaluate(() => localStorage.getItem('parapara-dev-log') ?? '');
 
-test('a sound clock that stops while running: the drawings keep playing, and the next Play brings the sound back', async ({ page }) => {
+test('a sound clock that stops while running: the drawings keep playing, she’s told to reopen the app, and the next Play makes a new context', async ({ page }) => {
   await freezableAudio(page);
   await watchSound(page);
   await openApp(page);
@@ -594,7 +594,8 @@ test('a sound clock that stops while running: the drawings keep playing, and the
   });
   await playBtn(page).click();
   await expect(page.locator('.pp-playback')).toBeVisible();
-  await expect(toast(page)).toContainText('Tap Play again');
+  // Only closing the app helped on her iPad (WebKit bug), so that's what it says.
+  await expect(toast(page)).toContainText('Close Parapara! and open it again');
   // Not frozen: the playhead moves on (silently).
   await expect.poll(() => page.evaluate(() => [...window.__visited].sort()), { timeout: 5000 })
     .toEqual(expect.arrayContaining(['Frame 2', 'Frame 3']));
@@ -613,5 +614,40 @@ test('a sound clock that stops while running: the drawings keep playing, and the
   // And it runs on that clock without stalling.
   await page.waitForTimeout(800); // proving a stall doesn't happen
   expect((await devLogText(page)).match(/sound-stalled/g)).toHaveLength(1);
+  await playBtn(page).click();
+});
+
+// The WebKit bug (audio.js header): a home-screen app's sound can come
+// back silent after the background. The workaround: pause the context
+// on the way out; the next Play tap resumes it.
+test('going to the background pauses the sound; the next Play resumes it', async ({ page }) => {
+  await freezableAudio(page); // for window.__contexts
+  await watchSound(page);
+  await openApp(page);
+  await frames(page, 3);
+  await tiles(page).nth(0).click();
+  await expect(tiles(page).nth(0)).toHaveClass(/is-current/);
+  await importSound(page, { buffer: wav(2) });
+  await soundBtn(page).click(); // close the panel
+
+  // Playing when the app goes: playback stops, the context pauses.
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__contexts[0]?.state)).toBe('running');
+  await setVisibility(page, 'hidden');
+  await expect(page.locator('.pp-playback')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__contexts[0].state)).toBe('suspended');
+  await expect.poll(() => devLogText(page)).toContain('sound-sleep state=running paused=true');
+  await setVisibility(page, 'visible');
+  // Coming back doesn't start it — only a tap can.
+  expect(await page.evaluate(() => window.__contexts[0].state)).toBe('suspended');
+
+  // The next Play resumes the same context and schedules sound on it.
+  const before = await page.evaluate(() => window.__soundStarts.length);
+  await playBtn(page).click();
+  await expect(page.locator('.pp-playback')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__contexts[0].state)).toBe('running');
+  expect(await page.evaluate(() => window.__contexts.length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__soundStarts.length)).toBeGreaterThan(before);
   await playBtn(page).click();
 });

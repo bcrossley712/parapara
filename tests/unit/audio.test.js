@@ -49,6 +49,8 @@ function fakeContext({ state = 'running', outputLatency = 0 } = {}) {
     },
     decodeAudioData: (bytes) => (bytes.byteLength > 0 ? Promise.resolve({ duration: 4 }) : Promise.reject(new Error('bad'))),
     resume() { ctx.resumes += 1; return Promise.resolve(); },
+    suspends: 0,
+    suspend() { ctx.suspends += 1; ctx.state = 'suspended'; return Promise.resolve(); },
     close() { ctx.closed = true; return Promise.resolve(); },
   };
   return ctx;
@@ -574,4 +576,44 @@ test('the log hears each state change, with the rate', () => {
   handler();
   assert.deepEqual(events.find(([name]) => name === 'sound-state')[1], { state: 'interrupted', rate: 44100, out: 0, base: '?' });
   void audio; void contexts;
+});
+
+// --- going to the background (the WebKit silent-sound bug) ---
+
+test('sleep stops the sound and pauses a running context; the next unlock resumes it', () => {
+  const { ctx, audio, events } = setup();
+  audio.clock.start({ fps: 12, frameCount: 24 });
+  assert.equal(ctx.started.length, 1);
+  audio.sleep();
+  assert.equal(ctx.stopped, 1);
+  assert.equal(audio.clock.mode, null);
+  assert.equal(ctx.suspends, 1);
+  assert.equal(ctx.state, 'suspended');
+  assert.deepEqual(events.at(-1), ['sound-sleep', { state: 'running', paused: true }]);
+  audio.unlock(); // inside the Play tap
+  assert.equal(ctx.resumes, 1);
+});
+
+test('sleep leaves a context that isn\'t running alone, and never pauses while recording', () => {
+  const { ctx, audio, events } = setup({ ctxOptions: { state: 'suspended' } });
+  audio.unlock(); // makes the context
+  ctx.state = 'interrupted';
+  audio.sleep();
+  assert.equal(ctx.suspends, 0);
+  assert.deepEqual(events.at(-1), ['sound-sleep', { state: 'interrupted', paused: false }]);
+
+  ctx.state = 'running';
+  audio.setRecording(true);
+  audio.sleep();
+  assert.equal(ctx.suspends, 0);
+  assert.deepEqual(events.at(-1), ['sound-sleep', { state: 'running', paused: false, why: 'recording' }]);
+});
+
+test('sleep before any sound has played makes no context', () => {
+  let made = 0;
+  const events = [];
+  const audio = createAudio({ createContext: () => { made += 1; return fakeContext(); }, onEvent: (n, d) => events.push([n, d]) });
+  audio.sleep();
+  assert.equal(made, 0);
+  assert.deepEqual(events, [['sound-sleep', { state: 'none', paused: false }]]);
 });

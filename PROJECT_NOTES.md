@@ -140,21 +140,31 @@ icon, manifest `name`/`short_name`, and repo copy.
      share links, now that video sharing works.
 2. Then the requested extras under Open items.
 
+**Built, to check on the iPad (this push) — sound after the
+background.** A WebKit bug (see Open items) left the sound silent after
+the app came back from the background (seen 2026-10-31, after saving a
+video and with backgrounding alone); only closing the app helped. Now
+the sound pauses when the app goes to the background and the next Play
+resumes it. Check: play, put the app away for a minute or two, come
+back, Play — is there sound? Send the log either way (`sound-sleep
+state=… paused=…`, the `play` line, `sound-state`, `sound-start`). The
+stall notice now says to close and reopen the app.
+
 **Open iPad checks** (send the activity log with any of them):
 - **Whenever convenient:** a 48-frame export's time, with the editor
   fine after (no lost-canvas banner); a 1–3 fps video in Photos;
   sharing to Files; switching apps mid-export stops it with a
-  message; one launch's `storage` line (a reference point); from 5c:
+  message; from 5c:
   music while recording (`rec-start`, `rec-session`,
   `sound-start`/`sound-silent`), the first-hold mic prompt, dragging
   handles with her stylus, a 3-minute song's memory, whether the sound
   panel should reopen at launch (it doesn't).
 - **When it happens:**
   - Play freezing after Bluetooth headphones connect: the drawings
-    should keep moving with a "sound stopped" notice, and the next
-    Play should have sound. Send `sound-stalled`, `sound-renew`,
-    `sound-device-change`, `sound-state` and the `play` line. If the
-    next Play is still silent, say so.
+    should keep moving with a "The sound stopped. Close Parapara!…"
+    notice (confirmed for a background stall, 2026-10-31). Send
+    `sound-stalled`, `sound-device-change`, `sound-state` and the
+    `play` line.
   - Music during a take sounding ~½ s late: look for `out=5` in
     `rec-start` / `mic-delay` and rerun the Mic delay test
     (`MIC_DELAY_SECONDS` is -22 ms). iOS asking for the mic after each
@@ -180,6 +190,23 @@ if it shows:
   `export-audio-failed`, `share-failed`.
 
 **Open items**
+- **Silent sound after the background — WebKit bug, workaround
+  unproven.** A home-screen app's Web Audio can come back silent after
+  the app has been in the background: the context says `'running'`,
+  its clock may even move, nothing is heard ([WebKit
+  291892](https://bugs.webkit.org/show_bug.cgi?id=291892), also
+  276016, 276687 — open, not ours to fix). Tested on her iPad
+  (2026-10-31): Play again with a new context ✗, a page reload ✗,
+  closing and reopening the app ✓. Reports say iOS 26 may be worst —
+  **her iPadOS version: not recorded yet** (Settings → General →
+  About). Built: pause on the way out (`audio.sleep`), resume in the
+  Play tap; a frozen clock still shows the close-and-reopen notice,
+  but the silent kind can't be detected. **If the pause doesn't
+  help:** the fallback is playing the sound through an `<audio>`
+  element (a file made with the export's offline mix) — a real project
+  (playback timing runs on the audio clock today), and reports say
+  iOS 26 may break `<audio>` in home-screen apps too. Decide after her
+  iPad's result.
 - **GIF and PNG sequence export — cut from step 6 (2026-10-29), revisit
   after the main build; ask her.** A departure from her apps (all offer
   both), chosen on purpose: MP4 with sound covers "send it to a
@@ -285,7 +312,9 @@ if it shows:
   project backup her only remedy is deleting drawings (a video can't be
   opened as a project again), and ~80% of Safari's quota likely never
   fires on her iPad — eviction follows the iPad's free space, not the
-  app's quota. Instead each launch logs a `storage` line. **Revisit**
+  app's quota. Instead each launch logs a `storage` line. **Her iPad
+  (2026-10-31): ~34 MB used of a ~35 GB quota (0.1%), `persisted=yes`**
+  — confirms the warning would never fire. **Revisit**
   after step 7's backup, or if the log shows usage climbing or
   `persisted=no`. ([why](docs/DESIGN_NOTES.md#planned-features))
 - **Onion skin extras — revisit in final touches**, once she knows
