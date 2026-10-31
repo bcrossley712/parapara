@@ -785,7 +785,11 @@ device-only.
 - **Export tiers:** (1) video/animation export + native Web Share —
   covers "send it to a friend," the main use; (2) shareable link via a
   Cloudflare Worker + R2, deferred until the core app is proven;
-  (3) full project export/import, stretch goal. Export format was
+  (3) full project export/import, stretch goal — **raised to step 7's
+  first job (2026-10-31) as automatic backup to R2**: a manual backup
+  goes stale (his phone wipe: the manual one was too old to help, the
+  automatic one saved everything), and a home-screen app can't write
+  to Files unprompted, so carefree means a server. Export format was
   originally GIF/WebM stitching; ffmpeg.wasm was floated but is
   superseded unless reinstated. Container/codec decided at step 6.
 - **Export (step 6 scoping, 2026-10-27).** Formats as her apps offer:

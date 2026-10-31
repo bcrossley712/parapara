@@ -95,109 +95,73 @@ icon, manifest `name`/`short_name`, and repo copy.
   (`SOUND_FILE_TYPES` in `ui.js`), never `audio/*`** — iOS treats
   `audio/*` like video and shows Photo Library / Take Video / Choose
   File (seen on her iPad); extensions should open Files directly.
-- **Third-party code — one agreed exception: gifenc** (MIT, no
-  dependencies), **for GIF export if it's built — not vendored yet**
-  (GIF was cut from step 6; see Open items). Its 256-color reduction
-  is the hard part and better than a homemade one. **Vendored, never
-  loaded from a CDN**: its readable `src/` files (not the minified
-  build) copied into `js/export/vendor/gifenc/` with their license
-  header and a version comment (1.0.3), listed in `APP_SHELL`, and
-  fixed by us if needed — upstream changes never reach the app unless
-  copied in by hand. No dithering, so a photo in a GIF bands; accepted.
-  Any other library needs the same discussion first.
+- **Third-party code — none, with one agreed exception:** gifenc
+  (MIT), only if GIF export is ever built — copied into the repo at a
+  pinned version, never loaded from a CDN ([plan](docs/DESIGN_NOTES.md#planned-features)
+  → "GIF and PNG sequence"). Any other library needs the same
+  discussion first.
 - **He's comfortable with vanilla JS**, knows Vue but chose not to use
   it here. Skip deep terminal hand-holding; don't assume tooling
   fluency beyond that.
 
 ## Current state
 
-- **Done and confirmed on the iPad:** steps 1–4 and 5a–5c — drawing,
-  saving, undo, layers, gallery, 2e's requests, reference image, frame
-  cache, playback, onion skin, frame editing, a canvas tap closing an
-  open menu, and sound (import, sound panel, hold-to-record over
-  music), plus the last push's layers menu, mixer and Listen/Set start,
-  **6a** (video export: Share opens the iOS share sheet, Save Video
-  plays) and **6b** (sound in the video: plays in Photos and, sent in
-  Messages, for the friend — the WebKit AAC workaround proven). Music /
-  Voice balance checked by him: workable as is (a slight lean to music;
-  lowering Music brings the voice forward). Headset checked with recording (no AirPods to test). How each works
-  is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
-  with the buttons, not gestures. She knows songs from streaming apps
-  can't be imported (bought downloads can).
+- **Done and confirmed on the iPad:** steps 1–6 — drawing, saving,
+  undo, layers, gallery, 2e's requests, reference image, frame cache,
+  playback, onion skin, frame editing, menus closing on a canvas tap,
+  sound (import, sound panel, hold-to-record over music, mixer,
+  Listen/Set start) and export (MP4 with sound through the share
+  sheet, Include images per project). How each works is in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
+  the buttons, not gestures. She knows songs from streaming apps can't
+  be imported (bought downloads can).
 
-**Built, to check on the iPad (this push) — Play freezing after
-Bluetooth headphones connect** (seen twice after 6b: Play showed no
-movement and no sound until the app was relaunched; the log said
-`sound-start` each time — the context said 'running' but its clock had
-stopped). Now a stalled clock is caught within ½ s: the drawings play on
-silently, a notice says "The sound stopped. Tap Play again…", and the
-next Play makes a fresh audio context. Check, when it happens again:
-the drawings keep moving, and the next Play has sound. Send the log
-either way: `sound-stalled`, `sound-renew why=…`, `sound-device-change`
-(whether iOS reports the headphones at all), `sound-state` and the
-`play` line's `rate=` / `out=` (a sample-rate change is one suspect). If
-the next Play is still silent, a fresh context isn't enough on iOS —
-say so; the fallback still keeps the drawings playing.
+**Next:**
 
-**Built, to check on the iPad (this push) — 6d.** **Include images:**
-the Share sheet shows an Include images switch only when a frame has
-a photo; it starts off, so a photo stays out of the video even while
-she sees it. Check: off → no photo in the video; on → the photo is in,
-whatever Hide images says; the switch is still on after closing and
-reopening the project (it's per project). Remind her a background
-photo now needs the switch on once. **Storage log:** each launch adds
-a `storage` line (`used=`, `quota=`, `pct=`, `persisted=`) — send one
-from her iPad so we have a reference point (no warning is shown).
+1. **Step 7 — automatic backup (his priority, 2026-10-31).** It must
+   be carefree: no step she has to remember (his experience — a manual
+   backup was too old to help when his phone was wiped; only the
+   automatic one saved anything). A home-screen app can't write to
+   Files on its own, so automatic means a server: **Cloudflare Worker
+   + R2**. Build in this order (each confirmed on the iPad):
+   - **7a — a project as one file, and opening one** (save and
+     restore a whole project). Both the cloud backup and any manual
+     copy use it, and it's testable without a server.
+   - **7b — automatic backup to R2** after saves, when online, and
+     **restore onto a fresh install** (a wiped iPad, a new one).
+     Decide when scoping: how a device proves the backups are its own
+     (at minimum a private key, plus a recovery code kept by him
+     outside the iPad — a wiped iPad loses its key), how old versions
+     and deleted projects are kept, cost (likely within the free
+     tier; check), and that a 13-year-old's drawings are private (no
+     public bucket, no listing).
+   - **Then** share links and Krita reference import on the same
+     backend — decide when they're reached whether she still wants
+     share links, now that video sharing works.
+2. Then the requested extras under Open items.
 
-**6a checks still open, whenever convenient** (not blocking): Files
-works; a 48-frame
-export's time and the editor fine after (no lost-canvas banner); a 1–3
-fps video plays right in Photos; switching apps mid-export stops it
-with a message. On a failure, send the activity log (`export`,
-`exported` / `export-failed`, `share` lines).
-
-**Built, waiting on real use to confirm** (the app sees little use in
-development, so these may take a while):
-- **Erase-then-switch fix:** erase as the last stroke, tap another
-  frame — no "…loaded again" banner.
-- **Activity log fields:** guard lines carry `undo=`, `cache=`, `made=`
-  — useful only once a lost canvas recurs (see Open items).
-
-**Next, in this order** (each confirmed on the iPad before the next):
-
-1. **Step 6** export + native share sheet (format reasoning and the
-   WebKit AAC trap: [design notes](docs/DESIGN_NOTES.md#planned-features)).
-   **Agreed scope (2026-10-27):**
-   - **MP4 only** (H.264 + AAC; WebCodecs + a hand-written muxer). Her
-     apps also offer GIF and PNG sequence; **both cut from step 6
-     (2026-10-29), a deliberate departure** — see Open items. No repeat
-     option: length = frames ÷ fps, the song cut at the last frame.
-   - **Include images** switch in the export sheet, shown only when the
-     project has a photo; off to start (a tracing photo usually stays
-     out), remembered per project, separate from Hide images (6d,
-     2026-10-29).
-   - **Share is a second tap** after encoding (iOS opens the share
-     sheet only from a tap); switching apps mid-export aborts it.
-   - Split: **6a** export sheet, progress, Share, MP4 video-only ·
-     **6b** sound in the MP4 (AAC workaround; only a file played in
-     Messages on her iPad proves it) · ~~6c GIF + PNG zip~~ (cut) ·
-     **6d** Include images (remembered per project) + a launch storage
-     log line; the storage warning dropped (see Open items).
-   - **6a, 6b done** (confirmed on the iPad) — see ARCHITECTURE.md →
-     Export and sharing. No include-sound switch (Flipaclip has none —
-     add if she asks). **6d built** — confirm on the iPad (above);
-     then step 6 is done.
-2. **Step 7** Cloudflare Worker + R2 (share links, Krita reference
-   import) · then the requested extras under Open items.
-
-**5c checks still open, whenever convenient** (not blocking): music
-while recording (send the take's `rec-start`, `rec-session`,
-`sound-start`/`sound-silent` lines), the first-hold mic prompt,
-dragging handles with her stylus, a 3-minute song's memory/pause,
-whether the panel should reopen at launch (it doesn't). **Mic delay**
-is set at -22 ms; if music during a take ever sounds ~½ s late, look
-for `out=5` in the `rec-start` / `mic-delay` lines and rerun the Mic
-delay test. iOS asks for the mic after every relaunch — its choice.
+**Open iPad checks** (send the activity log with any of them):
+- **Whenever convenient:** a 48-frame export's time, with the editor
+  fine after (no lost-canvas banner); a 1–3 fps video in Photos;
+  sharing to Files; switching apps mid-export stops it with a
+  message; one launch's `storage` line (a reference point); from 5c:
+  music while recording (`rec-start`, `rec-session`,
+  `sound-start`/`sound-silent`), the first-hold mic prompt, dragging
+  handles with her stylus, a 3-minute song's memory, whether the sound
+  panel should reopen at launch (it doesn't).
+- **When it happens:**
+  - Play freezing after Bluetooth headphones connect: the drawings
+    should keep moving with a "sound stopped" notice, and the next
+    Play should have sound. Send `sound-stalled`, `sound-renew`,
+    `sound-device-change`, `sound-state` and the `play` line. If the
+    next Play is still silent, say so.
+  - Music during a take sounding ~½ s late: look for `out=5` in
+    `rec-start` / `mic-delay` and rerun the Mic delay test
+    (`MIC_DELAY_SECONDS` is -22 ms). iOS asking for the mic after each
+    relaunch is its choice.
+  - A lost-canvas banner (see Open items). The erase-then-switch fix
+    should mean no "…loaded again" banner after erasing and tapping
+    another frame.
 
 **Ask her when there's a chance** ([why](docs/DESIGN_NOTES.md#reference-image)):
 does she want to draw/erase on the photo itself (→ "Make into layer"),
@@ -205,11 +169,15 @@ and does starting a photo at 50% bother her when it's a background
 (→ remember her last opacity, or a choice on import)?
 
 **Watch the activity log** (gear → Developer → Activity log). Get it
-if it shows `load-renewed`, `load-broken`, `save-refused`,
-`check-failed`, `hold-refused`, `export-audio-failed`, `sound-stalled`, `recover` (lost canvas — each line
-also gives `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`) or `save-failed … timed out`
-(a layer encode that never finished; the save gives up after 15 s
-instead of locking the editor), or `export-failed` / `share-failed`.
+if it shows:
+- **lost canvas:** `load-renewed`, `load-broken`, `save-refused`,
+  `check-failed`, `hold-refused`, `recover` (each line also gives
+  `canvases=`, `play=`, `onion=`, `undo=`, `cache=`, `made=`);
+- **saving:** `save-failed … timed out` (a layer encode that never
+  finished; the save gives up after 15 s instead of locking the
+  editor);
+- **sound and export:** `sound-stalled`, `export-failed`,
+  `export-audio-failed`, `share-failed`.
 
 **Open items**
 - **GIF and PNG sequence export — cut from step 6 (2026-10-29), revisit
@@ -318,8 +286,8 @@ instead of locking the editor), or `export-failed` / `share-failed`.
   opened as a project again), and ~80% of Safari's quota likely never
   fires on her iPad — eviction follows the iPad's free space, not the
   app's quota. Instead each launch logs a `storage` line. **Revisit**
-  when project backup (export tier 3) exists, or if the log shows usage
-  climbing or `persisted=no`. ([why](docs/DESIGN_NOTES.md#planned-features))
+  after step 7's backup, or if the log shows usage climbing or
+  `persisted=no`. ([why](docs/DESIGN_NOTES.md#planned-features))
 - **Onion skin extras — revisit in final touches**, once she knows
   onion skins (she's too new to judge them now): wrap-around with
   loop, ghosts of the active layer only.
@@ -358,8 +326,7 @@ Applies to the whole app. How each area works is in
 - **Stack:** vanilla JS, native ES modules, no framework, no bundler.
   Nothing from npm ships (gifenc, if GIF export is ever built, is the
   one agreed exception — see Standing constraints); npm is test tooling
-  only. CI tests, copies
-  app files, and stamps the service-worker version — never compiles.
+  only. CI tests, copies app files, and stamps the service-worker version — never compiles.
   ([why](docs/DESIGN_NOTES.md#stack))
 - **Input:** Pointer Events only. Pressure/tilt deliberately unread, so
   Apple Pencil support is additive. **Two deliberate exceptions**, both
@@ -378,8 +345,9 @@ Applies to the whole app. How each area works is in
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
 - **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  share links and Krita import via Worker + R2 (step 7). Video export
-  + Web Share is step 6; the storage warning was dropped (Open items).
+  step 7 on a Cloudflare Worker + R2 — automatic backup first, then
+  share links and Krita import. The storage warning was dropped (Open
+  items).
 
 ## Global rules
 
