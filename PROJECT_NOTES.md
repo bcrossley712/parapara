@@ -97,7 +97,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   File (seen on her iPad); extensions should open Files directly.
   7a's Import (a project file) is a file input too, with **no
   `accept`** (iOS may grey out the unknown `.parapara`); the contents
-  decide.
+  decide. On her iPad it shows Photo Library / Take Photo or Video /
+  Choose File before Files — accepted (2026-11-01), leave it.
 - **Third-party code — none, with one agreed exception:** gifenc
   (MIT), only if GIF export is ever built — copied into the repo at a
   pinned version, never loaded from a CDN ([plan](docs/DESIGN_NOTES.md#planned-features)
@@ -115,7 +116,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   sound (import, sound panel, hold-to-record over music, mixer,
   Listen/Set start, sound back after the background — 2026-10-31) and
   export (MP4 with sound through the share sheet, Include images per
-  project). How each works is in
+  project), and 7a's project files (gallery ⋯ → Save as file, top
+  bar → Import — 2026-11-01). How each works is in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
   the buttons, not gestures. She knows songs from streaming apps can't
   be imported (bought downloads can).
@@ -128,35 +130,36 @@ icon, manifest `name`/`short_name`, and repo copy.
    automatic one saved anything). A home-screen app can't write to
    Files on its own, so automatic means a server: **Cloudflare Worker
    + R2**. Build in this order (each confirmed on the iPad):
-   - **7a — a project as one file, and opening one — built, to
-     check** (below). Decided (2026-10-31): a `.parapara` file (a
-     stored zip: `project.json` + blobs); opening always makes a new
-     project with the same name; the thumbnail rides along. **7b
-     uploads the same manifest and blobs piece by piece** (only
-     changed blobs go up), not a whole file per save.
+   - **7a — done** (above).
    - **7b — automatic backup to R2** after saves, when online, and
-     **restore onto a fresh install** (a wiped iPad, a new one).
-     Decide when scoping: how a device proves the backups are its own
-     (at minimum a private key, plus a recovery code kept by him
-     outside the iPad — a wiped iPad loses its key), how old versions
-     and deleted projects are kept, cost (likely within the free
-     tier; check), and that a 13-year-old's drawings are private (no
-     public bucket, no listing).
+     **restore onto a fresh install** (a wiped iPad, a new one) —
+     **scoped 2026-11-01** ([decisions](docs/DESIGN_NOTES.md#planned-features)
+     → "Backup (7b scoping)"). In short: a **passkey with PRF** (synced
+     by iCloud Keychain) instead of a recovery code; everything
+     **encrypted on the iPad**; uploads the 7a manifest plus only the
+     changed blobs; restore keeps the original ids (`keepIds` on
+     `unpackProject`); **one invite code per family** (friends can
+     use it); limits 1 GB per vault, 8 GB total, 25 MB per upload;
+     palette, recent colors and tool settings backed up too; she sees
+     a notice when backup has been failing for days. **First:** the
+     dev Passkey test on her iPad (below). **Then** the full 7b build
+     plan for his OK, and his Cloudflare setup. The app **stays at
+     `bcrossley712.github.io`** (decided 2026-11-01): passkeys are tied
+     to the site's address, so a later move would strand them.
    - **Then** share links and Krita reference import on the same
      backend — decide when they're reached whether she still wants
      share links, now that video sharing works.
 2. Then the requested extras under Open items.
 
-**Built, to check on the iPad (this push) — 7a, project files.**
-Gallery ⋯ → **Save as file** → "Your file is ready" → Share; gallery
-top bar → **Import**. Check: Save as file a real project (one with a
-photo and sound), Save to Files; does the share sheet offer Files /
-AirDrop, and is the file named `<name>.parapara` (not `.zip`)? Then
-Import it: does the picker open Files directly or show a menu first,
-is the `.parapara` file selectable, and does the new card open with
-every frame, layer, photo and the sound? Try importing something
-that isn't one (a photo) — a notice, no card. Send the log
-(`project-file`, `project-import`, any `…-failed`).
+**Built, to check on the iPad (this push) — dev Passkey test (before
+7b).** In the **installed app** (not Safari), gear → Developer →
+**Passkey test**: the first tap makes a test passkey (Touch ID), the
+second signs in with it. Hoped for: "made a test passkey (PRF on,
+synced to iCloud)", then "Passkey test passed". Send the
+`passkey-test` log lines (`app=installed`, `prf`, `secret`, `same`,
+`bs`). Then delete "Parapara! passkey test" in the Passwords app.
+Safari already passed Corbado's demo (2026-11-01) once her Screen
+Time allowed iCloud Passwords (see DESIGN_NOTES → Backup).
 
 **Open iPad checks** (send the activity log with any of them):
 - **Whenever convenient:** a 48-frame export's time, with the editor
@@ -197,7 +200,8 @@ if it shows:
 - **sound and export:** `sound-stalled`, `export-failed`,
   `export-audio-failed`, `share-failed`;
 - **project files (7a):** `project-file-failed`,
-  `project-import-failed`.
+  `project-import-failed`;
+- **passkeys (before 7b):** `passkey-test … result=failed`.
 
 **Open items**
 - **Silent sound after the background — WebKit bug, worked around;
@@ -450,7 +454,11 @@ and the `showNotice` wrapper in `main.js` (and the guard-context
 assertions in `canvas-loss.spec.js`), `frameCache.memory`,
 `liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`,
 `storageLogFields` in `storage.js` (6d; keep `storageEstimate` if a
-storage warning is ever built), and the
+storage warning is ever built), the **Passkey test** (before 7b:
+`backup/dev-passkey-test.js`, its import and `passkeyTest` in
+`main.js`, `ui.js` and `gallery.js`, its button in
+`settings-panel.js`, its `sw.js` entry, `tests/e2e/passkey.spec.js`;
+keep `backup/passkey.js`), and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
 (`parapara-dev-log`); Copy takes the last 60 (`DEV_LOG_COPY_LINES`).
 

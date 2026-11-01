@@ -68,9 +68,26 @@ test('the rail has a gear instead of Clear, and the panel opens and closes', asy
   await gear(page).click();
   await expect(panel(page)).toBeVisible();
 
-  // Tap outside (on the canvas area) closes it, like the color picker.
-  await page.locator('.pp-canvas-area').click({ position: { x: 20, y: 20 } });
+  // Tap outside (on the canvas area, at its right edge — the panel
+  // can reach the top of the screen) closes it, like the color picker.
+  const area = await page.locator('.pp-canvas-area').boundingBox();
+  await page.locator('.pp-canvas-area').click({ position: { x: area.width - 20, y: 20 } });
   await expect(panel(page)).toBeHidden();
+});
+
+test('the panel fits the screen and scrolls when the Developer section is taller', async ({ page }) => {
+  await page.setViewportSize({ width: 1080, height: 560 });
+  await openInstalledApp(page);
+  await gear(page).click();
+  const box = await panel(page).boundingBox();
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(560);
+  // The top of it (Check for updates) is still on screen, the bottom
+  // (Passkey test) scrolls into view.
+  await expect(page.getByRole('button', { name: 'Check for updates' })).toBeInViewport();
+  const passkey = page.getByRole('button', { name: 'Passkey test' });
+  await passkey.scrollIntoViewIfNeeded();
+  await expect(passkey).toBeInViewport();
 });
 
 test('the panel shows which build is running', async ({ page }) => {

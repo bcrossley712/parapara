@@ -71,6 +71,8 @@ const APP_SHELL = [
   './js/export/export.js',
   './js/export/mp4.js',
   './js/export/aac.js',
+  './js/backup/passkey.js',
+  './js/backup/dev-passkey-test.js', // DEV ONLY (before 7b)
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

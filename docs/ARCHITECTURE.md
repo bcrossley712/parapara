@@ -221,7 +221,8 @@ and the glue in `main.js`.
 `storage/autosave.js` (save timing only: debounce 500 ms drawing /
 300 ms settings, no overlap, flush), `storage/project-file.js` and
 `storage/zip.js` (7a, a project as one file), `storage/dev-log.js`
-(DEV ONLY).
+(DEV ONLY), `backup/passkey.js` (before 7b: passkeys with PRF) and
+`backup/dev-passkey-test.js` (DEV ONLY).
 The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema).
 
 ### How it works
@@ -252,8 +253,20 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   blob list). Step 7b reuses the manifest and blobs, uploaded piece by
   piece.
 
+- **Passkeys (before 7b):** `passkey.js` wraps
+  `navigator.credentials` — a discoverable passkey with PRF
+  (`createPasskey`), signing in with no `allowCredentials` so the iPad
+  lists every passkey for the site, as restore will
+  (`signInWithPasskey`) — plus pure helpers (`authenticatorFlags`,
+  `readPrf`, base64url). The dev Passkey test drives it: tap 1 makes a
+  test passkey, tap 2 signs in and compares a fingerprint of the PRF
+  secret (localStorage `parapara-dev-passkey`).
+
 ### Don't break
 
+- **Passkey ceremonies run synchronously inside the tap** (no await
+  before `createPasskey` / `signInWithPasskey`): Safari refuses
+  WebAuthn without a fresh gesture, and one tap allows one ceremony.
 - **Autosave exports every unsaved layer in the same tick and saves
   each to the ref of the frame it was exported from** (`session.frame`
   captured before any await). Reading the ref after awaiting the
@@ -292,12 +305,20 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   that if thumbnail ids change. Sound files and photos count in it; skip
   them too if a sound/photo test ever uses it.
 
+### Testing
+
+- **Passkeys in e2e** (`passkey.spec.js`): Chromium's virtual
+  authenticator over CDP (`WebAuthn.addVirtualAuthenticator` with
+  `hasPrf`, backup flags on) stands in for iCloud Keychain. Open the
+  app as **`localhost`**, not the config's `127.0.0.1` — an IP address
+  isn't a valid passkey domain (SecurityError).
+
 ### iPad-only checks
 
-IOS storage eviction, suspend/relaunch behavior. 7a: the share sheet
-for a `.parapara` file (Save to Files, AirDrop; named `.parapara`, not
-`.zip`), the Import picker with no `accept`, memory while packing a
-big project.
+IOS storage eviction, suspend/relaunch behavior. 7a: share sheet,
+`.parapara` name and the Import picker confirmed (2026-11-01); still
+unchecked: memory while packing a big project. Before 7b: the dev
+Passkey test in the installed app.
 
 ---
 
@@ -999,6 +1020,10 @@ temporary), `ui/dev-log-view.js` (DEV ONLY); screen routing in
 
 ### Don't break
 
+- **The gear panel caps its height** to the room beside/below the gear
+  and scrolls (`setOpen`); the Developer section is taller than an
+  810 px iPad screen, so without it the top (Check for updates) goes
+  off screen.
 - **The menu-dismiss listener in `ui.js` is registered before any
   menu is created** (document, capture): it must see the menu still
   open, and menus close themselves in their own capture listeners. It

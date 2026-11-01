@@ -880,6 +880,91 @@ device-only.
   and only the blobs that changed; restore reassembles them. Restore
   onto a wiped iPad will want the original ids kept (an option on
   unpack), not a copy.
+  **On her iPad (2026-11-01):** saved as `<name>.parapara`; an
+  11-frame, 8-layer project packed into 2.1 MB in 63 ms and imported
+  in 187 ms, and the copy opened and played with sound. Import's menu
+  before Files is the cost of no `accept` — accepted. Picking a folder
+  in Files and finding the file again were tedious (iOS's own UI, not
+  fixable here); 7b's in-app restore avoids that, and Save as file /
+  Import stay as extras (sending to a friend, a copy on a computer).
+- **Backup (7b scoping, 2026-11-01).** Automatic, so nothing for her
+  to remember. Decided with him:
+  - **Shape:** the Worker is a thin private locker; the iPad hashes,
+    encrypts and decides what to send. Per backup it asks which blobs
+    the Worker lacks (one request), uploads those, then the 7a
+    manifest last (the Worker refuses a manifest whose blobs aren't
+    there). At most every ~2 min while she draws, and on leaving a
+    project, hiding the app or launching with work pending; iOS may
+    cut an upload short when hidden, and the next launch finishes it.
+    Restore keeps the original ids (`keepIds`); a project already on
+    the device is skipped. Palette, recent colors and tool settings
+    are backed up too (his choice), so a new iPad feels like hers.
+  - **Identity — a passkey, not a recovery code.** He didn't want a
+    code that can get lost; an email login (Auth0 or our own emailed
+    code) was weighed and set aside: whatever lets her back in after a
+    wipe must hand back the key, so the server would hold it (no
+    end-to-end encryption); Auth0's redirect can land in Safari, whose
+    storage is separate from the home-screen app's; email links open
+    in Safari too; sending email to any address needs Workers Paid or
+    another provider; and it would store families' addresses. A
+    passkey's **PRF** output (the same secret every time for the same
+    salt, only that passkey can produce it) unlocks the vault's
+    encryption key, and iCloud Keychain syncs the passkey — so a new
+    iPad on her Apple ID restores with one Touch ID, nothing typed.
+    The passkey's user handle names the vault. The Worker keeps only
+    public keys and checks signatures. Later, optional: a second
+    passkey on his iPhone as a spare key. It depends on **iCloud
+    Keychain staying on** for her Apple ID (a child account in his
+    Family Sharing can always be recovered).
+  - **Her Screen Time had to change for passkeys (2026-11-01):**
+    Corbado's PRF demo first failed with NotAllowedError (no Touch ID
+    sheet). Fixed by allowing Account Changes briefly to turn on
+    iCloud → Passwords → Sync this iPad, and allowing the Passwords app
+    (hidden, so AutoFill From was empty). Then Safari passed all three
+    checks: PRF at creation (with a value — CTAP 2.2), PRF at sign-in
+    with the same value, synced passkey (BE=1, BS=1). Whether the
+    installed app behaves the same is the dev Passkey test.
+  - **Encrypted on the iPad** (AES-GCM, WebCrypto): blobs named by a
+    keyed hash of their contents, so Cloudflare sees random ids,
+    sizes and times — no names, no drawings — and identical files
+    share one name (a duplicated project costs nothing).
+  - **Friends can use it:** one vault per install, no accounts, no
+    emails. **One invite code per family** (a Worker secret he edits,
+    `name:code` pairs); each vault remembers its invite, so removing
+    one stops that family's backups without touching others. Turning
+    backup on is an adult's step; without it the app works as before.
+  - **Cost guards:** the app itself is static on GitHub Pages (1.3 MB,
+    soft 100 GB/month), so only backup touches Cloudflare. The
+    Workers free plan can't bill (100,000 requests/day, then errors
+    until midnight UTC — a junk flood could pause her backups for a
+    day, nothing lost). R2 is what bills, so the Worker refuses writes
+    past **1 GB per vault, 8 GB total (inside the free 10 GB), 25 MB
+    per upload**, checked against totals the daily cleanup computes;
+    a `PAUSED` variable switches it all off; a $1 budget alert in
+    Cloudflare (alerts don't cap). Worst case with these: under ~$10 a
+    month. Outgrowing free means dozens of active users — a deliberate
+    choice then (Workers Paid $5/month).
+  - **Kept:** latest, hourly for 48 h, daily for 30 days; deleted
+    projects leave a marker and stay restorable 90 days; vaults unused
+    for 12 months are deleted. Picking an old version is deferred (a
+    later menu that opens one as a copy); restore offers current
+    projects and a "Deleted recently" list.
+  - **She sees a notice** when backup has been failing for days (his
+    choice); settings shows the status.
+  - **Privacy:** private bucket (no public URL), every request
+    authenticated and scoped to its vault, the Worker answers only
+    the app's origin.
+  - **Origin:** passkeys and IndexedDB belong to the site's address
+    (today `bcrossley712.github.io`, shared with his other Pages
+    projects). He has his own domain on Cloudflare but **keeps the app
+    where it is** (2026-11-01); a move after 7b would strand the
+    passkeys and need a restore. The Worker can still live on his
+    domain.
+  - **Cloudflare facts checked 2026-11-01:** R2 free 10 GB-month, 1M
+    Class A and 10M Class B requests a month, then $0.015/GB-month and
+    $4.50 per million Class A; enabling R2 asks for a payment method;
+    Workers free 10 ms CPU per request (I/O waits don't count), 100 MB
+    request bodies, 1,000 calls to Cloudflare services per request.
 - **Krita reference import** (one-way PC → iPad) reuses the same
   Worker + R2 backend: `.kra` is a ZIP with a merged-preview image;
   import that as a reference layer, not a full layer-stack parser.

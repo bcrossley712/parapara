@@ -590,6 +590,10 @@ html, body {
   font-size: 14px;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  /* The Developer section can outgrow the screen (setOpen caps the
+     height to the space beside or below the gear): scroll inside. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .pp-settings--hidden {

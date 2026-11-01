@@ -21,6 +21,7 @@ import { runPlaybackSpeedTest, runFrameMemoryTest, reportInterruptedMemoryTest }
 // Developer only (after 4b): the activity log, removed with the Developer section.
 import { devLog } from './storage/dev-log.js';
 import { showDevLog } from './ui/dev-log-view.js';
+import { runPasskeyTest } from './backup/dev-passkey-test.js'; // DEV ONLY (before 7b)
 import {
   initStorage,
   storageEstimate,
@@ -209,6 +210,8 @@ const appActions = {
   applyUpdate: () => updater.applyUpdate(),
   freshReload: () => updater.freshReload(),
   showActivityLog: () => showDevLog({ read: (last) => devLog.read(last), clear: () => devLog.clear() }),
+  // DEV ONLY (before 7b): runs inside the gear-menu tap.
+  passkeyTest: () => runPasskeyTest({ log: (fields) => devLog.add('passkey-test', fields), notice: showNotice }),
 };
 
 // Problems she has to OK go in the activity log too (dev only).

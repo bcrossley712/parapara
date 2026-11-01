@@ -17,7 +17,8 @@
 //   (timeline/dev-stress.js): Playback speed test and Frame memory
 //   test, editor only like Fill all layers. After 4b, Activity log
 //   (storage/dev-log.js): the last few hundred things that happened,
-//   to copy out when a drawing goes missing. Both screens.
+//   to copy out when a drawing goes missing. Both screens. Before 7b,
+//   Passkey test (backup/dev-passkey-test.js), both screens.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
@@ -32,6 +33,7 @@ export function createSettingsPanel(actions) {
     playbackSpeedTest, // () => void, optional (editor only)
     frameMemoryTest,   // () => void, optional (editor only)
     micDelayTest,      // () => void, optional (editor only; 5c)
+    passkeyTest,       // () => void, optional (before 7b); runs inside the tap
     showActivityLog,   // () => void, optional
   } = actions;
 
@@ -90,6 +92,13 @@ export function createSettingsPanel(actions) {
   micHint.className = 'pp-settings__hint';
   micHint.textContent = 'Plays a click and records it. Speaker on, volume up, no headphones, quiet room. Run it a few times.';
 
+  // Before 7b: does a passkey with PRF work in the installed app?
+  // (backup/dev-passkey-test.js). Must run inside the tap.
+  const passkeyBtn = makeButton('Passkey test');
+  const passkeyHint = document.createElement('div');
+  passkeyHint.className = 'pp-settings__hint';
+  passkeyHint.textContent = 'Tap once to make a test passkey, again to sign in with it. Delete it afterwards in the Passwords app.';
+
   const logBtn = makeButton('Activity log');
   const logHint = document.createElement('div');
   logHint.className = 'pp-settings__hint';
@@ -101,6 +110,7 @@ export function createSettingsPanel(actions) {
   if (playbackSpeedTest) panel.append(speedBtn, speedHint);
   if (frameMemoryTest) panel.append(memoryBtn, memoryHint);
   if (micDelayTest) panel.append(micBtn, micHint);
+  if (passkeyTest) panel.append(passkeyBtn, passkeyHint);
 
   let open = false;
   let busy = false;
@@ -174,6 +184,11 @@ export function createSettingsPanel(actions) {
     setOpen(false);
   });
 
+  passkeyBtn.addEventListener('click', () => {
+    passkeyTest(); // first: iOS needs the tap for the passkey sheet
+    setOpen(false);
+  });
+
   // Opens next to `anchor`. 'beside' (the editor's gear, at the bottom
   // of the rail): to its right, bottom-aligned, growing upward.
   // 'below' (the gallery's gear, top right): under it, right-aligned.
@@ -183,16 +198,21 @@ export function createSettingsPanel(actions) {
     if (next) {
       if (anchor) {
         const rect = anchor.getBoundingClientRect();
+        // Never taller than the room it has (8 px clear of the screen
+        // edge); the rest scrolls (the Developer section grew past an
+        // 810 px-tall iPad screen with the Passkey test).
         if (placement === 'below') {
           panel.style.left = '';
           panel.style.bottom = '';
           panel.style.top = `${rect.bottom + 8}px`;
           panel.style.right = `${window.innerWidth - rect.right}px`;
+          panel.style.maxHeight = `${Math.max(120, window.innerHeight - rect.bottom - 16)}px`;
         } else {
           panel.style.top = '';
           panel.style.right = '';
           panel.style.left = `${rect.right + 8}px`;
           panel.style.bottom = `${window.innerHeight - rect.bottom}px`;
+          panel.style.maxHeight = `${Math.max(120, rect.bottom - 8)}px`;
         }
       }
       if (!busy) status.textContent = '';
