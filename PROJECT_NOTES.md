@@ -522,19 +522,25 @@ bitmapRefs kept, so no pixels move. Version 1 had `frame.layers[]` +
 
 ## Testing
 
-**Add tests for new logic. Run them in three tiers — not the full
-suite after every small change:**
+**Add tests for new logic. Run them in three tiers — the sandbox
+never runs the full suite (slow on 2 CPUs, and its `toBlob` stall
+fails a random set each run; CI is the full check):**
 1. **While working:** `npm run test:unit` (seconds) plus only the e2e
    spec files for the area being changed, e.g.
    `npx playwright test sound` (the area's Testing tips are in
    ARCHITECTURE.md). Stress-run a timing spec once it passes.
-2. **Once, before handing off for a push:** the full suite — a change
-   in one area can break another (5b's menu change broke the robot
-   test). Sandbox failures may be the known `toBlob` stall (below).
-3. **On every push:** CI runs everything on 4 workers and blocks the
-   deploy on any failure — the real gate.
+2. **Once, before handing off for a push:** `npm run test:unit`, the
+   e2e specs of **every area touched**, and the robot test
+   (`npx playwright test hunt` — it catches one area breaking
+   another, as 5b's menu change did). **Failures: rerun only them,
+   once** (`npx playwright test --last-failed`); a test that passes on
+   the rerun was the stall. Investigate only one that fails twice.
+3. **On every push:** CI runs the full suite on 4 workers and blocks
+   the deploy on any failure — the real gate. A cross-area failure
+   caught here costs one fix-and-push; nothing broken reaches the
+   iPad.
 
-**Hand-off checklist, every step:** full suite passes → the area
+**Hand-off checklist, every step:** tier 2 passes → the area
 section in ARCHITECTURE.md is updated (rules and decisions only) →
 Current state here says what's built and what to check on the iPad,
 with no story of how it got there.
@@ -556,8 +562,8 @@ with no story of how it got there.
   to the e2e command (CI never sets it); "hiding the app saves
   immediately" still fails there (it needs a save within 300 ms). So **a sandbox run is a pre-check; CI
   (pinned image) is the real check**: judge sandbox failures by
-  whether they're this stall, and compare against a run without the
-  change when in doubt.
+  whether they're this stall — rerun with `--last-failed` rather than
+  rerunning everything.
 - **Version pin:** `@playwright/test` is exactly `1.56.0`, matching
   the sandbox browser *and* CI's image
   `mcr.microsoft.com/playwright:v1.56.0-noble` in `deploy.yml`. Bump
