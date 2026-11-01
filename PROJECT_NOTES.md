@@ -144,9 +144,11 @@ icon, manifest `name`/`short_name`, and repo copy.
      at `bcrossley712.github.io` (passkeys are tied to the address).
      - **Push 1 — the Worker, setup and automatic backup: done**
        (above; its remaining iPad checks are under Open iPad checks).
-     - **Push 2 — restore** (next, in a new conversation): the plan
-       is in [DESIGN_NOTES → Backup](docs/DESIGN_NOTES.md#planned-features)
-       → "Push 2 plan"; the Worker side and client calls exist.
+     - **Push 2 — restore: built, awaiting push and iPad checks**
+       (empty gallery → Restore from backup; Backup sheet → Restore… /
+       Turn off on this iPad; [ARCHITECTURE →
+       Backup](docs/ARCHITECTURE.md#backup)). Checks under Open iPad
+       checks.
    - **Then** share links and Krita reference import on the same
      backend — decide when they're reached whether she still wants
      share links, now that video sharing works.
@@ -156,6 +158,17 @@ icon, manifest `name`/`short_name`, and repo copy.
    through `stamp()` and the stroke path).
 
 **Open iPad checks** (send the activity log with any of them):
+- **Restore (7b push 2), first:** in **Safari on her iPad** (its own
+  storage): Restore from backup → Continue → Touch ID offers the
+  Parapara! passkey → the list shows her animations with thumbnails →
+  restore all → they open and play, sound included; then Backup there
+  says backed up, and **Turn off on this iPad** before closing Safari
+  (otherwise it stays a second device on her backup). Log:
+  `backup-passkey signin=yes secret=yes handle=yes`, `backup-on
+  via=restore`, `restore projects=…`. In the installed app: Backup →
+  Restore… lists everything as "On this iPad" with no Touch ID. Also
+  whenever convenient: hide the app mid-restore, then Restore again
+  finishes the rest.
 - **Backup (7b push 1), as she draws:** a stroke later gives
   `backup projects=1 blobs=1` (2 with the thumbnail) after ~2 min or
   Back up now; airplane mode → Back up now says no internet, then
@@ -202,7 +215,7 @@ if it shows:
 - **project files (7a):** `project-file-failed`,
   `project-import-failed`;
 - **backup (7b):** `backup-failed` (with `error`, or `step` while
-  turning on).
+  turning on); `restore-failed` (with `step` and `error`).
 
 **Open items**
 - **Silent sound after the background — WebKit bug, worked around;
@@ -383,10 +396,10 @@ Applies to the whole app. How each area works is in
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
 - **Backup (7b)** runs on a Cloudflare Worker + R2 (`worker/`,
-  deployed by its own workflow, not part of the published site).
-  **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  restore (7b push 2), then share links and Krita import on the same
-  backend. The storage warning was dropped (Open items).
+  deployed by its own workflow, not part of the published site);
+  restore (push 2) reads it back. **Planned**
+  ([details](docs/DESIGN_NOTES.md#planned-features)): share links and
+  Krita import on the same backend. The storage warning was dropped (Open items).
 
 ## Global rules
 

@@ -315,11 +315,12 @@ unchecked: memory while packing a big project.
 **Files:** `js/backup/backup.js` (what a run does, the queue),
 `backup/scheduler.js` (when), `backup/crypto.js` (encryption, blob
 names), `backup/client.js` (the Worker's endpoints, `BACKUP_URL`),
-`backup/passkey.js` (passkeys with PRF), `ui/backup-sheet.js` (gear →
-Backup); the Worker in `worker/` (`src/index.js`, `webauthn.js`,
+`backup/passkey.js` (passkeys with PRF), `backup/restore.js` (push
+2: sign-in, list, restore), `ui/backup-sheet.js` (gear → Backup),
+`ui/restore-sheet.js` (the picker); the Worker in `worker/` (`src/index.js`, `webauthn.js`,
 `cleanup.js`, `wrangler.toml`, `README.md` for setup and operations),
 deployed by `.github/workflows/worker.yml`. Glue in `main.js` ("automatic
-backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-features)
+backup", "restore"). ([why](DESIGN_NOTES.md#planned-features)
 → "Backup (7b scoping)")
 
 ### How it works
@@ -376,6 +377,40 @@ backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-feat
   Stateless challenges (HMAC under `SIGNING_KEY`, 5 minutes).
 - **The service worker leaves non-GET and other-site requests alone**
   (7b), so uploads to the Worker never pass through its cache code.
+- **Restore (push 2)** — from the empty gallery's "Restore from
+  backup" and the Backup sheet (off: Restore from backup; on:
+  Restore…). **Not connected yet:** a challenge first (no invite),
+  then Continue → `signInWithPasskey` inside the tap with no
+  `allowCredentials` → `POST /v1/sessions` (the user handle is the
+  vault id) → the wrapped secret unwraps with the PRF output →
+  `backup.enable`, so **signing in connects this device** (its own
+  projects back up into that vault). **Already connected:** straight to
+  the list, no Touch ID.
+- **Settings come back only on a fresh device** (no projects when
+  signing in), and before `backup.enable`, so no run can send the new
+  device's defaults over them; main.js updates `toolSettings` /
+  `recentColors` in memory too.
+- **The list:** `GET /v1/projects`, then each project's latest
+  manifest (a deleted one's `latestLive`), decrypted for its name,
+  frame count and thumbnail blob. Current ones start ticked, "Deleted
+  recently" unticked, ones already here shown but not pickable.
+- **Restoring** (one project at a time, its blobs 3 at once):
+  `buildProject(manifest, reader, { keepIds: true })` — the 7a builder,
+  shared with Import — so ids, name and times come back as saved;
+  `saveImportedProject` in one transaction. A project already here is
+  skipped, so a cut-off restore resumes by running it again. A blob the
+  Worker lacks comes back blank (counted, logged). Before saving, a
+  current project with every blob is `markRestored` (its
+  `projectFingerprint`), so the next run finds it unchanged and sends
+  nothing; a deleted one isn't, so the next run uploads its manifest,
+  which takes it off the vault's deleted list.
+- **Turn off on this iPad** (Backup sheet, with a confirm):
+  `backup.disable()` waits for a run, then clears meta `backupKeys`,
+  `backup` and `backupQueue`. The vault is untouched; Restore from
+  backup reconnects to it (Turn on would make a *new* vault).
+- Log lines: `restore` (projects, skipped, failed, missing, ms),
+  `restore-failed` (`step`: challenge, passkey, connect, settings,
+  list, project, restore), `backup-on via=restore`, `backup-off`.
 
 ### Don't break
 
@@ -391,6 +426,10 @@ backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-feat
   vault from it. Don't change how it's made.
 - **Changing the crypto labels (`PRF_SALT`, HKDF infos, AADs) strands
   every existing backup.** Add a version instead.
+- **Restore keeps ids and must not re-upload:** `projectFingerprint`
+  is the one definition of "unchanged" for both a run and
+  `markRestored` — change one, change both (a test catches a
+  mismatch: a restored project must back up as zero uploads).
 - **Blobs reach the backup only through `projectFileBlobIds`**
   (`mapBlobRefs`), like the project file — a new blob kind added there
   is backed up automatically.
@@ -404,7 +443,9 @@ backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-feat
 - **Unit:** `worker.test.js` (the Worker on `tests/support/fake-r2.js`
   with a software passkey, `soft-passkey.js`), `backup.test.js`
   (crypto, scheduler, the notice, the sheet's wording, and backup.js
-  on fake-indexeddb calling the real Worker's handler as its fetch).
+  on fake-indexeddb calling the real Worker's handler as its fetch),
+  `restore.test.js` (a second fresh fake-indexeddb "iPad" signing in
+  with the same software passkey), `project-file.test.js` (`keepIds`).
 - **E2E** (`backup.spec.js`): serve.js hosts the real Worker at
   `/__backup__/` on an in-memory R2 (invite `e2e-invite-code`;
   `/__test__/backup?vault=` lists a vault's keys). Open the app as
@@ -412,7 +453,10 @@ backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-feat
   `window.__PARAPARA_BACKUP_URL__` in an init script, and add
   Chromium's virtual authenticator over CDP with `hasPrf`. Fail the
   network with `page.route('**/__backup__/**', …)`, per page; the
-  Worker's state is shared by every test.
+  Worker's state is shared by every test. Restore specs simulate a
+  fresh install by deleting the `parapara` database from another page
+  on the origin (`/manifest.json`); the virtual authenticator, and so
+  the passkey, survives the navigation.
 
 ### iPad-only checks
 
@@ -422,6 +466,10 @@ check: a stroke later sending
 one blob; a run cut short when the app is hidden (finished at the
 next launch); airplane mode → "Waiting for the internet", then backed
 up; Back up now; the 3-day notice (only if it really happens).
+Restore (push 2): Touch ID sign-in with no passkey list (in Safari on
+her iPad, then the installed app) gives a user handle and the PRF
+secret; a full restore's time; the app hidden mid-restore, then
+Restore again finishes it; the picker's list scrolls with her finger.
 
 ---
 

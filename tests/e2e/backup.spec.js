@@ -171,3 +171,98 @@ test('deleting a project leaves a deleted marker in the backup', async ({ page, 
     return projects.find((p) => p.projectId === projectId)?.deleted;
   }, { timeout: 15000 }).toBe(true);
 });
+
+// --- restore (7b push 2) ---
+
+const restoreSheet = (page) => page.locator('.pp-restore');
+
+// A fresh install on the same "iPad": the app's database and local
+// storage gone, the passkey (the virtual authenticator) still there —
+// as on a new iPad with the same iCloud Keychain.
+async function wipeAppData(page) {
+  await page.goto(new URL('/manifest.json', page.url()).href);
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    localStorage.clear();
+    const req = indexedDB.deleteDatabase('parapara');
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('blocked'));
+  }));
+  await page.goto(new URL('/index.html', page.url()).href);
+  await page.locator('.pp-gallery').waitFor();
+  await expect(page.locator('.pp-gallery-card')).toHaveCount(0);
+}
+
+const projectIds = (page) => page.evaluate(() => new Promise((resolve) => {
+  const req = indexedDB.open('parapara');
+  req.onsuccess = () => {
+    const r = req.result.transaction('projects').objectStore('projects').getAllKeys();
+    r.onsuccess = () => { req.result.close(); resolve(r.result.sort()); };
+  };
+}));
+
+test('a fresh install restores from the empty gallery with the passkey; nothing goes up again', async ({ page, baseURL }) => {
+  await openApp(page, baseURL);
+  await stroke(page);
+  await turnOn(page);
+  await page.getByRole('button', { name: 'Close' }).click();
+  // Leaving the editor saves the gallery thumbnail; back it up too.
+  await page.getByRole('button', { name: 'Gallery', exact: true }).click();
+  await expect(page.locator('.pp-gallery-card')).toHaveCount(1);
+  await openSheet(page);
+  await sheet(page).getByRole('button', { name: 'Back up now' }).click();
+  await expect(message(page)).toHaveText(/^Backed up just now\.$/);
+  await expect.poll(async () => (await storedKeys(page)).filter((k) => k.includes('/b/')).length).toBe(2);
+  await sheet(page).getByRole('button', { name: 'Close' }).click();
+  const vault = await vaultId(page);
+  const before = await projectIds(page);
+  const drawn = await savedDrawingBytes(page);
+
+  await wipeAppData(page);
+  await page.getByRole('button', { name: 'Restore from backup' }).click();
+  await restoreSheet(page).getByRole('button', { name: 'Continue' }).click();
+  await expect(restoreSheet(page)).toHaveAttribute('data-phase', 'pick');
+  await expect(restoreSheet(page).locator('.pp-restore__item')).toHaveCount(1);
+  await expect(restoreSheet(page).locator('.pp-restore__item img')).toHaveCount(1);
+
+  const uploads = countBlobUploads(page);
+  await restoreSheet(page).getByRole('button', { name: 'Restore 1' }).click();
+  await expect(restoreSheet(page)).toHaveAttribute('data-phase', 'done');
+  await expect(restoreSheet(page).locator('.pp-restore__message')).toHaveText('Brought back 1 animation.');
+  await restoreSheet(page).getByRole('button', { name: 'Done' }).click();
+
+  // Back as itself, with its drawing, in the gallery.
+  await expect(page.locator('.pp-gallery-card')).toHaveCount(1);
+  expect(await projectIds(page)).toEqual(before);
+  expect(await savedDrawingBytes(page)).toEqual(drawn);
+  expect(await vaultId(page)).toBe(vault);
+
+  // Backup is on here now, and has nothing to send.
+  await openSheet(page);
+  await expect(sheet(page)).toHaveAttribute('data-phase', 'on');
+  await sheet(page).getByRole('button', { name: 'Back up now' }).click();
+  await expect(message(page)).toHaveText(/^Backed up just now\.$/);
+  expect(uploads).toEqual([]);
+});
+
+test('with backup on, Restore lists right away; Turn off on this iPad forgets the vault here', async ({ page, baseURL }) => {
+  await openApp(page, baseURL);
+  await stroke(page);
+  await turnOn(page);
+
+  await sheet(page).getByRole('button', { name: 'Restore…' }).click();
+  await expect(restoreSheet(page)).toHaveAttribute('data-phase', 'pick');
+  const item = restoreSheet(page).locator('.pp-restore__item');
+  await expect(item).toHaveCount(1);
+  await expect(item).toBeDisabled();
+  await expect(item).toContainText('On this iPad');
+  await expect(restoreSheet(page).getByRole('button', { name: 'Restore', exact: true })).toBeDisabled();
+  await restoreSheet(page).getByRole('button', { name: 'Cancel' }).click();
+
+  await openSheet(page);
+  await sheet(page).getByRole('button', { name: 'Turn off on this iPad' }).click();
+  await page.locator('.pp-dialog').getByRole('button', { name: 'Turn off' }).click();
+  await expect(sheet(page)).toHaveAttribute('data-phase', 'off');
+  expect(await vaultId(page)).toBeUndefined();
+  expect((await readDb(page, 'meta', 'backupKeys'))?.value ?? null).toBeNull();
+});

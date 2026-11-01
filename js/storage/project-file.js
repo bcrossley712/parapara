@@ -19,6 +19,8 @@
 // Opening a file never overwrites anything: every id is new
 // (copyProjectRecords, the same remapping Duplicate uses), so opening
 // the same file twice makes two projects, like Procreate's import.
+// Restore (7b push 2) shares buildProject with keepIds instead: the
+// backup's project comes back as itself.
 
 import { makeZip, readZip, ZipError } from './zip.js';
 import { copyProjectRecords, referencedBlobIds } from './layers.js';
@@ -107,8 +109,9 @@ const isSide = (v) => Number.isInteger(v) && v > 0 && v <= MAX_CANVAS_SIDE;
 // Throws ProjectFileError('damaged') unless the manifest's project and
 // frames are shaped enough to be saved and opened. Field values the
 // editor already sanitizes on open (fps, onion skin, palette, sound
-// clips…) are left to it.
-function checkShape(manifest) {
+// clips…) are left to it. `where` is the blob entries' locator field:
+// 'path' in a project file, 'name' in a backup manifest (7b).
+function checkShape(manifest, where = 'path') {
   const { project, frames, blobs } = manifest;
   const bad = (what) => new ProjectFileError('damaged', `This file is damaged (${what}).`);
   if (!isObject(project) || !Array.isArray(frames) || !Array.isArray(blobs)) throw bad('parts missing');
@@ -125,7 +128,7 @@ function checkShape(manifest) {
   }
   if (project.audioClips != null && !Array.isArray(project.audioClips)) throw bad('sound');
   for (const b of blobs) {
-    if (!isObject(b) || !isId(b.id) || typeof b.type !== 'string' || !isId(b.path)) throw bad('file list');
+    if (!isObject(b) || !isId(b.id) || typeof b.type !== 'string' || !isId(b[where])) throw bad('file list');
   }
   const known = new Set(frames.map((f) => f.id));
   if (!project.frames.some((id) => known.has(id))) throw bad('no frames');
@@ -166,27 +169,54 @@ export async function unpackProject(file, { now = Date.now() } = {}) {
   if (manifest.version > PROJECT_FILE_VERSION) {
     throw new ProjectFileError('newer', 'This file was made by a newer Parapara!. Update the app, then try again.');
   }
-  checkShape(manifest);
+  return buildProject(manifest, async (entry) => {
+    try {
+      return await zip.read(entry.path);
+    } catch (err) {
+      if (err instanceof ZipError) throw new ProjectFileError('damaged', 'This file is damaged.', { cause: err });
+      throw err;
+    }
+  }, { now });
+}
 
-  const source = { ...manifest.project, name: cleanName(manifest.project.name) };
-  const copy = copyProjectRecords(source, manifest.frames, { now });
-  copy.project.createdAt = Number.isFinite(source.createdAt) ? source.createdAt : now;
+// Shared by Import (7a) and restore (7b push 2): a checked manifest
+// ({ project, frames, blobs: [{ id, type, … }] }) plus `readBlob(entry)`
+// (bytes, or null when the source lacks it) → { project, frames, blobs }
+// ready for storage.saveImportedProject.
+//   keepIds false (Import): every id new, name cleaned, updatedAt now.
+//   keepIds true (restore): ids, name and times exactly as saved, so
+//   the backup sees the same project and nothing is uploaded again.
+// Only blobs the project uses come along; a listed blob it doesn't use
+// is skipped, a used one the source lacks stays blank (like a layer
+// never drawn on). Throws ProjectFileError('damaged') on a bad shape.
+export async function buildProject(manifest, readBlob, { now = Date.now(), keepIds = false, where = 'path' } = {}) {
+  checkShape(manifest, where);
+  let copy;
+  if (keepIds) {
+    if (!isId(manifest.project.id)) throw new ProjectFileError('damaged', 'This file is damaged (project id).');
+    const project = { ...manifest.project, name: cleanName(manifest.project.name) };
+    const known = new Set(project.frames);
+    const frames = manifest.frames.filter((f) => known.has(f.id)).map((f) => ({ ...f, projectId: project.id }));
+    const present = new Set(frames.map((f) => f.id));
+    if (!project.frames.every((id) => present.has(id))) {
+      project.frames = project.frames.filter((id) => present.has(id));
+      if (!present.has(project.currentFrameId)) project.currentFrameId = project.frames[0];
+    }
+    const pairs = [...referencedBlobIds(project, frames)].map((id) => [id, id]);
+    copy = { project, frames, pairs };
+  } else {
+    const source = { ...manifest.project, name: cleanName(manifest.project.name) };
+    copy = copyProjectRecords(source, manifest.frames, { now });
+    copy.project.createdAt = Number.isFinite(source.createdAt) ? source.createdAt : now;
+  }
 
-  // Only blobs the project uses come along; a listed blob it doesn't
-  // use is skipped, a used one the file lacks stays blank (like a
-  // layer never drawn on).
   const listed = new Map(manifest.blobs.map((b) => [b.id, b]));
   const blobs = [];
   for (const [from, to] of copy.pairs) {
     const entry = listed.get(from);
     if (!entry) continue;
-    let data;
-    try {
-      data = await zip.read(entry.path);
-    } catch (err) {
-      if (err instanceof ZipError) throw new ProjectFileError('damaged', 'This file is damaged.', { cause: err });
-      throw err;
-    }
+    const data = await readBlob(entry);
+    if (!data) continue;
     const buffer = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
       ? data.buffer
       : data.slice().buffer;

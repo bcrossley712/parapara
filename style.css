@@ -1428,6 +1428,26 @@ html, body {
   display: none;
 }
 
+/* Restore from backup (7b push 2): only on an empty gallery. */
+.pp-gallery__restore {
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--pp-ink);
+  font-family: var(--pp-font);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.pp-gallery__restore[hidden] {
+  display: none;
+}
+
 /* The "new animation" tile: dashed, like the strip's add-frame tile. */
 .pp-gallery-new {
   display: flex;
@@ -1708,6 +1728,155 @@ html, body {
 }
 
 .pp-backup__invite[hidden] {
+  display: none;
+}
+
+/* Restore from backup / Turn off on this iPad (7b push 2): smaller
+   links under the main buttons, so they don't compete with them. */
+.pp-backup__extra {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 16px;
+}
+
+.pp-backup__extra:empty {
+  display: none;
+}
+
+.pp-backup__link {
+  min-height: 44px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--pp-accent);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The Restore sheet (js/ui/restore-sheet.js, 7b push 2): a scrolling
+   list of her animations with a tick on each one coming back. The
+   backdrop blocks touches, so the list opts back in to scrolling. */
+.pp-restore__dialog {
+  width: min(480px, 100%);
+  max-height: calc(100% - 16px);
+}
+
+.pp-restore__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pp-restore__list[hidden],
+.pp-restore__note:empty {
+  display: none;
+}
+
+.pp-restore__note {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.pp-restore__section {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.pp-restore__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 10px 6px 6px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--pp-ink-light);
+  color: var(--pp-bg);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pp-restore__item.is-on {
+  border-color: var(--pp-accent);
+}
+
+.pp-restore__item.is-here {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pp-restore__thumb {
+  flex: none;
+  width: 80px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.pp-restore__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.pp-restore__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pp-restore__name {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pp-restore__sub {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.pp-restore__tick {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--pp-bg);
+  border-radius: 50%;
+  opacity: 0.5;
+}
+
+.pp-restore__tick svg {
+  visibility: hidden;
+}
+
+.pp-restore__item.is-on .pp-restore__tick {
+  border-color: var(--pp-accent);
+  background: var(--pp-accent);
+  color: var(--pp-ink);
+  opacity: 1;
+}
+
+.pp-restore__item.is-on .pp-restore__tick svg {
+  visibility: visible;
+}
+
+.pp-restore__item.is-here .pp-restore__tick {
   display: none;
 }
 

@@ -22,7 +22,13 @@
 //   'on'       — `status` (backupStatusText) and `usage` lines, Back
 //                up now (disabled while `running`)
 // callbacks: { onNext(invite), onTurnOn, onFinish, onBackupNow,
-// onClose } — onTurnOn and onFinish run synchronously in their taps.
+// onRestore, onTurnOff, onClose } — onTurnOn and onFinish run
+// synchronously in their taps.
+//
+// Push 2 (restore): 'off' also offers Restore from backup (signing in
+// connects this device to an existing backup — also how a device that
+// was turned off gets back to the same one); 'on' offers Restore… and
+// Turn off on this iPad, as smaller links under the main buttons.
 
 import { formatSize } from './export-sheet.js';
 
@@ -73,7 +79,8 @@ export function backupUsageText(usage) {
 
 export function createBackupSheet(callbacks = {}, { signal } = {}) {
   const {
-    onNext = () => {}, onTurnOn = () => {}, onFinish = () => {}, onBackupNow = () => {}, onClose = () => {},
+    onNext = () => {}, onTurnOn = () => {}, onFinish = () => {}, onBackupNow = () => {},
+    onRestore = () => {}, onTurnOff = () => {}, onClose = () => {},
   } = callbacks;
 
   const backdrop = document.createElement('div');
@@ -112,7 +119,10 @@ export function createBackupSheet(callbacks = {}, { signal } = {}) {
   const buttons = document.createElement('div');
   buttons.className = 'pp-dialog__buttons';
 
-  dialog.append(title, message, detail, field, note, buttons);
+  const extra = document.createElement('div');
+  extra.className = 'pp-backup__extra';
+
+  dialog.append(title, message, detail, field, note, buttons, extra);
   backdrop.appendChild(dialog);
 
   let state = { phase: 'closed' };
@@ -128,6 +138,15 @@ export function createBackupSheet(callbacks = {}, { signal } = {}) {
 
   const closeBtn = (label = 'Close') => button(label, false, () => close());
 
+  function link(label, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pp-backup__link';
+    btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
   const next = () => {
     const invite = field.value.trim();
     if (invite) onNext(invite);
@@ -137,6 +156,7 @@ export function createBackupSheet(callbacks = {}, { signal } = {}) {
     const s = state;
     backdrop.dataset.phase = s.phase;
     buttons.replaceChildren();
+    extra.replaceChildren();
     field.hidden = s.phase !== 'off';
     detail.textContent = '';
     note.textContent = s.note ?? '';
@@ -148,6 +168,7 @@ export function createBackupSheet(callbacks = {}, { signal } = {}) {
         field.oninput = sync;
         sync();
         buttons.append(closeBtn(), nextBtn);
+        extra.append(link('Restore from backup', () => onRestore()));
         break;
       }
       case 'checking':
@@ -171,6 +192,7 @@ export function createBackupSheet(callbacks = {}, { signal } = {}) {
         const now = button('Back up now', true, () => onBackupNow());
         now.disabled = s.running === true;
         buttons.append(closeBtn(), now);
+        extra.append(link('Restore…', () => onRestore()), link('Turn off on this iPad', () => onTurnOff()));
         break;
       }
       default:

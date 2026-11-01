@@ -71,6 +71,9 @@ import { createBackupScheduler } from './backup/scheduler.js';
 import { PRF_SALT, newVaultSecret, wrapSecret, toB64u, fromB64u } from './backup/crypto.js';
 import { createPasskey, signInWithPasskey, randomBytes } from './backup/passkey.js';
 import { createBackupSheet, backupStatusText, backupUsageText } from './ui/backup-sheet.js';
+// Step 7b push 2: restore.
+import { createRestore } from './backup/restore.js';
+import { createRestoreSheet, restoreDoneText } from './ui/restore-sheet.js';
 import {
   packProject, unpackProject, projectFileBlobIds, ProjectFileError,
   PROJECT_FILE_EXTENSION, PROJECT_FILE_TYPE,
@@ -246,6 +249,16 @@ const backupScheduler = createBackupScheduler({
 let backupSheet = null;
 let backupUsage = null;
 let pendingJoin = null; // { invite, challenge, userId, made }
+const restorer = createRestore({
+  storage: { listProjects, saveImportedProject, saveToolSettings, saveRecentColors },
+  client: backupClient,
+  backup,
+  log: (event, fields) => devLog.add(event, fields),
+});
+let restoreSheet = null;
+let pendingRestore = null; // { challenge }
+let restoreItems = null; // the last list, for Try again
+let refreshGallery = null; // set while the gallery is showing
 
 async function runBackup() {
   refreshBackupSheet();
@@ -327,6 +340,14 @@ function openBackupSheet() {
       onBackupNow: () => {
         backupScheduler.soon();
         refreshBackupSheet();
+      },
+      onRestore: () => {
+        backupSheet.close();
+        openRestoreSheet();
+      },
+      onTurnOff: () => {
+        backupSheet.close();
+        backupTurnOff();
       },
       onClose: () => { pendingJoin = null; },
     });
@@ -412,6 +433,146 @@ async function finishJoin(join, prfOutput) {
     devLog.add('backup-failed', { step: 'join', error: err?.code ?? String(err?.message ?? err) });
     backupSheet.show({ phase: 'off', note: joinProblem(err) });
   }
+}
+
+// --- restore (step 7b push 2) ---
+//
+// backup/restore.js does the work, ui/restore-sheet.js shows it. On a
+// device that isn't connected yet: a challenge first (so Continue can
+// open the passkey sheet inside the tap), Touch ID, then the device is
+// connected — backup is on — and the list loads. On a connected device
+// the list loads straight away (no Touch ID).
+
+const RESTORE_PROBLEMS = {
+  offline: 'There’s no internet. Try again when the iPad is online.',
+  paused: 'Backups are paused right now. Try again later.',
+  revoked: 'This family’s backup invite was turned off.',
+  'not-found': 'That passkey’s backup wasn’t found.',
+  'no-passkey': 'That passkey isn’t a Parapara! backup passkey.',
+  'no-prf': 'This device’s passkeys can’t unlock the backup.',
+  unreadable: 'The backup couldn’t be unlocked with that passkey.',
+  unauthorized: 'This iPad needs to sign in to the backup again: in Backup, tap Turn off on this iPad, then Restore from backup.',
+  'old-challenge': 'That took too long. Tap Continue to try again.',
+};
+const restoreProblem = (err) => RESTORE_PROBLEMS[err?.code] ?? `Restore didn’t work (${err?.code ?? err?.name ?? 'error'}).`;
+
+function openRestoreSheet() {
+  if (!storageWorks) {
+    showNotice("Restore isn't available: this iPad's storage isn't working.");
+    return;
+  }
+  if (!restoreSheet) {
+    restoreSheet = createRestoreSheet({
+      onSignIn: () => restoreSignIn(),
+      onRestore: (items) => restoreChosen(items),
+      onRetry: () => (restoreItems ? restoreChosen(restoreItems) : loadRestoreList()),
+      onClose: () => {
+        pendingRestore = null;
+        restoreItems = null;
+      },
+    });
+  }
+  restoreItems = null;
+  if (backup.enabled) loadRestoreList();
+  else prepareRestore();
+}
+
+async function prepareRestore(note) {
+  restoreSheet.show({ phase: 'preparing' });
+  try {
+    const challenge = await backupClient.challenge();
+    if (!restoreSheet.isOpen) return;
+    pendingRestore = { challenge };
+    restoreSheet.show({ phase: 'signin', note });
+  } catch (err) {
+    devLog.add('restore-failed', { step: 'challenge', error: err?.code ?? String(err) });
+    if (restoreSheet.isOpen) restoreSheet.show({ phase: 'signin', note: restoreProblem(err) });
+  }
+}
+
+// Continue: the passkey sign-in, synchronously in the tap.
+function restoreSignIn() {
+  const pending = pendingRestore;
+  if (!pending) {
+    prepareRestore();
+    return;
+  }
+  pendingRestore = null;
+  signInWithPasskey({ salt: PRF_SALT, challenge: fromB64u(pending.challenge) }).then(async (signedIn) => {
+    restoreSheet.show({ phase: 'connecting' });
+    devLog.add('backup-passkey', { signin: 'yes', secret: signedIn.prf.first ? 'yes' : 'no', handle: signedIn.userHandle ? 'yes' : 'no' });
+    try {
+      const fresh = (await listProjects()).length === 0;
+      const { settings } = await restorer.connect(signedIn, { fresh });
+      if (settings?.toolSettings) toolSettings = settings.toolSettings;
+      if (Array.isArray(settings?.recentColors)) recentColors = sanitizeColorList(settings.recentColors, MAX_RECENTS);
+      devLog.add('backup-on', { via: 'restore', settings: settings ? 'yes' : 'no' });
+      backupScheduler.soon();
+      if (restoreSheet.isOpen) loadRestoreList();
+    } catch (err) {
+      devLog.add('restore-failed', { step: 'connect', error: err?.code ?? String(err?.message ?? err) });
+      if (restoreSheet.isOpen) prepareRestore(restoreProblem(err));
+    }
+  }, (err) => {
+    // Cancelled, or no passkey for this site on this device.
+    devLog.add('restore-failed', { step: 'passkey', error: String(err?.name ?? err) });
+    if (restoreSheet.isOpen) {
+      prepareRestore('No passkey was used. On her iPad (or one signed in to her Apple account), tap Continue and choose the Parapara! backup passkey.');
+    }
+  });
+}
+
+async function loadRestoreList() {
+  restoreSheet.show({ phase: 'loading' });
+  try {
+    const items = await restorer.list();
+    if (!restoreSheet.isOpen) return;
+    restoreSheet.show(items.length ? { phase: 'pick', items } : { phase: 'empty' });
+  } catch (err) {
+    devLog.add('restore-failed', { step: 'list', error: err?.code ?? String(err?.message ?? err) });
+    if (restoreSheet.isOpen) restoreSheet.show({ phase: 'failed', note: restoreProblem(err) });
+  }
+}
+
+async function restoreChosen(items) {
+  restoreItems = items;
+  restoreSheet.show({ phase: 'working', done: 0, total: items.length, name: items[0]?.name ?? '' });
+  try {
+    const result = await restorer.restore(items, {
+      onProgress: (p) => {
+        if (restoreSheet.isOpen) restoreSheet.show({ phase: 'working', ...p });
+      },
+    });
+    restoreItems = null;
+    if (restoreSheet.isOpen) restoreSheet.show({ phase: 'done', message: restoreDoneText(result) });
+  } catch (err) {
+    devLog.add('restore-failed', { step: 'restore', error: err?.code ?? String(err?.message ?? err) });
+    if (restoreSheet.isOpen) restoreSheet.show({ phase: 'failed', note: restoreProblem(err) });
+  } finally {
+    refreshGallery?.();
+    backupScheduler.soon();
+  }
+}
+
+async function backupTurnOff() {
+  const ok = await showConfirm({
+    title: 'Turn off backup on this iPad?',
+    message: 'What’s already backed up stays in the backup, and the drawings on this iPad stay here. To use the same backup again later, choose Restore from backup in Backup.',
+    confirmLabel: 'Turn off',
+    danger: true,
+  });
+  if (!ok) {
+    openBackupSheet();
+    return;
+  }
+  try {
+    await backup.disable();
+    backupUsage = null;
+    devLog.add('backup-off');
+  } catch (err) {
+    devLog.add('backup-failed', { step: 'off', error: String(err?.message ?? err) });
+  }
+  openBackupSheet();
 }
 
 // Problems she has to OK go in the activity log too (dev only).
@@ -696,6 +857,7 @@ async function showGallery(preloaded = null) {
           gallery.setBusy(false);
         }
       },
+      onRestore: () => openRestoreSheet(),
       onDelete: async (id) => {
         gallery.setBusy(true);
         try {
@@ -712,6 +874,14 @@ async function showGallery(preloaded = null) {
     },
   });
   gallery.render(cards);
+
+  // Restore (7b push 2) adds projects while the gallery is up.
+  refreshGallery = async () => {
+    const next = await loadGalleryCards();
+    if (closed) return;
+    cards = next;
+    gallery.render(cards);
+  };
 
   // Loads (or creates) a project and opens it. The gallery stays up
   // until the project has fully loaded, so a failure leaves her where
@@ -730,6 +900,7 @@ async function showGallery(preloaded = null) {
       return;
     }
     closed = true;
+    refreshGallery = null;
     gallery.destroy();
     mountEditor(session, { canSave: true });
   }

@@ -16,8 +16,11 @@ import { GEAR_ICON } from './icons.js';
 import { MAX_PROJECT_NAME } from '../storage/storage.js';
 
 // callbacks: { onOpen(id), onCreate(), onRename(id, name),
-//   onDuplicate(id), onSaveFile(id), onImport(file), onDelete(id) }
+//   onDuplicate(id), onSaveFile(id), onImport(file), onDelete(id),
+//   onRestore() }
 //   — onImport gets the File she picked; checking it is main.js's job.
+//   onRestore (7b push 2): the empty gallery's "Restore from backup",
+//   for a new iPad or a reinstall.
 // appActions: for the gear menu (see settings-panel.js) — no editor
 //   actions here.
 //
@@ -27,7 +30,7 @@ import { MAX_PROJECT_NAME } from '../storage/storage.js';
 export function createGallery(container, { callbacks, appActions = {} }) {
   const {
     onOpen, onCreate, onRename, onDuplicate, onDelete,
-    onSaveFile = () => {}, onImport = () => {},
+    onSaveFile = () => {}, onImport = () => {}, onRestore = () => {},
   } = callbacks;
   container.innerHTML = '';
   const listeners = new AbortController();
@@ -85,7 +88,17 @@ export function createGallery(container, { callbacks, appActions = {} }) {
   grid.className = 'pp-gallery__grid';
   const hint = document.createElement('p');
   hint.className = 'pp-gallery__hint';
-  scroller.append(grid, hint);
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.className = 'pp-gallery__restore';
+  restoreBtn.textContent = 'Restore from backup';
+  restoreBtn.hidden = true;
+  restoreBtn.addEventListener('click', () => {
+    if (busy) return;
+    closeMenu();
+    onRestore();
+  }, { signal });
+  scroller.append(grid, hint, restoreBtn);
 
   shell.append(topBar, scroller);
   container.appendChild(shell);
@@ -278,6 +291,7 @@ export function createGallery(container, { callbacks, appActions = {} }) {
     thumbImgs.clear();
     grid.replaceChildren(newTile(), ...projects.map(card));
     hint.textContent = projects.length === 0 ? 'Tap New animation to start your first one.' : '';
+    restoreBtn.hidden = projects.length !== 0;
   }
 
   function setBusy(next) {

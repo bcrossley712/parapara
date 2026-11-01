@@ -164,6 +164,34 @@ test('opening a file makes a new project with new ids and every blob, byte for b
   assert.equal((await storage.listProjects()).length, 2);
 });
 
+test('buildProject with keepIds (restore, 7b) brings the project back as itself', async () => {
+  const loaded = await makeSaved();
+  const ids = PF.projectFileBlobIds(loaded.project, loaded.frames);
+  const stored = await storage.loadBlobs(ids);
+  const manifest = {
+    project: loaded.project,
+    frames: loaded.frames,
+    blobs: ids.filter((id) => stored.has(id)).map((id) => ({ id, type: stored.get(id).type, name: `n-${id}` })),
+  };
+  const read = async (entry) => new Uint8Array(stored.get(entry.id).buffer);
+  const built = await PF.buildProject(manifest, read, { keepIds: true, where: 'name', now: 5 });
+  assert.deepEqual(built.project, loaded.project, 'ids, name and times unchanged');
+  assert.deepEqual(built.frames.map((f) => f.id), loaded.frames.map((f) => f.id));
+  assert.deepEqual(built.blobs.map((b) => b.id).sort(), [...stored.keys()].sort());
+
+  // Saved on a fresh device, it loads exactly as it was.
+  storage._resetForTests();
+  globalThis.indexedDB = new IDBFactory();
+  await storage.saveImportedProject(built);
+  const back = await storage.loadProject(loaded.project.id);
+  assert.deepEqual(back.project, loaded.project);
+
+  // A source that lacks a blob leaves it blank; a bad shape is damaged.
+  const partial = await PF.buildProject(manifest, async (e) => (e.type === 'audio/mp4' ? null : read(e)), { keepIds: true, where: 'name' });
+  assert.equal(partial.blobs.length, built.blobs.length - 1);
+  await assert.rejects(PF.buildProject({ ...manifest, blobs: [{ id: 'x', type: 'image/png' }] }, read, { keepIds: true, where: 'name' }), { code: 'damaged' });
+});
+
 test('opening the same file twice makes two projects', async () => {
   const file = await packSaved(await makeSaved());
   const a = await PF.unpackProject(file);

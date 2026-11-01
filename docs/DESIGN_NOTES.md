@@ -1027,6 +1027,25 @@ device-only.
     skipped) → `saveImportedProject` → settings back (`GET
     /v1/settings`). Check: restore into Safari on her iPad or his
     computer. Picking an old version stays deferred.
+  - **Push 2 decisions (2026-11-01, his OK to my leanings):**
+    - **No Touch ID on a connected device:** it already holds the
+      token and keys, so Restore lists straight away (getting a deleted
+      project back on her own iPad).
+    - **Settings only on a fresh install** (no projects when signing
+      in): a restore on a device she uses mustn't reset her brush
+      sizes.
+    - **Turn off on this iPad** added: signing in connects a device
+      (its projects back up into her vault), and a test copy (Safari)
+      shouldn't stay a second device — two devices editing one project
+      means the latest save wins (older versions kept 30 days). Turning
+      back on goes through Restore (Turn on would start a new vault).
+    - **A restored deleted project is live again** in the backup.
+    - **Where to test:** Safari on her iPad (separate storage from the
+      home-screen app). His computer has her passkey only through
+      hybrid (QR) sign-in, whose PRF support isn't confirmed.
+    - **Kept ids:** restore brings a project back as itself, not a
+      copy (7a's Import makes copies), so the backup recognises it and
+      nothing is uploaded twice.
   - **Cloudflare facts checked 2026-11-01:** R2 free 10 GB-month, 1M
     Class A and 10M Class B requests a month, then $0.015/GB-month and
     $4.50 per million Class A; enabling R2 asks for a payment method;

@@ -77,6 +77,8 @@ const APP_SHELL = [
   './js/backup/backup.js',
   './js/backup/scheduler.js',
   './js/ui/backup-sheet.js',
+  './js/backup/restore.js',
+  './js/ui/restore-sheet.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

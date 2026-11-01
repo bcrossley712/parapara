@@ -53,7 +53,15 @@ export function backupNoticeDue(state, queue, now) {
   return now - Math.min(...waiting) > NOTICE_AFTER_MS && now - (state.noticeAt ?? 0) > NOTICE_EVERY_MS;
 }
 
-async function pool(items, size, work) {
+// The fingerprint that tells a run a project hasn't changed since its
+// last upload: { project, frames in timeline order, blob list with
+// names }. Restore (restore.js) computes the same from a manifest, so
+// a project it brings back isn't uploaded again.
+export async function projectFingerprint(project, orderedFrames, list) {
+  return fingerprint(enc.encode(JSON.stringify({ project, frames: orderedFrames, blobs: list })));
+}
+
+export async function pool(items, size, work) {
   let next = 0;
   const runners = Array.from({ length: Math.min(size, items.length) }, async () => {
     while (next < items.length) await work(items[next++]);
@@ -126,7 +134,7 @@ export function createBackup({ storage, client, now = Date.now, log = () => {}, 
     const byId = new Map(frames.map((f) => [f.id, f]));
     const ordered = project.frames.map((id) => byId.get(id)).filter(Boolean);
     const content = { project, frames: ordered, blobs: list };
-    const hash = await fingerprint(enc.encode(JSON.stringify(content)));
+    const hash = await projectFingerprint(project, ordered, list);
     if (queue.sent[projectId]?.hash === hash) return { skipped: 'unchanged' };
 
     const names = [...bytesByName.keys()];
@@ -278,6 +286,36 @@ export function createBackup({ storage, client, now = Date.now, log = () => {}, 
       await saveState();
       markSettings();
       await this.catchUp();
+    },
+
+    // Restore (7b push 2): what it needs to read the vault — the
+    // device's auth header value and the vault's keys. null when off.
+    access() {
+      return this.enabled ? { auth: auth(), keys } : null;
+    },
+
+    // Restore brought this project back exactly as the manifest saved
+    // at `at` describes it (`hash` = projectFingerprint of it), so a run
+    // finds it unchanged. Call before saving it.
+    async markRestored(projectId, hash, at) {
+      if (!this.enabled) return;
+      queue.sent[projectId] = { hash, at };
+      await saveQueue();
+    },
+
+    // Turn off on this iPad: forget the vault here (keys, token, to-do
+    // list). The backup itself stays; signing in again (Restore)
+    // reconnects to it. Waits for a run in progress.
+    async disable() {
+      if (running) await running.catch(() => {});
+      clearTimeout(persistTimer);
+      persistTimer = null;
+      state = null;
+      keys = null;
+      queue = emptyQueue();
+      await storage.saveMeta(META_KEYS, null);
+      await storage.saveMeta(META_STATE, null);
+      await storage.saveMeta(META_QUEUE, null);
     },
 
     noticeDue() {
