@@ -138,7 +138,7 @@ test('an update that is mid-download when the app opens still shows the toast', 
   // `watch(reg.installing)` — Chromium still notifies the reopened
   // page. So this guards the behavior, but doesn't prove that line is
   // needed; it's there for WebKit (iPad), which can't be tested here.
-  await setServerState(page, { version: NEW_VERSION, slowInstallMs: 1000 });
+  await setServerState(page, { version: NEW_VERSION, slowInstallMs: 300 });
   const other = await context.newPage();
   await other.goto('/index.html');
   await other.evaluate(async () => {
@@ -150,8 +150,10 @@ test('an update that is mid-download when the app opens still shows the toast', 
 
   await page.reload();
   await page.locator('.pp-canvas').waitFor();
-  // The browser fetches only a few files at a time, so a 1 s delay per
-  // file makes the install take ~6 s.
+  // The browser fetches only ~3 files at a time, so the install takes
+  // about (APP_SHELL files ÷ 3) × the delay — it grows with every new
+  // module: ~6 s at 58 files and 300 ms (1 s per file reached the 20 s
+  // limit at 58 files and failed CI).
   await expect(page.locator('#pp-update-toast')).toBeVisible({ timeout: 20000 });
 });
 
