@@ -1,0 +1,48 @@
+name: Deploy backup Worker
+
+# Step 7b: the backup Worker (worker/) deploys to Cloudflare on its
+# own, only when worker/ changes (or by hand from the Actions tab).
+# Its tests run first; a failure stops the deploy. Needs two GitHub
+# secrets: CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers")
+# and CLOUDFLARE_ACCOUNT_ID. The Worker's own secrets (INVITES,
+# SIGNING_KEY) are set in the Cloudflare dashboard and survive deploys.
+# See worker/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - '.github/workflows/worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Needs no npm packages (in-memory R2 and a software passkey).
+      - name: Worker tests
+        run: node --test tests/unit/worker.test.js
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          wranglerVersion: '4'

@@ -43,6 +43,27 @@ export const MAX_PROJECT_NAME = 60;
 
 let dbPromise = null;
 
+// --- change notices (7b) ---
+//
+// The backup listens here for anything that changes what a project
+// would upload (or the app settings it backs up), so no caller has to
+// remember to tell it. Called after the write has committed, with
+// (projectId, kind): 'changed' | 'deleted' | 'settings' (projectId
+// null). Never throws into the save.
+let changeListener = null;
+
+export function onStorageChange(fn) {
+  changeListener = fn;
+}
+
+function notifyChange(projectId, kind = 'changed') {
+  try {
+    changeListener?.(projectId, kind);
+  } catch (err) {
+    console.error('Parapara! storage change listener failed:', err);
+  }
+}
+
 // --- ids ---
 
 export function newId() {
@@ -401,6 +422,7 @@ export async function createProject(name) {
       s[STORE_META].put({ key: META_LAST_PROJECT, value: project.id });
     }
   );
+  notifyChange(project.id);
 
   return { project, frames: [frame] };
 }
@@ -464,6 +486,7 @@ export async function renameProject(projectId, name) {
       if (project) s[STORE_PROJECTS].put({ ...project, name });
     };
   });
+  notifyChange(projectId);
 }
 
 // Deletes a project for good: its record, every frame, every blob
@@ -492,6 +515,7 @@ export async function deleteProject(projectId) {
       };
     }
   );
+  notifyChange(projectId, 'deleted');
 }
 
 // Thumbnail: a small PNG of frame 1, stored like a layer bitmap
@@ -503,6 +527,7 @@ export async function saveThumbnail(projectId, blob) {
   await withTransaction([STORE_BLOBS], 'readwrite', (s) => {
     s[STORE_BLOBS].put({ id: thumbnailBlobId(projectId), projectId, type, buffer });
   });
+  notifyChange(projectId);
 }
 
 // Returns the thumbnail Blob, or null if there isn't one yet.
@@ -515,6 +540,7 @@ export async function saveProject(project) {
   await withTransaction([STORE_PROJECTS], 'readwrite', (s) => {
     s[STORE_PROJECTS].put(record);
   });
+  notifyChange(project.id);
   return record;
 }
 
@@ -538,6 +564,7 @@ export async function saveToolSettings(settings) {
   await withTransaction([STORE_META], 'readwrite', (s) => {
     s[STORE_META].put({ key: META_TOOL_SETTINGS, value: settings });
   });
+  notifyChange(null, 'settings');
 }
 
 // --- recent colors (app-wide, remembered across launches) ---
@@ -557,6 +584,7 @@ export async function saveRecentColors(colors) {
   await withTransaction([STORE_META], 'readwrite', (s) => {
     s[STORE_META].put({ key: META_RECENT_COLORS, value: colors });
   });
+  notifyChange(null, 'settings');
 }
 
 // --- UI state (app-wide, remembered across launches) ---
@@ -578,6 +606,23 @@ export async function saveUiState(state) {
   });
 }
 
+// --- other app-level records (7b: the backup's state and keys) ---
+//
+// Stored as-is under `key` in the meta store; the caller validates.
+
+export async function loadMeta(key) {
+  const record = await withTransaction([STORE_META], 'readonly', (s) =>
+    promisifyRequest(s[STORE_META].get(key))
+  );
+  return record?.value ?? null;
+}
+
+export async function saveMeta(key, value) {
+  await withTransaction([STORE_META], 'readwrite', (s) => {
+    s[STORE_META].put({ key, value });
+  });
+}
+
 // Saves the project and the given frames in one transaction, so a
 // layer or frame added or removed can never be saved on the project
 // without its frame records (or the reverse). `removedFrameIds` are
@@ -589,6 +634,7 @@ export async function saveProjectAndFrames(project, frames, removedFrameIds = []
     for (const frame of frames) s[STORE_FRAMES].put(frame);
     for (const id of removedFrameIds) s[STORE_FRAMES].delete(id);
   });
+  notifyChange(project.id);
   return record;
 }
 
@@ -643,6 +689,7 @@ export async function copyBlobs(projectId, pairs) {
   await withTransaction([STORE_BLOBS], 'readwrite', (s) => {
     copyBlobsIn(s[STORE_BLOBS], pairs, projectId);
   });
+  notifyChange(projectId);
 }
 
 // Duplicates a saved project — record, frames and every blob it
@@ -655,6 +702,7 @@ export async function saveProjectCopy({ project, frames, pairs }) {
     for (const frame of frames) s[STORE_FRAMES].put(frame);
     copyBlobsIn(s[STORE_BLOBS], pairs, project.id);
   });
+  notifyChange(project.id);
 }
 
 // Project file (7a): the stored blobs under `ids`, as Map id -> { type,
@@ -681,12 +729,14 @@ export async function saveImportedProject({ project, frames, blobs }) {
     for (const frame of frames) s[STORE_FRAMES].put(frame);
     for (const { id, type, buffer } of blobs) s[STORE_BLOBS].put({ id, projectId: project.id, type, buffer });
   });
+  notifyChange(project.id);
 }
 
 export async function saveFrame(frame) {
   await withTransaction([STORE_FRAMES], 'readwrite', (s) => {
     s[STORE_FRAMES].put(frame);
   });
+  notifyChange(frame.projectId);
 }
 
 // Saves one layer's bitmap and bumps the project's updatedAt, in a
@@ -712,6 +762,7 @@ export async function saveLayerBitmap(projectId, bitmapRef, blob) {
       }
     };
   });
+  notifyChange(projectId);
 }
 
 // Returns the layer's bitmap as a Blob, or null if it's blank (never

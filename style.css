@@ -1695,6 +1695,22 @@ html, body {
   border-color: var(--pp-accent);
 }
 
+/* Backup sheet (7b): the usage line and the "why it didn't work" note
+   only take room when they have something to say. */
+.pp-backup__detail:empty,
+.pp-backup__note:empty {
+  display: none;
+}
+
+.pp-backup__note {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.pp-backup__invite[hidden] {
+  display: none;
+}
+
 .pp-dialog__buttons {
   display: flex;
   flex-wrap: wrap;

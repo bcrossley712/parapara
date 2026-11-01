@@ -922,8 +922,9 @@ device-only.
     iCloud → Passwords → Sync this iPad, and allowing the Passwords app
     (hidden, so AutoFill From was empty). Then Safari passed all three
     checks: PRF at creation (with a value — CTAP 2.2), PRF at sign-in
-    with the same value, synced passkey (BE=1, BS=1). Whether the
-    installed app behaves the same is the dev Passkey test.
+    with the same value, synced passkey (BE=1, BS=1). **The installed
+    app passed too** (dev Passkey test, 2026-11-01): PRF at creation,
+    the same secret at sign-in, synced, user handle returned.
   - **Encrypted on the iPad** (AES-GCM, WebCrypto): blobs named by a
     keyed hash of their contents, so Cloudflare sees random ids,
     sizes and times — no names, no drawings — and identical files
@@ -958,8 +959,64 @@ device-only.
     (today `bcrossley712.github.io`, shared with his other Pages
     projects). He has his own domain on Cloudflare but **keeps the app
     where it is** (2026-11-01); a move after 7b would strand the
-    passkeys and need a restore. The Worker can still live on his
-    domain.
+    passkeys and need a restore. **The Worker lives at
+    `parapara-backup.kmsmallengines.com`** (his small-engine business
+    domain, 2026-11-01). Visitors to the business site never see it;
+    the address is visible only in the app's code and in public
+    certificate logs, and anyone who finds it gets "unauthorized". If
+    the domain ever lapses or leaves Cloudflare, backup stops until
+    the Worker moves (a config change; no one sets backup up again).
+  - **Built in two pushes** (his OK, 2026-11-01): backup can't touch
+    her drawings on the iPad, so it can run for days before restore
+    exists, and Safari (separate storage) makes restore easy to test.
+  - **Push 1 decisions (2026-11-01):**
+    - **Device tokens, not a passkey per request:** a passkey sign-in
+      asks for Touch ID, so joining (and, push 2, signing in) hands
+      the device a random token (the Worker keeps its SHA-256); the
+      vault's keys stay on the iPad non-extractable, so everyday
+      backups never prompt. The vault secret isn't kept on the iPad —
+      only the passkey's PRF output can unwrap the stored copy.
+    - **The vault id is the passkey's user handle** (16 random bytes),
+      so restore learns the vault from the sign-in itself.
+    - **Stateless challenges** (random + time + HMAC under
+      `SIGNING_KEY`): the challenge endpoint is open, so handing one
+      out must write nothing. Next fetches it (and checks the invite)
+      before Turn on, since the passkey sheet must open inside the tap.
+    - **Cleanup by "last referenced":** reading every kept manifest
+      to find live blobs would blow the free plan's 10 ms CPU and
+      1,000 R2 calls per run, so each manifest upload updates the
+      project's `index.json` (blob → newest manifest that used it).
+      A blob stays while used in the last 30 days or by the latest
+      live manifest — exact for every kept version, at the cost of
+      keeping blobs of dropped versions inside 30 days. Fresh blobs
+      (under a day) are never deleted. Hourly, a few vaults per run.
+    - **Limits read `meta/usage.json`** from the cleanup, so they lag
+      up to about an hour; fine at these sizes with uploads capped at
+      25 MB and joining gated by invites.
+    - **The service worker now ignores non-GET and other-site
+      requests** — it never cached them, and an upload re-issued from
+      the service worker on iOS is a needless risk.
+    - **`PAUSED` lives in the dashboard** (`keep_vars = true`), so
+      pausing needs no deploy; `INVITES` and `SIGNING_KEY` are
+      dashboard secrets. The Worker deploys from its own workflow when
+      `worker/` changes; `worker/` is left off the published site.
+    - **The Passkey test was removed** — turning backup on exercises
+      the same path for real.
+  - **Push 2 plan (restore):** Restore from backup on an empty gallery
+    and in the Backup sheet → Next fetches a challenge (no invite) →
+    Touch ID inside the tap: `signInWithPasskey` with that challenge
+    and no `allowCredentials`; the user handle is the vault id → `POST
+    /v1/sessions` returns a device token and the wrapped secret →
+    `unwrapSecret` with the PRF output → `vaultKeys` → `backup.enable`
+    (without re-queuing what was just restored) → `GET /v1/projects`
+    with names and thumbnails from each latest manifest, current ones
+    plus "Deleted recently" (deleted, latest live manifest) → for each
+    chosen project its manifest and blobs (`getBlob`, `unseal`) →
+    `unpackProject` split so it takes a manifest + blob reader (zip or
+    backup) and **`keepIds`** (a project already on the device is
+    skipped) → `saveImportedProject` → settings back (`GET
+    /v1/settings`). Check: restore into Safari on her iPad or his
+    computer. Picking an old version stays deferred.
   - **Cloudflare facts checked 2026-11-01:** R2 free 10 GB-month, 1M
     Class A and 10M Class B requests a month, then $0.015/GB-month and
     $4.50 per million Class A; enabling R2 asks for a payment method;

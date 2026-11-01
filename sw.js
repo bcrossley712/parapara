@@ -72,7 +72,11 @@ const APP_SHELL = [
   './js/export/mp4.js',
   './js/export/aac.js',
   './js/backup/passkey.js',
-  './js/backup/dev-passkey-test.js', // DEV ONLY (before 7b)
+  './js/backup/crypto.js',
+  './js/backup/client.js',
+  './js/backup/backup.js',
+  './js/backup/scheduler.js',
+  './js/ui/backup-sheet.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
@@ -126,6 +130,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only this site's GETs come from the cache. Uploads and other sites
+  // (the backup Worker, 7b) go straight to the network, untouched.
+  const { request } = event;
+  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );

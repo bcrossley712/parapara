@@ -21,7 +21,6 @@ import { runPlaybackSpeedTest, runFrameMemoryTest, reportInterruptedMemoryTest }
 // Developer only (after 4b): the activity log, removed with the Developer section.
 import { devLog } from './storage/dev-log.js';
 import { showDevLog } from './ui/dev-log-view.js';
-import { runPasskeyTest } from './backup/dev-passkey-test.js'; // DEV ONLY (before 7b)
 import {
   initStorage,
   storageEstimate,
@@ -61,7 +60,17 @@ import {
   newId,
   loadBlobs,
   saveImportedProject,
+  loadMeta,
+  saveMeta,
+  onStorageChange,
 } from './storage/storage.js';
+// Step 7b: automatic backup.
+import { createBackup } from './backup/backup.js';
+import { createBackupClient } from './backup/client.js';
+import { createBackupScheduler } from './backup/scheduler.js';
+import { PRF_SALT, newVaultSecret, wrapSecret, toB64u, fromB64u } from './backup/crypto.js';
+import { createPasskey, signInWithPasskey, randomBytes } from './backup/passkey.js';
+import { createBackupSheet, backupStatusText, backupUsageText } from './ui/backup-sheet.js';
 import {
   packProject, unpackProject, projectFileBlobIds, ProjectFileError,
   PROJECT_FILE_EXTENSION, PROJECT_FILE_TYPE,
@@ -210,9 +219,200 @@ const appActions = {
   applyUpdate: () => updater.applyUpdate(),
   freshReload: () => updater.freshReload(),
   showActivityLog: () => showDevLog({ read: (last) => devLog.read(last), clear: () => devLog.clear() }),
-  // DEV ONLY (before 7b): runs inside the gear-menu tap.
-  passkeyTest: () => runPasskeyTest({ log: (fields) => devLog.add('passkey-test', fields), notice: showNotice }),
+  openBackup: () => openBackupSheet(),
 };
+
+// --- automatic backup (step 7b) ---
+//
+// backup/backup.js does a run, backup/scheduler.js decides when,
+// ui/backup-sheet.js shows it; this is the glue. storage.js tells the
+// backup about every change (onStorageChange), so nothing else has to.
+// Runs: ~10 s after a save but at most every 2 minutes while she
+// draws, and soon after launch, leaving a project, hiding the app,
+// coming back online, or Back up now.
+
+const BACKUP_NOTICE = "Your drawings haven't been backed up for 3 days. Ask a parent to check Backup in Settings.";
+const backupClient = createBackupClient();
+const backup = createBackup({
+  storage: { loadProject, listProjects, loadBlobs, loadMeta, saveMeta, loadToolSettings, loadRecentColors },
+  client: backupClient,
+  log: (event, fields) => devLog.add(event, fields),
+  appVersion: () => appActions.getVersionLabel().catch(() => ''),
+});
+const backupScheduler = createBackupScheduler({
+  run: () => runBackup(),
+  isOnline: () => navigator.onLine !== false,
+});
+let backupSheet = null;
+let backupUsage = null;
+let pendingJoin = null; // { invite, challenge, userId, made }
+
+async function runBackup() {
+  refreshBackupSheet();
+  const result = await backup.run();
+  if (backup.noticeDue()) {
+    showNotice(BACKUP_NOTICE);
+    backup.noticeShown().catch(() => {});
+  }
+  refreshBackupSheet();
+  return result;
+}
+
+onStorageChange((projectId, kind) => {
+  backup.changed(projectId, kind);
+  if (backup.enabled) backupScheduler.changed();
+});
+window.addEventListener('online', () => {
+  if (backup.enabled) backupScheduler.soon();
+});
+
+// At launch, once storage works: catch up on anything missed, run.
+async function startBackup() {
+  try {
+    await backup.load();
+    if (!backup.enabled) return;
+    await backup.catchUp();
+    backupScheduler.soon();
+    if (backup.noticeDue()) {
+      showNotice(BACKUP_NOTICE);
+      backup.noticeShown().catch(() => {});
+    }
+  } catch (err) {
+    devLog.add('backup-failed', { step: 'start', error: String(err?.message ?? err) });
+  }
+}
+
+function backupSoon() {
+  if (backup.enabled) backupScheduler.soon();
+}
+
+function refreshBackupSheet() {
+  if (!backupSheet?.isOpen || backupSheet.phase !== 'on') return;
+  const status = backup.status();
+  backupSheet.show({
+    phase: 'on',
+    status: backupStatusText(status, { online: navigator.onLine !== false }),
+    usage: backupUsageText(backupUsage),
+    running: status.running,
+  });
+}
+
+function showBackupOn() {
+  backupSheet.show({ phase: 'on', status: '', usage: '' });
+  refreshBackupSheet();
+  backup.usage().then((usage) => {
+    backupUsage = usage;
+    refreshBackupSheet();
+  }, () => {});
+}
+
+const JOIN_PROBLEMS = {
+  'bad-invite': "That invite code didn't work. Check it and try again.",
+  offline: 'There’s no internet. Try again when the iPad is online.',
+  paused: 'Backups are paused right now. Try again later.',
+  'old-challenge': 'That took too long. Tap Next to try again.',
+};
+const joinProblem = (err) => JOIN_PROBLEMS[err?.code] ?? `Backup couldn't be turned on (${err?.code ?? err?.name ?? 'error'}).`;
+
+function openBackupSheet() {
+  if (!storageWorks) {
+    showNotice("Backup isn't available: this iPad's storage isn't working.");
+    return;
+  }
+  if (!backupSheet) {
+    backupSheet = createBackupSheet({
+      onNext: (invite) => backupNext(invite),
+      onTurnOn: () => backupTurnOn(),
+      onFinish: () => backupFinish(),
+      onBackupNow: () => {
+        backupScheduler.soon();
+        refreshBackupSheet();
+      },
+      onClose: () => { pendingJoin = null; },
+    });
+  }
+  if (backup.enabled) showBackupOn();
+  else backupSheet.show({ phase: 'off' });
+}
+
+// Next: check the invite and get the Worker's challenge now, so the
+// Turn on tap can open the passkey sheet without waiting (Safari).
+async function backupNext(invite) {
+  backupSheet.show({ phase: 'checking' });
+  try {
+    const challenge = await backupClient.challenge(invite);
+    if (!backupSheet.isOpen) return;
+    pendingJoin = { invite, challenge };
+    backupSheet.show({ phase: 'confirm' });
+  } catch (err) {
+    devLog.add('backup-failed', { step: 'invite', error: err?.code ?? String(err) });
+    if (backupSheet.isOpen) backupSheet.show({ phase: 'off', note: joinProblem(err) });
+  }
+}
+
+// Turn on: the passkey, synchronously in the tap.
+function backupTurnOn() {
+  const join = pendingJoin;
+  if (!join) return;
+  join.userId = randomBytes(16);
+  createPasskey({
+    rpName: 'Parapara!',
+    userName: 'Parapara! backup',
+    userId: join.userId,
+    salt: PRF_SALT,
+    challenge: fromB64u(join.challenge),
+  }).then((made) => {
+    join.made = made;
+    devLog.add('backup-passkey', { prf: made.prf.enabled ? 'yes' : 'no', secret: made.prf.first ? 'yes' : 'no', synced: made.flags?.bs ? 'yes' : 'no' });
+    if (made.prf.first) finishJoin(join, made.prf.first);
+    else backupSheet.show({ phase: 'finish' });
+  }, (err) => {
+    devLog.add('backup-failed', { step: 'passkey', error: String(err?.name ?? err) });
+    backupSheet.show({ phase: 'confirm', note: "The passkey wasn't saved. Tap Turn on to try again." });
+  });
+}
+
+// Finish (only when the passkey gave no secret at creation): sign in
+// with it once, synchronously in the tap, to get the secret.
+function backupFinish() {
+  const join = pendingJoin;
+  if (!join?.made) return;
+  signInWithPasskey({ salt: PRF_SALT, credentialIds: [join.made.credentialId] }).then((signedIn) => {
+    if (signedIn.prf.first) finishJoin(join, signedIn.prf.first);
+    else backupSheet.show({ phase: 'off', note: "This iPad can't make the key backup needs (its passkeys don't support PRF)." });
+  }, (err) => {
+    devLog.add('backup-failed', { step: 'finish', error: String(err?.name ?? err) });
+    backupSheet.show({ phase: 'finish', note: "That didn't work. Tap Finish to try again." });
+  });
+}
+
+async function finishJoin(join, prfOutput) {
+  backupSheet.show({ phase: 'working' });
+  try {
+    const secret = newVaultSecret();
+    const { made } = join;
+    const result = await backupClient.join({
+      invite: join.invite,
+      vaultId: toB64u(join.userId),
+      passkey: {
+        id: toB64u(made.credentialId),
+        publicKey: made.response.publicKey,
+        alg: made.response.alg,
+        clientDataJSON: made.response.clientDataJSON,
+        authenticatorData: made.response.authenticatorData,
+      },
+      wrappedKey: await wrapSecret(prfOutput, secret),
+    });
+    await backup.enable({ vaultId: result.vaultId, token: result.token, passkeyId: toB64u(made.credentialId), secret });
+    pendingJoin = null;
+    devLog.add('backup-on');
+    backupScheduler.soon();
+    showBackupOn();
+  } catch (err) {
+    devLog.add('backup-failed', { step: 'join', error: err?.code ?? String(err?.message ?? err) });
+    backupSheet.show({ phase: 'off', note: joinProblem(err) });
+  }
+}
 
 // Problems she has to OK go in the activity log too (dev only).
 // Project file (7a): the share sheet, or a download where there's
@@ -256,8 +456,12 @@ document.addEventListener('visibilitychange', () => {
   devLog.add('app', document.visibilityState);
   if (document.visibilityState === 'hidden') {
     hideEditor?.();
-    flushAll();
-  } else checkEditor?.();
+    flushAll().finally(() => backupSoon());
+    backup.flush().catch(() => {});
+  } else {
+    checkEditor?.();
+    backupSoon();
+  }
 });
 window.addEventListener('pagehide', () => flushAll());
 
@@ -270,6 +474,7 @@ async function launch() {
   try {
     const { persisted } = await initStorage();
     storageWorks = true;
+    startBackup(); // not awaited: never holds up opening her work
     // How much is stored and whether iOS agreed to keep it (6d) — a
     // reference point; no warning is shown. Not awaited.
     storageEstimate().then(
@@ -3371,6 +3576,7 @@ function mountEditor(session, { canSave }) {
     frameTiles.destroy();
     ui.destroy();
     showGallery(cards);
+    backupSoon(); // 7b: leaving a project backs it up soon
   }
 }
 

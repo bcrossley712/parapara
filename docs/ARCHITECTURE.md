@@ -11,7 +11,7 @@ decisions — UI specifics belong in code comments), **Don't break**
 (each rule is here because breaking it caused, or would cause, a real
 bug), and where useful **Testing** tips and **iPad-only checks**.
 
-Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying](#layers-undo-and-copying) · [Saving and storage](#saving-and-storage) · [Frames, playback and onion skin](#frames-playback-and-onion-skin) · [Reference image](#reference-image) · [Sound](#sound) · [Export and sharing](#export-and-sharing) · [Colors and tool settings](#colors-and-tool-settings) · [Editor UI, menus and screens](#editor-ui-menus-and-screens) · [PWA, layout and updates](#pwa-layout-and-updates)
+Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying](#layers-undo-and-copying) · [Saving and storage](#saving-and-storage) · [Backup](#backup) · [Frames, playback and onion skin](#frames-playback-and-onion-skin) · [Reference image](#reference-image) · [Sound](#sound) · [Export and sharing](#export-and-sharing) · [Colors and tool settings](#colors-and-tool-settings) · [Editor UI, menus and screens](#editor-ui-menus-and-screens) · [PWA, layout and updates](#pwa-layout-and-updates)
 
 ---
 
@@ -221,8 +221,7 @@ and the glue in `main.js`.
 `storage/autosave.js` (save timing only: debounce 500 ms drawing /
 300 ms settings, no overlap, flush), `storage/project-file.js` and
 `storage/zip.js` (7a, a project as one file), `storage/dev-log.js`
-(DEV ONLY), `backup/passkey.js` (before 7b: passkeys with PRF) and
-`backup/dev-passkey-test.js` (DEV ONLY).
+(DEV ONLY). Backup (7b) has [its own section](#backup).
 The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema).
 
 ### How it works
@@ -252,21 +251,19 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   it; the file check covers shape only (canvas size, layers, frames,
   blob list). Step 7b reuses the manifest and blobs, uploaded piece by
   piece.
-
-- **Passkeys (before 7b):** `passkey.js` wraps
-  `navigator.credentials` — a discoverable passkey with PRF
-  (`createPasskey`), signing in with no `allowCredentials` so the iPad
-  lists every passkey for the site, as restore will
-  (`signInWithPasskey`) — plus pure helpers (`authenticatorFlags`,
-  `readPrf`, base64url). The dev Passkey test drives it: tap 1 makes a
-  test passkey, tap 2 signs in and compares a fingerprint of the PRF
-  secret (localStorage `parapara-dev-passkey`).
+- **Change notices (7b):** every write in `storage.js` that changes
+  what a project would back up (its record, frames, blobs, thumbnail,
+  name; create, copy, import, delete) or the backed-up settings (tool
+  settings, recent colors) calls `notifyChange(projectId, kind)` after
+  it commits; main.js hands these to the backup (`onStorageChange`).
+  `loadMeta` / `saveMeta` store other app records (the backup's).
 
 ### Don't break
 
-- **Passkey ceremonies run synchronously inside the tap** (no await
-  before `createPasskey` / `signInWithPasskey`): Safari refuses
-  WebAuthn without a fresh gesture, and one tap allows one ceremony.
+- **A new storage write that changes a project or the backed-up
+  settings must call `notifyChange`**, or the backup won't know until
+  the next launch's catch-up (and a rename, which doesn't bump
+  `updatedAt`, not even then).
 - **Autosave exports every unsaved layer in the same tick and saves
   each to the ref of the frame it was exported from** (`session.frame`
   captured before any await). Reading the ref after awaiting the
@@ -305,20 +302,125 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   that if thumbnail ids change. Sound files and photos count in it; skip
   them too if a sound/photo test ever uses it.
 
-### Testing
-
-- **Passkeys in e2e** (`passkey.spec.js`): Chromium's virtual
-  authenticator over CDP (`WebAuthn.addVirtualAuthenticator` with
-  `hasPrf`, backup flags on) stands in for iCloud Keychain. Open the
-  app as **`localhost`**, not the config's `127.0.0.1` — an IP address
-  isn't a valid passkey domain (SecurityError).
-
 ### iPad-only checks
 
 IOS storage eviction, suspend/relaunch behavior. 7a: share sheet,
 `.parapara` name and the Import picker confirmed (2026-11-01); still
-unchecked: memory while packing a big project. Before 7b: the dev
-Passkey test in the installed app.
+unchecked: memory while packing a big project.
+
+---
+
+## Backup
+
+**Files:** `js/backup/backup.js` (what a run does, the queue),
+`backup/scheduler.js` (when), `backup/crypto.js` (encryption, blob
+names), `backup/client.js` (the Worker's endpoints, `BACKUP_URL`),
+`backup/passkey.js` (passkeys with PRF), `ui/backup-sheet.js` (gear →
+Backup); the Worker in `worker/` (`src/index.js`, `webauthn.js`,
+`cleanup.js`, `wrangler.toml`, `README.md` for setup and operations),
+deployed by `.github/workflows/worker.yml`. Glue in `main.js` ("automatic
+backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-features)
+→ "Backup (7b scoping)")
+
+### How it works
+
+- **Turning on** (gear → Backup, an adult's job): the invite code →
+  Next fetches a Worker challenge (checking the invite) → **Turn on**
+  makes a discoverable passkey ("Parapara! backup", user id = a new
+  random vault id) with PRF, inside the tap → a random 32-byte vault
+  secret is wrapped under the PRF output and sent with the passkey to
+  `POST /v1/vaults`, which returns a device token. If the passkey
+  gives no PRF secret at creation, **Finish** signs in with it once
+  (her iPad gives it at creation). The vault's `enc` / `name` keys
+  (HKDF from the secret) go to meta `backupKeys`, non-extractable;
+  the secret itself isn't kept on the iPad.
+- **What changed:** storage's change notices mark a project (or the
+  settings) dirty in meta `backupQueue` (`{ since, at }` per project,
+  written within a second); a delete queues a deleted marker if the
+  backup has sent that project. At launch `catchUp` also marks any
+  project whose `updatedAt` is newer than its last upload, and any
+  uploaded project that's gone.
+- **When** (scheduler.js): ~10 s after a change but at most every
+  2 minutes while she draws; ~1 s after launch, leaving a project,
+  hiding or showing the app, coming online, Back up now. A failed run
+  retries after 1, 5, 15, then every 60 minutes; offline waits for
+  `online`.
+- **A run** (one at a time): deleted markers first, then each dirty
+  project — its blobs (`projectFileBlobIds`, the 7a list, thumbnail
+  included) named by HMAC of their bytes; a fingerprint of { project,
+  frames, blob list } skips an unchanged project; `POST
+  /v1/blobs/missing` (500 at a time), encrypt and upload those (3 at
+  once), then the manifest (`{ format: 'parapara-backup', version: 1,
+  app, project, frames, blobs: [{ id, type, name }] }`, encrypted) as
+  `PUT /v1/projects/<id>` with `refs` (the names) last. The Worker
+  refuses a manifest naming a blob it doesn't have (`missing-blobs`);
+  the run sends those and tries once more. Then the settings
+  (`{ toolSettings, recentColors }`) if their fingerprint changed. A
+  change during a run stays queued (`at` moved).
+- **State** in meta `backup`: `{ vaultId, token, passkeyId,
+  enabledAt, lastOkAt, lastError, lastErrorAt, noticeAt }`. Log
+  lines: `backup` (projects, blobs, bytes, deleted, ms),
+  `backup-failed` (`error`, or `step` for setup), `backup-passkey`,
+  `backup-on`.
+- **Her notice** ("Your drawings haven't been backed up for 3 days.
+  Ask a parent to check Backup in Settings."): after a run or at
+  launch, when something has waited more than 3 days (`since`) and she
+  wasn't told in the last day (`backupNoticeDue`).
+- **The Worker** keeps per vault: `vault.json` (passkeys, wrapped
+  secret, device-token hashes), `b/<name>`, `p/<id>/m/<savedAt>.json`,
+  `p/<id>/index.json` (each blob's latest reference), `settings.json`.
+  Invite per family (`INVITES` secret); limits 1 GB per vault, 8 GB
+  total, 25 MB per upload (checked against `meta/usage.json`); `PAUSED`
+  variable; the hourly cleanup keeps versions (latest, hourly 48 h,
+  daily 30 days), deleted projects 90 days, vaults 12 months unused.
+  Stateless challenges (HMAC under `SIGNING_KEY`, 5 minutes).
+- **The service worker leaves non-GET and other-site requests alone**
+  (7b), so uploads to the Worker never pass through its cache code.
+
+### Don't break
+
+- **Passkey ceremonies run synchronously inside the tap** (no await
+  before `createPasskey` / `signInWithPasskey`): Safari refuses
+  WebAuthn without a fresh gesture, and one tap allows one ceremony.
+  That's why Next fetches the challenge before Turn on.
+- **Nothing readable leaves the iPad:** blobs, manifests and settings
+  go through `seal` (each with its own associated data: `blob:<name>`,
+  `manifest:<projectId>`, `settings`); names are `blobName` (keyed
+  HMAC), never a plain hash.
+- **The vault id is the passkey's user handle** — restore finds the
+  vault from it. Don't change how it's made.
+- **Changing the crypto labels (`PRF_SALT`, HKDF infos, AADs) strands
+  every existing backup.** Add a version instead.
+- **Blobs reach the backup only through `projectFileBlobIds`**
+  (`mapBlobRefs`), like the project file — a new blob kind added there
+  is backed up automatically.
+- **Worker:** a manifest is accepted only when every blob it names is
+  stored (or already in the project's index); cleanup never deletes a
+  blob uploaded in the last day (its manifest may be on its way) and
+  stays under 1,000 R2 calls per run (free plan).
+
+### Testing
+
+- **Unit:** `worker.test.js` (the Worker on `tests/support/fake-r2.js`
+  with a software passkey, `soft-passkey.js`), `backup.test.js`
+  (crypto, scheduler, the notice, the sheet's wording, and backup.js
+  on fake-indexeddb calling the real Worker's handler as its fetch).
+- **E2E** (`backup.spec.js`): serve.js hosts the real Worker at
+  `/__backup__/` on an in-memory R2 (invite `e2e-invite-code`;
+  `/__test__/backup?vault=` lists a vault's keys). Open the app as
+  **`localhost`** (an IP address isn't a valid passkey domain), set
+  `window.__PARAPARA_BACKUP_URL__` in an init script, and add
+  Chromium's virtual authenticator over CDP with `hasPrf`. Fail the
+  network with `page.route('**/__backup__/**', …)`, per page; the
+  Worker's state is shared by every test.
+
+### iPad-only checks
+
+Turning on with Touch ID in the installed app; the first upload of
+her real projects (time, `backup` log line); a stroke later sending
+one blob; a run cut short when the app is hidden (finished at the
+next launch); airplane mode → "Waiting for the internet", then backed
+up; Back up now; the 3-day notice (only if it really happens).
 
 ---
 

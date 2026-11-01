@@ -83,11 +83,11 @@ test('the panel fits the screen and scrolls when the Developer section is taller
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(560);
   // The top of it (Check for updates) is still on screen, the bottom
-  // (Passkey test) scrolls into view.
+  // (Mic delay test) scrolls into view.
   await expect(page.getByRole('button', { name: 'Check for updates' })).toBeInViewport();
-  const passkey = page.getByRole('button', { name: 'Passkey test' });
-  await passkey.scrollIntoViewIfNeeded();
-  await expect(passkey).toBeInViewport();
+  const last = page.getByRole('button', { name: 'Mic delay test' });
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
 });
 
 test('the panel shows which build is running', async ({ page }) => {

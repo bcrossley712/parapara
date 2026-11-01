@@ -10,11 +10,20 @@
 //   version, and can delay service-worker install fetches (requests
 //   that bypass the HTTP cache) to hold a new worker mid-install.
 //   Either parameter may be omitted. Responds with the current state.
+//
+// Hosts the backup Worker (step 7b): /__backup__/… runs the real
+// worker/src code on an in-memory R2 (tests/support/fake-r2.js), with
+// RP_ID localhost — specs open the app as localhost (an IP address
+// isn't a valid passkey domain) and point it here by setting
+// window.__PARAPARA_BACKUP_URL__. Invite code: e2e-invite-code.
+// GET /__test__/backup?vault=<id> lists that vault's stored keys.
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import worker from '../../worker/src/index.js';
+import { FakeR2 } from '../support/fake-r2.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PORT = Number(process.argv[2] || 8765);
@@ -35,9 +44,47 @@ const TYPES = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const backupEnv = {
+  BUCKET: new FakeR2(),
+  RP_ID: 'localhost',
+  ALLOWED_ORIGINS: `http://localhost:${PORT},http://127.0.0.1:${PORT}`,
+  INVITES: 'e2e:e2e-invite-code',
+  SIGNING_KEY: 'e2e-signing-key',
+};
+
+async function serveBackup(req, res, urlPath, search) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = chunks.length ? Buffer.concat(chunks) : undefined;
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+  const request = new Request(`http://localhost:${PORT}${urlPath.slice('/__backup__'.length)}${search}`, {
+    method: req.method,
+    headers,
+    body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
+  });
+  const response = await worker.fetch(request, backupEnv);
+  const out = {};
+  response.headers.forEach((v, k) => { out[k] = v; });
+  res.writeHead(response.status, { ...out, 'Cache-Control': 'no-store' });
+  res.end(Buffer.from(await response.arrayBuffer()));
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const urlPath = decodeURIComponent(url.pathname);
+
+  if (urlPath.startsWith('/__backup__/')) {
+    await serveBackup(req, res, urlPath, url.search);
+    return;
+  }
+  if (urlPath === '/__test__/backup') {
+    const vault = url.searchParams.get('vault') ?? '';
+    const keys = [...backupEnv.BUCKET.objects.keys()].filter((k) => k.startsWith(`vaults/${vault}/`));
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ keys }));
+    return;
+  }
 
   if (urlPath === '/__test__/state') {
     if (url.searchParams.has('version')) state.version = url.searchParams.get('version');

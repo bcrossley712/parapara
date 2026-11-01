@@ -1,0 +1,31 @@
+# The backup Worker (step 7b) — see README.md here. Deployed by
+# .github/workflows/worker.yml; don't deploy by hand unless that's broken.
+
+name = "parapara-backup"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Only on his domain, never the public workers.dev address.
+workers_dev = false
+routes = [
+  { pattern = "parapara-backup.kmsmallengines.com", custom_domain = true },
+]
+
+# Variables set in the dashboard (PAUSED) survive a deploy.
+keep_vars = true
+
+[vars]
+RP_ID = "bcrossley712.github.io"
+ALLOWED_ORIGINS = "https://bcrossley712.github.io"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "parapara-backup"
+
+# Cleanup: a few vaults per run, hourly (cleanup.js).
+[triggers]
+crons = ["23 * * * *"]
+
+# Secrets, set in the dashboard (Settings → Variables and Secrets):
+#   INVITES      "name:code,name:code"
+#   SIGNING_KEY  long random text (signs passkey challenges)

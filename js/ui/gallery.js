@@ -100,7 +100,7 @@ export function createGallery(container, { callbacks, appActions = {} }) {
       applyUpdate: appActions.applyUpdate ?? (async () => window.location.reload()),
       freshReload: appActions.freshReload ?? (async () => window.location.reload()),
       showActivityLog: appActions.showActivityLog, // dev only (after 4b)
-      passkeyTest: appActions.passkeyTest, // dev only (before 7b)
+      openBackup: appActions.openBackup, // 7b
     },
     placement: 'below',
     onOpen: () => closeMenu(),

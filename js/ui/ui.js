@@ -381,7 +381,7 @@ export function initUI(container, options = {}) {
       playbackSpeedTest: appActions.playbackSpeedTest ?? (() => {}),
       frameMemoryTest: appActions.frameMemoryTest ?? (() => {}),
       micDelayTest: appActions.micDelayTest, // dev only (5c)
-      passkeyTest: appActions.passkeyTest, // dev only (before 7b)
+      openBackup: appActions.openBackup, // 7b
       showActivityLog: appActions.showActivityLog, // dev only (after 4b)
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },

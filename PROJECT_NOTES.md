@@ -131,35 +131,37 @@ icon, manifest `name`/`short_name`, and repo copy.
    Files on its own, so automatic means a server: **Cloudflare Worker
    + R2**. Build in this order (each confirmed on the iPad):
    - **7a — done** (above).
-   - **7b — automatic backup to R2** after saves, when online, and
-     **restore onto a fresh install** (a wiped iPad, a new one) —
-     **scoped 2026-11-01** ([decisions](docs/DESIGN_NOTES.md#planned-features)
-     → "Backup (7b scoping)"). In short: a **passkey with PRF** (synced
-     by iCloud Keychain) instead of a recovery code; everything
-     **encrypted on the iPad**; uploads the 7a manifest plus only the
-     changed blobs; restore keeps the original ids (`keepIds` on
-     `unpackProject`); **one invite code per family** (friends can
-     use it); limits 1 GB per vault, 8 GB total, 25 MB per upload;
-     palette, recent colors and tool settings backed up too; she sees
-     a notice when backup has been failing for days. **First:** the
-     dev Passkey test on her iPad (below). **Then** the full 7b build
-     plan for his OK, and his Cloudflare setup. The app **stays at
-     `bcrossley712.github.io`** (decided 2026-11-01): passkeys are tied
-     to the site's address, so a later move would strand them.
+   - **7b — automatic backup to R2 and restore onto a fresh
+     install**, in two pushes ([decisions](docs/DESIGN_NOTES.md#planned-features)
+     → "Backup (7b scoping)"; how it works: [ARCHITECTURE →
+     Backup](docs/ARCHITECTURE.md#backup)). A **passkey with PRF**
+     (iCloud Keychain) instead of a recovery code, everything
+     **encrypted on the iPad**, one invite per family, the app stays
+     at `bcrossley712.github.io` (passkeys are tied to the address).
+     - **Push 1 — the Worker, setup and automatic backup: built, to
+       check** (below).
+     - **Push 2 — restore** (next, in a new conversation): the plan
+       is in [DESIGN_NOTES → Backup](docs/DESIGN_NOTES.md#planned-features)
+       → "Push 2 plan"; the Worker side and client calls exist.
    - **Then** share links and Krita reference import on the same
      backend — decide when they're reached whether she still wants
      share links, now that video sharing works.
 2. Then the requested extras under Open items.
 
-**Built, to check on the iPad (this push) — dev Passkey test (before
-7b).** In the **installed app** (not Safari), gear → Developer →
-**Passkey test**: the first tap makes a test passkey (Touch ID), the
-second signs in with it. Hoped for: "made a test passkey (PRF on,
-synced to iCloud)", then "Passkey test passed". Send the
-`passkey-test` log lines (`app=installed`, `prf`, `secret`, `same`,
-`bs`). Then delete "Parapara! passkey test" in the Passwords app.
-Safari already passed Corbado's demo (2026-11-01) once her Screen
-Time allowed iCloud Passwords (see DESIGN_NOTES → Backup).
+**Built, to check (this push) — 7b push 1, automatic backup.**
+**His setup first** ([worker/README.md](worker/README.md) → One-time
+setup; Worker at `parapara-backup.kmsmallengines.com`, one invite,
+`hers`): R2 on and budget alert set (2026-11-01); the deploy token and
+account id as GitHub secrets; deploy (Actions → Deploy backup Worker);
+`INVITES` and `SIGNING_KEY` secrets on the Worker; `/v1/status`
+answers `{"error":"unauthorized"}`. **Then on her iPad** (installed app): gear
+→ **Backup** → invite → Next → Turn on (Touch ID) → "Backed up just
+now" and a usage line; draw, wait ~2 min or tap Back up now → a
+`backup … blobs=1` log line; airplane mode → Back up now → "no
+internet", then off airplane mode → backed up; close the app mid-run
+and reopen. Send the log (`backup`, `backup-failed`,
+`backup-passkey`, `backup-on`). R2 → Objects should show only random
+names under `vaults/`.
 
 **Open iPad checks** (send the activity log with any of them):
 - **Whenever convenient:** a 48-frame export's time, with the editor
@@ -201,7 +203,8 @@ if it shows:
   `export-audio-failed`, `share-failed`;
 - **project files (7a):** `project-file-failed`,
   `project-import-failed`;
-- **passkeys (before 7b):** `passkey-test … result=failed`.
+- **backup (7b):** `backup-failed` (with `error`, or `step` while
+  turning on).
 
 **Open items**
 - **Silent sound after the background — WebKit bug, worked around;
@@ -381,10 +384,11 @@ Applies to the whole app. How each area works is in
   fields), never restructure. See [Schema](#schema).
 - **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
   project, not hardcoded.
-- **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
-  step 7 on a Cloudflare Worker + R2 — automatic backup first, then
-  share links and Krita import. The storage warning was dropped (Open
-  items).
+- **Backup (7b)** runs on a Cloudflare Worker + R2 (`worker/`,
+  deployed by its own workflow, not part of the published site).
+  **Planned** ([details](docs/DESIGN_NOTES.md#planned-features)):
+  restore (7b push 2), then share links and Krita import on the same
+  backend. The storage warning was dropped (Open items).
 
 ## Global rules
 
@@ -411,7 +415,9 @@ rules are in each area's **Don't break** in `docs/ARCHITECTURE.md`.
 - **Schema and storage:** extend the schema additively; store/index
   changes need a `DB_VERSION` bump and a *new* upgrade branch. Any new
   kind of blob reference must be added to `mapBlobRefs` (`layers.js`)
-  or the launch sweep deletes it (Saving and storage).
+  or the launch sweep deletes it (Saving and storage). A new storage
+  write that changes a project must call `notifyChange`, or the
+  backup misses it (Saving and storage).
 - **Anything that changes layer pixels** — a new tool, flip, merge
   down — must mark the ink map and dirty rect (Canvas and drawing)
   and `frameCache.touch` the frame (Frames, playback and onion skin).
@@ -427,6 +433,7 @@ Don't break, Testing tips, iPad-only checks).
 | [Canvas and drawing](docs/ARCHITECTURE.md#canvas-and-drawing) | `canvas/canvas.js`, `brush.js`, `gestures.js`, `region.js`, `ink-map.js` |
 | [Layers, undo and copying](docs/ARCHITECTURE.md#layers-undo-and-copying) | `storage/layers.js`, `history.js`, `ui/layers-panel.js` |
 | [Saving and storage](docs/ARCHITECTURE.md#saving-and-storage) | `storage/storage.js`, `autosave.js`, `dev-log.js` |
+| [Backup](docs/ARCHITECTURE.md#backup) | `backup/*`, `ui/backup-sheet.js`, `worker/` |
 | [Frames, playback and onion skin](docs/ARCHITECTURE.md#frames-playback-and-onion-skin) | `timeline/*`, `canvas/render-frame.js`, `frame-tiles.js`, `playback-frames.js`, `onion-view.js`, `thumbnail.js`, `ui/onion-badge.js` |
 | [Reference image](docs/ARCHITECTURE.md#reference-image) | `canvas/reference.js`, `transform.js`, `ui/image-menu.js`, `reference-bar.js` |
 | [Sound](docs/ARCHITECTURE.md#sound) | `audio/*`, `ui/sound-panel.js` |
@@ -454,11 +461,7 @@ and the `showNotice` wrapper in `main.js` (and the guard-context
 assertions in `canvas-loss.spec.js`), `frameCache.memory`,
 `liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`,
 `storageLogFields` in `storage.js` (6d; keep `storageEstimate` if a
-storage warning is ever built), the **Passkey test** (before 7b:
-`backup/dev-passkey-test.js`, its import and `passkeyTest` in
-`main.js`, `ui.js` and `gallery.js`, its button in
-`settings-panel.js`, its `sw.js` entry, `tests/e2e/passkey.spec.js`;
-keep `backup/passkey.js`), and the
+storage warning is ever built), and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
 (`parapara-dev-log`); Copy takes the last 60 (`DEV_LOG_COPY_LINES`).
 

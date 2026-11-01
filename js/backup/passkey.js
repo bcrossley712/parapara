@@ -10,8 +10,9 @@
 //
 // Thin wrappers over navigator.credentials plus pure helpers (flags,
 // base64url), unit-tested in Node. No storage, no DOM beyond
-// `navigator`. The dev Passkey test (dev-passkey-test.js) drives it
-// now; 7b's backup setup and restore will.
+// `navigator`. Backup setup uses createPasskey; restore (7b push 2)
+// will use signInWithPasskey. The dev Passkey test that proved this on
+// her iPad (2026-11-01) was removed with 7b push 1.
 //
 // **createPasskey and signInWithPasskey must be called synchronously
 // inside a tap** (no await before them): Safari refuses WebAuthn
@@ -77,16 +78,19 @@ export function readPrf(extensionResults) {
 }
 
 // Creates a discoverable passkey on this device with PRF turned on.
+// `challenge` (bytes) is the Worker's when it will check the result.
 // Resolves { credentialId (bytes), userId, prf: { enabled, first },
-// flags }. `prf.first` is set when the authenticator already answers
-// at creation (CTAP 2.2; iCloud Keychain on iPadOS 27 does); otherwise
-// it comes at the first sign-in. Call inside a tap.
-export function createPasskey({ rpName, userName, displayName, userId = randomBytes(16), salt }) {
+// flags, response: { clientDataJSON, authenticatorData, publicKey
+// (SPKI), alg } } — `response` is what the Worker checks, base64url.
+// `prf.first` is set when the authenticator already answers at
+// creation (CTAP 2.2; iCloud Keychain on iPadOS 27 does); otherwise it
+// comes at the first sign-in. Call inside a tap.
+export function createPasskey({ rpName, userName, displayName, userId = randomBytes(16), salt, challenge = randomBytes(32) }) {
   const pending = navigator.credentials.create({
     publicKey: {
       rp: { name: rpName }, // id defaults to this page's host
       user: { id: userId, name: userName, displayName: displayName ?? userName },
-      challenge: randomBytes(32),
+      challenge,
       pubKeyCredParams: [
         { type: 'public-key', alg: -7 },   // ES256
         { type: 'public-key', alg: -257 }, // RS256
@@ -104,11 +108,18 @@ export function createPasskey({ rpName, userName, displayName, userId = randomBy
   return pending.then((cred) => {
     if (!cred) throw new Error('no passkey was made');
     const authData = cred.response.getAuthenticatorData?.() ?? null;
+    const publicKey = cred.response.getPublicKey?.() ?? null;
     return {
       credentialId: new Uint8Array(cred.rawId),
       userId: new Uint8Array(userId),
       prf: readPrf(cred.getClientExtensionResults?.()),
       flags: authenticatorFlags(authData),
+      response: {
+        clientDataJSON: toBase64Url(cred.response.clientDataJSON),
+        authenticatorData: authData ? toBase64Url(authData) : null,
+        publicKey: publicKey ? toBase64Url(publicKey) : null,
+        alg: cred.response.getPublicKeyAlgorithm?.() ?? null,
+      },
     };
   });
 }
@@ -116,12 +127,13 @@ export function createPasskey({ rpName, userName, displayName, userId = randomBy
 // Signs in with a passkey for this site and evaluates PRF with
 // `salt`. With no `credentialIds`, the iPad lists every passkey for
 // the site (how restore on a fresh iPad finds the backup). Resolves
-// { credentialId, userHandle, prf: { first }, flags }. Call inside a
-// tap.
-export function signInWithPasskey({ salt, credentialIds = [] }) {
+// { credentialId, userHandle, prf: { first }, flags, response:
+// { clientDataJSON, authenticatorData, signature } } (base64url, for
+// the Worker). Call inside a tap.
+export function signInWithPasskey({ salt, credentialIds = [], challenge = randomBytes(32) }) {
   const pending = navigator.credentials.get({
     publicKey: {
-      challenge: randomBytes(32),
+      challenge,
       allowCredentials: credentialIds.map((id) => ({ type: 'public-key', id })),
       userVerification: 'required',
       timeout: PASSKEY_TIMEOUT_MS,
@@ -135,6 +147,11 @@ export function signInWithPasskey({ salt, credentialIds = [] }) {
       userHandle: cred.response.userHandle ? new Uint8Array(cred.response.userHandle) : null,
       prf: readPrf(cred.getClientExtensionResults?.()),
       flags: authenticatorFlags(cred.response.authenticatorData),
+      response: {
+        clientDataJSON: toBase64Url(cred.response.clientDataJSON),
+        authenticatorData: toBase64Url(cred.response.authenticatorData),
+        signature: toBase64Url(cred.response.signature),
+      },
     };
   });
 }
