@@ -657,6 +657,32 @@ export async function saveProjectCopy({ project, frames, pairs }) {
   });
 }
 
+// Project file (7a): the stored blobs under `ids`, as Map id -> { type,
+// buffer }, in one read. Ids with nothing stored (a blank layer) are
+// left out. All of them are in memory at once — a project's worth.
+export async function loadBlobs(ids) {
+  const records = await withTransaction([STORE_BLOBS], 'readonly', (s) =>
+    Promise.all(ids.map((id) => promisifyRequest(s[STORE_BLOBS].get(id))))
+  );
+  const out = new Map();
+  for (const record of records) {
+    if (record) out.set(record.id, { type: record.type, buffer: record.buffer });
+  }
+  return out;
+}
+
+// Project file (7a): saves an opened file's project — record, frames
+// and blobs ({ id, type, buffer }, see unpackProject) — in one
+// transaction, so a failure (out of space) leaves no half project.
+// Doesn't change the last-opened project.
+export async function saveImportedProject({ project, frames, blobs }) {
+  await withTransaction([STORE_PROJECTS, STORE_FRAMES, STORE_BLOBS], 'readwrite', (s) => {
+    s[STORE_PROJECTS].put(project);
+    for (const frame of frames) s[STORE_FRAMES].put(frame);
+    for (const { id, type, buffer } of blobs) s[STORE_BLOBS].put({ id, projectId: project.id, type, buffer });
+  });
+}
+
 export async function saveFrame(frame) {
   await withTransaction([STORE_FRAMES], 'readwrite', (s) => {
     s[STORE_FRAMES].put(frame);

@@ -123,6 +123,17 @@ html, body {
   color: var(--pp-ink);
 }
 
+/* A top-bar button with a word instead of an icon (the gallery's
+   Import, 7a): as wide as its word. */
+.pp-text-btn {
+  width: auto;
+  min-width: 48px;
+  padding: 0 16px;
+  font-family: var(--pp-font);
+  font-size: 17px;
+  font-weight: 600;
+}
+
 /* Pushes the buttons after it to the right end of the top bar. */
 .pp-top-bar__spacer {
   flex: 1;

@@ -18,8 +18,12 @@ let closeCurrent = null;
 // `dismissConfirms`: a tap on the dim area (or Escape) counts as the
 // confirm button, not Cancel — for a notice whose second button is the
 // unusual choice (5c's headphones popup: Got it / Don't show again).
-export function showConfirm({ title, message = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false, dismissConfirms = false }) {
-  return openDialog({ title, message, confirmLabel, cancelLabel, danger, input: null, dismissConfirms })
+// `onConfirmTap`: runs synchronously inside the confirm button's tap,
+// before the dialog closes — for what iOS allows only from a tap (7a's
+// Share opens the share sheet). The returned Promise resolves too late
+// for that.
+export function showConfirm({ title, message = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false, dismissConfirms = false, onConfirmTap = null }) {
+  return openDialog({ title, message, confirmLabel, cancelLabel, danger, input: null, dismissConfirms, onConfirmTap })
     .then((answer) => answer !== null);
 }
 
@@ -29,7 +33,7 @@ export function showPrompt({ title, value = '', confirmLabel = 'OK', cancelLabel
   return openDialog({ title, message: '', confirmLabel, cancelLabel, danger: false, input: { value, maxLength } });
 }
 
-function openDialog({ title, message, confirmLabel, cancelLabel, danger, input, dismissConfirms = false }) {
+function openDialog({ title, message, confirmLabel, cancelLabel, danger, input, dismissConfirms = false, onConfirmTap = null }) {
   closeCurrent?.(null);
 
   return new Promise((resolve) => {
@@ -102,7 +106,10 @@ function openDialog({ title, message, confirmLabel, cancelLabel, danger, input, 
     }
 
     cancelBtn.addEventListener('click', () => close(null));
-    confirmBtn.addEventListener('click', confirm);
+    confirmBtn.addEventListener('click', () => {
+      onConfirmTap?.();
+      confirm();
+    });
     const dismiss = () => (dismissConfirms ? confirm() : close(null));
     // A tap on the dim area (not the dialog) cancels (or confirms, with
     // dismissConfirms).

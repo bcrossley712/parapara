@@ -865,6 +865,21 @@ device-only.
     48-frame GIF's time.
   - **PNG sequence:** full size, one stored (uncompressed) zip so
     frames don't flood Photos; not scoped further.
+- **Project file (7a scoping, 2026-10-31; his choices were "go with
+  your picks").** A **zip, stored not deflated** — ordinary and
+  inspectable, and PNG/sound bytes are already compressed; written by
+  our own small `zip.js` rather than a library. **`.parapara`**, not
+  `.zip`, so it reads as hers; iOS may grey out an extension it doesn't
+  know, so Import has **no `accept`** and checks the contents (the cost
+  may be a menu before Files — an iPad check). **Opening makes a new
+  project, same name** (Procreate's import), never overwriting; the
+  **thumbnail rides along** rather than being redrawn. **Where:** the
+  gallery — ⋯ → Save as file, top bar → Import (Procreate's places).
+  **For 7b:** uploading a whole file after every save would resend the
+  whole project each time, so the backup uploads the same manifest
+  and only the blobs that changed; restore reassembles them. Restore
+  onto a wiped iPad will want the original ids kept (an option on
+  unpack), not a copy.
 - **Krita reference import** (one-way PC → iPad) reuses the same
   Worker + R2 backend: `.kra` is a ZIP with a merged-preview image;
   import that as a reference layer, not a full layer-stack parser.

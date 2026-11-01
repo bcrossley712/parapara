@@ -14,6 +14,7 @@
 
 import { initUI, showUpdatePrompt, showNotice as showNoticeToast, showBanner } from './ui/ui.js';
 import { createGallery } from './ui/gallery.js';
+import { formatSize } from './ui/export-sheet.js';
 import { showConfirm } from './ui/confirm-dialog.js';
 // Developer only (step 4a-i), removed with the gear menu's Developer section.
 import { runPlaybackSpeedTest, runFrameMemoryTest, reportInterruptedMemoryTest } from './timeline/dev-stress.js';
@@ -57,7 +58,13 @@ import {
   saveImageBlob,
   saveAudioBlob,
   newId,
+  loadBlobs,
+  saveImportedProject,
 } from './storage/storage.js';
+import {
+  packProject, unpackProject, projectFileBlobIds, ProjectFileError,
+  PROJECT_FILE_EXTENSION, PROJECT_FILE_TYPE,
+} from './storage/project-file.js';
 import {
   MAX_LAYERS,
   nextLayerName,
@@ -205,6 +212,34 @@ const appActions = {
 };
 
 // Problems she has to OK go in the activity log too (dev only).
+// Project file (7a): the share sheet, or a download where there's
+// none (a computer's browser). Must run synchronously in a tap.
+function shareFile(file) {
+  const canShareFiles = typeof navigator.share === 'function'
+    && typeof navigator.canShare === 'function'
+    && navigator.canShare({ files: [file] });
+  devLog.add('share', { via: canShareFiles ? 'sheet' : 'download', bytes: file.size });
+  if (!canShareFiles) {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  navigator.share({ files: [file] }).then(
+    () => devLog.add('shared'),
+    (err) => {
+      if (err?.name === 'AbortError') return; // she closed the share sheet
+      devLog.add('share-failed', { error: String(err?.message ?? err) });
+      showNotice("Sharing didn't open. Try Save as file again.");
+    },
+  );
+}
+
 function showNotice(message) {
   devLog.add('notice', message);
   showNoticeToast(message);
@@ -383,6 +418,72 @@ async function showGallery(preloaded = null) {
         } catch (err) {
           console.error('Parapara! duplicate failed:', err);
           showNotice("That animation couldn't be copied. The iPad may be out of space.");
+        } finally {
+          gallery.setBusy(false);
+        }
+      },
+      // Save as file (7a): the whole animation as one .parapara file,
+      // then Share (a second tap — iOS opens the share sheet only from
+      // one) for Save to Files, AirDrop or Messages.
+      onSaveFile: async (id) => {
+        gallery.setBusy(true);
+        let file;
+        try {
+          const started = performance.now();
+          const loaded = await loadProject(id);
+          if (!loaded) throw new Error('Project not found');
+          const blobs = await loadBlobs(projectFileBlobIds(loaded.project, loaded.frames));
+          const app = await appActions.getVersionLabel().catch(() => '');
+          const packed = packProject({ ...loaded, blobs, app });
+          file = new File([packed], exportFileName(loaded.project.name, PROJECT_FILE_EXTENSION), { type: PROJECT_FILE_TYPE });
+          devLog.add('project-file', {
+            project: String(id).slice(-4), frames: loaded.frames.length, blobs: blobs.size,
+            bytes: file.size, ms: Math.round(performance.now() - started),
+          });
+        } catch (err) {
+          console.error('Parapara! save as file failed:', err);
+          devLog.add('project-file-failed', { error: String(err?.message ?? err) });
+          showNotice("That animation couldn't be saved as a file.");
+          return;
+        } finally {
+          gallery.setBusy(false);
+        }
+        showConfirm({
+          title: 'Your file is ready',
+          message: `${file.name} (${formatSize(file.size)}). Share it to keep a copy in Files, or send it to a friend who has Parapara!`,
+          confirmLabel: 'Share',
+          cancelLabel: 'Done',
+          onConfirmTap: () => shareFile(file),
+        });
+      },
+      // Import (7a): a .parapara file becomes a new card at the front;
+      // she stays on the gallery, as after Duplicate.
+      onImport: async (picked) => {
+        gallery.setBusy(true);
+        try {
+          const started = performance.now();
+          const opened = await unpackProject(picked);
+          await saveImportedProject(opened);
+          devLog.add('project-import', {
+            project: opened.project.id.slice(-4), frames: opened.frames.length, blobs: opened.blobs.length,
+            bytes: picked.size, ms: Math.round(performance.now() - started),
+          });
+          const card = {
+            id: opened.project.id,
+            name: opened.project.name,
+            frameCount: opened.project.frames.length,
+            thumbnail: await loadThumbnail(opened.project.id).catch(() => null),
+          };
+          cards = [card, ...cards];
+          gallery.render(cards);
+        } catch (err) {
+          console.error('Parapara! import failed:', err);
+          devLog.add('project-import-failed', {
+            code: err?.code ?? 'error', bytes: picked.size, error: String(err?.message ?? err),
+          });
+          showNotice(err instanceof ProjectFileError
+            ? (err.code === 'damaged' ? "That file is damaged and couldn't be opened." : err.message)
+            : "That file couldn't be opened. The iPad may be out of space.");
         } finally {
           gallery.setBusy(false);
         }

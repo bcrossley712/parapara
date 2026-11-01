@@ -6,8 +6,9 @@
 // then reports intents through callbacks; main.js does the storage.
 //
 // Conventions (Procreate / Flipaclip): tap a card to open it, tap its
-// name to rename it, and the ⋯ button for Rename / Duplicate / Delete.
-// Delete asks first because it can't be undone.
+// name to rename it, and the ⋯ button for Rename / Duplicate / Save as
+// file / Delete. Delete asks first because it can't be undone.
+// Import in the top bar opens a project file (7a), as in Procreate.
 
 import { attachSettingsMenu } from './settings-panel.js';
 import { showConfirm, showPrompt } from './confirm-dialog.js';
@@ -15,7 +16,8 @@ import { GEAR_ICON } from './icons.js';
 import { MAX_PROJECT_NAME } from '../storage/storage.js';
 
 // callbacks: { onOpen(id), onCreate(), onRename(id, name),
-//   onDuplicate(id), onDelete(id) }
+//   onDuplicate(id), onSaveFile(id), onImport(file), onDelete(id) }
+//   — onImport gets the File she picked; checking it is main.js's job.
 // appActions: for the gear menu (see settings-panel.js) — no editor
 //   actions here.
 //
@@ -23,7 +25,10 @@ import { MAX_PROJECT_NAME } from '../storage/storage.js';
 // destroy() }. A project for render() is { id, name, frameCount,
 // thumbnail: Blob | null }.
 export function createGallery(container, { callbacks, appActions = {} }) {
-  const { onOpen, onCreate, onRename, onDuplicate, onDelete } = callbacks;
+  const {
+    onOpen, onCreate, onRename, onDuplicate, onDelete,
+    onSaveFile = () => {}, onImport = () => {},
+  } = callbacks;
   container.innerHTML = '';
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -44,7 +49,35 @@ export function createGallery(container, { callbacks, appActions = {} }) {
   gearBtn.className = 'pp-icon-btn';
   gearBtn.setAttribute('aria-label', 'Settings');
   gearBtn.innerHTML = GEAR_ICON;
-  topBar.append(title, spacer, gearBtn);
+  // Import (7a): a word, not an icon, as in Procreate's gallery.
+  const importBtn = document.createElement('button');
+  importBtn.type = 'button';
+  importBtn.className = 'pp-icon-btn pp-text-btn pp-gallery__import';
+  importBtn.textContent = 'Import';
+  topBar.append(title, spacer, importBtn, gearBtn);
+
+  // The project-file picker (7a): a native file input like the photo
+  // and sound pickers, because iPadOS has no other way into Files.
+  // Hidden; click() must happen inside the tap. No `accept`: iOS may
+  // grey out an extension it doesn't know (.parapara), so any file can
+  // be picked and main.js decides from its contents. (On iOS that may
+  // mean a short menu before Files opens — an iPad check.)
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.className = 'pp-file-input pp-file-input--project';
+  fileInput.hidden = true;
+  shell.appendChild(fileInput);
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0] ?? null;
+    fileInput.value = '';
+    if (file && !busy) onImport(file);
+  }, { signal });
+  importBtn.addEventListener('click', () => {
+    if (busy) return;
+    closeMenu();
+    fileInput.value = '';
+    fileInput.click();
+  }, { signal });
 
   const scroller = document.createElement('div');
   scroller.className = 'pp-gallery';
@@ -101,9 +134,10 @@ export function createGallery(container, { callbacks, appActions = {} }) {
     menu.setAttribute('role', 'menu');
     const renameBtn = menuButton('Rename', () => askRename(project));
     const duplicateBtn = menuButton('Duplicate', () => { if (!busy) onDuplicate(project.id); });
+    const saveFileBtn = menuButton('Save as file', () => { if (!busy) onSaveFile(project.id); });
     const deleteBtn = menuButton('Delete', () => askDelete(project));
     deleteBtn.classList.add('pp-gallery-menu__item--danger');
-    menu.append(renameBtn, duplicateBtn, deleteBtn);
+    menu.append(renameBtn, duplicateBtn, saveFileBtn, deleteBtn);
     anchor.closest('.pp-gallery-card').appendChild(menu);
     openMenu = menu;
     menuAnchor = anchor;

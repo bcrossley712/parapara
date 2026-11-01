@@ -52,6 +52,8 @@ const APP_SHELL = [
   './js/storage/history.js',
   './js/storage/layers.js',
   './js/storage/colors.js',
+  './js/storage/project-file.js',
+  './js/storage/zip.js',
   './js/storage/dev-log.js',
   './js/timeline/frames.js',
   './js/timeline/frame-strip.js',

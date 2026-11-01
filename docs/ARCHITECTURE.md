@@ -219,7 +219,9 @@ and the glue in `main.js`.
 
 **Files:** `js/storage/storage.js` (IndexedDB wrapper + schema factories),
 `storage/autosave.js` (save timing only: debounce 500 ms drawing /
-300 ms settings, no overlap, flush), `storage/dev-log.js` (DEV ONLY).
+300 ms settings, no overlap, flush), `storage/project-file.js` and
+`storage/zip.js` (7a, a project as one file), `storage/dev-log.js`
+(DEV ONLY).
 The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema).
 
 ### How it works
@@ -232,6 +234,23 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   `{ persisted }`, `storageEstimate()` the numbers). A reference point
   only — **no storage warning is shown** (dropped; PROJECT_NOTES.md
   Open items).
+- **Project file (7a):** gallery ⋯ → Save as file packs a project into
+  `<name>.parapara` — a zip with every entry *stored* (`zip.js`, our
+  own): `project.json` (`{ format: 'parapara-project', version: 1,
+  savedAt, app, project, frames, blobs: [{ id, type, path }] }`) and
+  `blobs/<n>.<ext>`, the stored bytes as-is. Only blobs the project
+  uses go in (`projectFileBlobIds` → `referencedBlobIds`), thumbnail
+  included; blank layers have none. Then a "Your file is ready" dialog
+  whose Share runs `navigator.share` inside the tap (`onConfirmTap`),
+  or downloads where there's no share sheet. Gallery → Import opens a
+  file (input with no `accept`); `unpackProject` checks it and remaps
+  every id with `copyProjectRecords` (as Duplicate does) — **opening
+  never overwrites, always a new project, same name, createdAt kept**
+  — and `saveImportedProject` writes it in one transaction. Values the
+  editor sanitizes on open (fps, onion, palette, clips) are left to
+  it; the file check covers shape only (canvas size, layers, frames,
+  blob list). Step 7b reuses the manifest and blobs, uploaded piece by
+  piece.
 
 ### Don't break
 
@@ -261,13 +280,24 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
   and a duplicate shares it with the original. The thumbnail
   (`thumbnailBlobId`) is derived, not a field; both handle it
   separately.
+- **Project file version:** bump `PROJECT_FILE_VERSION` only when an
+  older app couldn't read the file; additive schema fields don't need
+  it. A newer file is refused with "made by a newer Parapara!", never
+  half-read. Blobs reach the file only through `mapBlobRefs`, so a new
+  blob kind added there is carried automatically.
+- **`zip.js` writes and reads stored entries only** (no deflate, no
+  zip64); the reader refuses anything else and checks every entry's
+  CRC.
 - `savedDrawingBytes` in the e2e helpers skips `thumb-` blobs — keep
   that if thumbnail ids change. Sound files and photos count in it; skip
   them too if a sound/photo test ever uses it.
 
 ### iPad-only checks
 
-IOS storage eviction, suspend/relaunch behavior.
+IOS storage eviction, suspend/relaunch behavior. 7a: the share sheet
+for a `.parapara` file (Save to Files, AirDrop; named `.parapara`, not
+`.zip`), the Import picker with no `accept`, memory while packing a
+big project.
 
 ---
 

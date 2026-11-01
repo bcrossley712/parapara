@@ -95,6 +95,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   (`SOUND_FILE_TYPES` in `ui.js`), never `audio/*`** — iOS treats
   `audio/*` like video and shows Photo Library / Take Video / Choose
   File (seen on her iPad); extensions should open Files directly.
+  7a's Import (a project file) is a file input too, with **no
+  `accept`** (iOS may grey out the unknown `.parapara`); the contents
+  decide.
 - **Third-party code — none, with one agreed exception:** gifenc
   (MIT), only if GIF export is ever built — copied into the repo at a
   pinned version, never loaded from a CDN ([plan](docs/DESIGN_NOTES.md#planned-features)
@@ -110,8 +113,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   undo, layers, gallery, 2e's requests, reference image, frame cache,
   playback, onion skin, frame editing, menus closing on a canvas tap,
   sound (import, sound panel, hold-to-record over music, mixer,
-  Listen/Set start) and export (MP4 with sound through the share
-  sheet, Include images per project). How each works is in
+  Listen/Set start, sound back after the background — 2026-10-31) and
+  export (MP4 with sound through the share sheet, Include images per
+  project). How each works is in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
   the buttons, not gestures. She knows songs from streaming apps can't
   be imported (bought downloads can).
@@ -124,9 +128,12 @@ icon, manifest `name`/`short_name`, and repo copy.
    automatic one saved anything). A home-screen app can't write to
    Files on its own, so automatic means a server: **Cloudflare Worker
    + R2**. Build in this order (each confirmed on the iPad):
-   - **7a — a project as one file, and opening one** (save and
-     restore a whole project). Both the cloud backup and any manual
-     copy use it, and it's testable without a server.
+   - **7a — a project as one file, and opening one — built, to
+     check** (below). Decided (2026-10-31): a `.parapara` file (a
+     stored zip: `project.json` + blobs); opening always makes a new
+     project with the same name; the thumbnail rides along. **7b
+     uploads the same manifest and blobs piece by piece** (only
+     changed blobs go up), not a whole file per save.
    - **7b — automatic backup to R2** after saves, when online, and
      **restore onto a fresh install** (a wiped iPad, a new one).
      Decide when scoping: how a device proves the backups are its own
@@ -140,15 +147,16 @@ icon, manifest `name`/`short_name`, and repo copy.
      share links, now that video sharing works.
 2. Then the requested extras under Open items.
 
-**Built, to check on the iPad (this push) — sound after the
-background.** A WebKit bug (see Open items) left the sound silent after
-the app came back from the background (seen 2026-10-31, after saving a
-video and with backgrounding alone); only closing the app helped. Now
-the sound pauses when the app goes to the background and the next Play
-resumes it. Check: play, put the app away for a minute or two, come
-back, Play — is there sound? Send the log either way (`sound-sleep
-state=… paused=…`, the `play` line, `sound-state`, `sound-start`). The
-stall notice now says to close and reopen the app.
+**Built, to check on the iPad (this push) — 7a, project files.**
+Gallery ⋯ → **Save as file** → "Your file is ready" → Share; gallery
+top bar → **Import**. Check: Save as file a real project (one with a
+photo and sound), Save to Files; does the share sheet offer Files /
+AirDrop, and is the file named `<name>.parapara` (not `.zip`)? Then
+Import it: does the picker open Files directly or show a menu first,
+is the `.parapara` file selectable, and does the new card open with
+every frame, layer, photo and the sound? Try importing something
+that isn't one (a photo) — a notice, no card. Send the log
+(`project-file`, `project-import`, any `…-failed`).
 
 **Open iPad checks** (send the activity log with any of them):
 - **Whenever convenient:** a 48-frame export's time, with the editor
@@ -187,26 +195,22 @@ if it shows:
   finished; the save gives up after 15 s instead of locking the
   editor);
 - **sound and export:** `sound-stalled`, `export-failed`,
-  `export-audio-failed`, `share-failed`.
+  `export-audio-failed`, `share-failed`;
+- **project files (7a):** `project-file-failed`,
+  `project-import-failed`.
 
 **Open items**
-- **Silent sound after the background — WebKit bug, workaround
-  unproven.** A home-screen app's Web Audio can come back silent after
-  the app has been in the background: the context says `'running'`,
-  its clock may even move, nothing is heard ([WebKit
+- **Silent sound after the background — WebKit bug, worked around;
+  watch.** A home-screen app's Web Audio can come back silent after
+  the background ([WebKit
   291892](https://bugs.webkit.org/show_bug.cgi?id=291892), also
-  276016, 276687 — open, not ours to fix). Tested on her iPad
-  (2026-10-31): Play again with a new context ✗, a page reload ✗,
-  closing and reopening the app ✓. Reports say iOS 26 may be worst —
-  **her iPadOS version: not recorded yet** (Settings → General →
-  About). Built: pause on the way out (`audio.sleep`), resume in the
-  Play tap; a frozen clock still shows the close-and-reopen notice,
-  but the silent kind can't be detected. **If the pause doesn't
-  help:** the fallback is playing the sound through an `<audio>`
-  element (a file made with the export's offline mix) — a real project
-  (playback timing runs on the audio clock today), and reports say
-  iOS 26 may break `<audio>` in home-screen apps too. Decide after her
-  iPad's result.
+  276016, 276687 — open, not ours to fix). Pausing on the way out
+  (`audio.sleep`) and resuming in the Play tap **worked on her iPad
+  (2026-10-31, iPadOS 27.0.1)**: back after 1½ min, `play ctx=suspended`
+  → `running` → `sound-start`, sound heard. If silence comes back,
+  get the log; the fallback then is an `<audio>` element playing the
+  export's offline mix — a real project (playback timing runs on the
+  audio clock).
 - **GIF and PNG sequence export — cut from step 6 (2026-10-29), revisit
   after the main build; ask her.** A departure from her apps (all offer
   both), chosen on purpose: MP4 with sound covers "send it to a
