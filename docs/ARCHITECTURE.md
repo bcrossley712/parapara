@@ -416,8 +416,9 @@ backup"). Push 2 (restore) is still to come. ([why](DESIGN_NOTES.md#planned-feat
 
 ### iPad-only checks
 
-Turning on with Touch ID in the installed app; the first upload of
-her real projects (time, `backup` log line); a stroke later sending
+Confirmed 2026-11-01: turning on with Touch ID in the installed app;
+the first upload of her real projects (64 s for 24.9 MB). Still to
+check: a stroke later sending
 one blob; a run cut short when the app is hidden (finished at the
 next launch); airplane mode → "Waiting for the internet", then backed
 up; Back up now; the 3-day notice (only if it really happens).

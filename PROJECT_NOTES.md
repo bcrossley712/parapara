@@ -61,6 +61,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   - List each file's repo path in the message (e.g.
     `js/storage/autosave.js`) — several files share names across
     folders.
+  - **Files to delete go first in the message, in bold** — a zip
+    can't delete, and a missed one broke CI after 7b push 1.
 - **Be upfront about what can't be verified off-device** (iOS storage
   eviction, stylus feel, mic permission flow, share-sheet behavior).
 
@@ -116,8 +118,10 @@ icon, manifest `name`/`short_name`, and repo copy.
   sound (import, sound panel, hold-to-record over music, mixer,
   Listen/Set start, sound back after the background — 2026-10-31) and
   export (MP4 with sound through the share sheet, Include images per
-  project), and 7a's project files (gallery ⋯ → Save as file, top
-  bar → Import — 2026-11-01). How each works is in
+  project), 7a's project files (gallery ⋯ → Save as file, top
+  bar → Import — 2026-11-01), and 7b push 1, automatic backup (first
+  backup 2026-11-01: 11 projects, 182 blobs, 24.9 MB in 64 s; Worker
+  live at `parapara-backup.kmsmallengines.com`, invite `hers`). How each works is in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
   the buttons, not gestures. She knows songs from streaming apps can't
   be imported (bought downloads can).
@@ -138,32 +142,26 @@ icon, manifest `name`/`short_name`, and repo copy.
      (iCloud Keychain) instead of a recovery code, everything
      **encrypted on the iPad**, one invite per family, the app stays
      at `bcrossley712.github.io` (passkeys are tied to the address).
-     - **Push 1 — the Worker, setup and automatic backup: built, to
-       check** (below).
+     - **Push 1 — the Worker, setup and automatic backup: done**
+       (above; its remaining iPad checks are under Open iPad checks).
      - **Push 2 — restore** (next, in a new conversation): the plan
        is in [DESIGN_NOTES → Backup](docs/DESIGN_NOTES.md#planned-features)
        → "Push 2 plan"; the Worker side and client calls exist.
    - **Then** share links and Krita reference import on the same
      backend — decide when they're reached whether she still wants
      share links, now that video sharing works.
-2. Then the requested extras under Open items.
-
-**Built, to check (this push) — 7b push 1, automatic backup.**
-**His setup first** ([worker/README.md](worker/README.md) → One-time
-setup; Worker at `parapara-backup.kmsmallengines.com`, one invite,
-`hers`): R2 on and budget alert set (2026-11-01); the deploy token and
-account id as GitHub secrets; deploy (Actions → Deploy backup Worker);
-`INVITES` and `SIGNING_KEY` secrets on the Worker; `/v1/status`
-answers `{"error":"unauthorized"}`. **Then on her iPad** (installed app): gear
-→ **Backup** → invite → Next → Turn on (Touch ID) → "Backed up just
-now" and a usage line; draw, wait ~2 min or tap Back up now → a
-`backup … blobs=1` log line; airplane mode → Back up now → "no
-internet", then off airplane mode → backed up; close the app mid-run
-and reopen. Send the log (`backup`, `backup-failed`,
-`backup-passkey`, `backup-on`). R2 → Objects should show only random
-names under `vaults/`.
+2. Then the requested extras under Open items — **she's eager for the
+   stabilizer** (2026-11-01; he wants the extras ASAP after 7b). It's
+   in the brush block (stabilizer + symmetry + brush variety, one pass
+   through `stamp()` and the stroke path).
 
 **Open iPad checks** (send the activity log with any of them):
+- **Backup (7b push 1), as she draws:** a stroke later gives
+  `backup projects=1 blobs=1` (2 with the thumbnail) after ~2 min or
+  Back up now; airplane mode → Back up now says no internet, then
+  backs up once online; closing the app mid-run, then it finishes on
+  reopening; R2 → Objects shows only random names under `vaults/`.
+  The 3-day notice only if it really happens.
 - **Whenever convenient:** a 48-frame export's time, with the editor
   fine after (no lost-canvas banner); a 1–3 fps video in Photos;
   sharing to Files; switching apps mid-export stops it with a

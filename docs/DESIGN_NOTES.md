@@ -1002,6 +1002,16 @@ device-only.
       `worker/` changes; `worker/` is left off the published site.
     - **The Passkey test was removed** — turning backup on exercises
       the same path for real.
+    - **First backup on her iPad (2026-11-01):** turned on with Touch
+      ID (`backup-passkey prf=yes secret=yes synced=yes`); 11 projects,
+      182 blobs, 24.9 MB in 64 s — less than the iPad's 34.6 MB (no
+      database overhead, undo leftovers swept, shared blobs stored
+      once). Setup notes: Cloudflare's newer variable form has a
+      **Secret** toggle (no Type dropdown) and an environment choice
+      (Production); the Worker appears in Cloudflare only after the
+      workflow's first deploy; the first push failed CI because the
+      two Passkey-test files weren't deleted (a zip can't delete —
+      list deletions loudly at hand-off).
   - **Push 2 plan (restore):** Restore from backup on an empty gallery
     and in the Backup sheet → Next fetches a challenge (no invite) →
     Touch ID inside the tap: `signInWithPasskey` with that challenge
