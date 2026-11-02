@@ -138,3 +138,48 @@ test('a tap on another control closes the layers panel and still acts', async ({
   await expect(page.locator('.pp-layers')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Erase', exact: true })).toHaveClass(/is-active/);
 });
+
+test('the layers panel stays open while she moves between frames (the strip row)', async ({ page }) => {
+  await openApp(page);
+  const panel = page.locator('.pp-layers');
+  const addFrame = page.getByRole('button', { name: 'Add frame' });
+  const tile = (n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(panel).toBeVisible();
+
+  await expect(addFrame).toBeEnabled();
+  await addFrame.click();
+  await expect(tile(2)).toHaveClass(/is-current/);
+  await expect(panel).toBeVisible();
+
+  await expect(addFrame).toBeEnabled();
+  await tile(1).click();
+  await expect(tile(1)).toHaveClass(/is-current/);
+  await expect(panel).toBeVisible();
+
+  await expect(addFrame).toBeEnabled();
+  await page.getByRole('button', { name: 'Next frame' }).click();
+  await expect(tile(2)).toHaveClass(/is-current/);
+  await expect(panel).toBeVisible();
+
+  // Anywhere else still closes it.
+  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  await expect(panel).toBeHidden();
+});
+
+// A long press on iOS selects the nearest text and offers Copy: nothing
+// in the app is selectable (after 8b-i), except text boxes. Only the CSS
+// can be checked here — iOS's own long press is device-only.
+test('nothing is selectable except text boxes', async ({ page }) => {
+  await openApp(page);
+  const select = (locator) => locator.evaluate((el) => getComputedStyle(el).userSelect || getComputedStyle(el).webkitUserSelect);
+  for (const sel of ['.pp-canvas-area', '.pp-tool-rail', '.pp-tool-btn', '.pp-brush-size', '.pp-top-bar']) {
+    expect(await select(page.locator(sel).first()), sel).toBe('none');
+  }
+  await page.locator('.pp-color-swatch').click();
+  const hex = page.locator('.pp-color-picker__hex-input');
+  expect(await select(hex)).toBe('text');
+  // And typing still works.
+  await hex.fill('123456');
+  await expect(hex).toHaveValue('123456');
+});

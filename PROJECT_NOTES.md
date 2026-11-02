@@ -120,7 +120,8 @@ icon, manifest `name`/`short_name`, and repo copy.
   sheet, Include images per project); **7a** project files (gallery ⋯
   → Save as file, top bar → Import); **7b** automatic backup to
   Cloudflare and restore (both verified 2026-11-02); **8a** stabilizer
-  (as she expects, 2026-11-02). How each works is
+  (as she expects, 2026-11-02); **8b-i** symmetry, stroke buffer and
+  curved size (verified 2026-11-02). How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
@@ -131,10 +132,9 @@ links):
 1. **8b — symmetry + brush variety**, three pushes (scoped
    2026-11-02, [why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)),
    then flip drawing:
-   - **8b-i — built, not yet pushed** (checks below): stroke buffer,
-     tip seam with mirror flags, symmetry (rail menu, per project,
-     guide line, one undo entry with a patch per copy), curved 1–200
-     size slider. How: ARCHITECTURE → Canvas and drawing.
+   - **8b-i — done.** QOL after it (built, not yet pushed; checks
+     below): the layers panel stays open on frame-strip taps; no
+     long-press text selection.
    - **8b-ii:** brush panel (tap the selected Draw/Erase button; tips,
      size with the number shown, strength, Stabilizer moves here),
      with Pencil, Chalk/charcoal (canvas-fixed paper grain), Chisel
@@ -159,17 +159,12 @@ scoping)"; how it works is in [ARCHITECTURE →
 Backup](docs/ARCHITECTURE.md#backup).
 
 **Open iPad checks** (send the activity log with any of them):
-- **8b-i, once pushed:** drawing with symmetry off feels and looks
-  exactly as before (the stroke buffer is new underneath every
-  stroke) — no lag on long strokes, no flicker. Symmetry: each mode
-  mirrors draw, erase and smudge, with the stabilizer's trail on the
-  copies too; one undo removes the stroke and its copies; the guide is
-  easy to see but not in the way, and isn't in the video or the
-  gallery thumbnail; the mode comes back with the project, and a new
-  project starts Off. Size: small sizes are as easy to pick as before,
-  200 is reachable, sizes she'd saved come back the same. Rail still
-  fits (Symmetry label and gear visible). Log: `symmetry mode=…`,
-  `stroke … parts=N` for a mirrored stroke.
+- **After 8b-i (QOL), once pushed:** with Layers open, tapping frame
+  tiles, Add frame, prev/next or Play leaves it open, and the panel's
+  thumbnails show the new frame; a tap on the canvas, rail or top bar
+  still closes it. A long press anywhere (canvas, rail, gallery) no
+  longer selects text or shows Copy or the magnifier; renaming a layer
+  or project and typing a hex color still work.
 - **Whenever convenient:** a 48-frame export's time, with the editor
   fine after (no lost-canvas banner); a 1–3 fps video in Photos;
   sharing to Files; switching apps mid-export stops it with a
@@ -385,6 +380,12 @@ rules are in each area's **Don't break** in `docs/ARCHITECTURE.md`.
   won't open the picker. Likewise **`audio.unlock()` runs
   synchronously in the Play tap** — iOS starts sound only from one.
 - Text inputs ≥ 16px font.
+- **Nothing is selectable** (`user-select: none` and
+  `-webkit-touch-callout: none` on `html, body`, after 8b-i): a long
+  press made iOS select a label and offer Copy. Inputs, textareas and
+  `[contenteditable]` turn it back on (iOS won't type in a field
+  otherwise); any other text she must copy needs `user-select: text`
+  (the activity log has it).
 - **No arrow or symbol characters as icons in labels** (↔, ↕, ✓, ★ …)
   — iOS may draw them as color emoji (↕ did, in 3b's flip button),
   and desktop Chromium won't show it. Use inline SVG with

@@ -11,6 +11,7 @@
 
 import { test, expect } from '@playwright/test';
 import { openApp, readDb, setVisibility } from './helpers.js';
+import { MIC_DELAY_SECONDS } from '../../js/audio/clip.js';
 
 test.use({
   launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] },
@@ -111,6 +112,15 @@ async function holdUntilRecording(page) {
   await expect(panel(page).locator('.pp-sound-panel__mic')).toHaveClass(/is-recording/);
 }
 
+// The last take's lead-in (seconds) from its `recorded` line in the
+// activity log (written to storage a moment later), or null.
+async function takeLeadIn(page) {
+  const lines = await page.evaluate(() => JSON.parse(localStorage.getItem('parapara-dev-log') ?? '[]'));
+  const line = lines.filter((l) => / recorded /.test(` ${l} `)).pop();
+  const match = line?.match(/leadIn=(-?[\d.]+)/);
+  return match ? Number(match[1]) : null;
+}
+
 const savedProject = async (page) => (await readDb(page, 'projects'))[0];
 async function savedVoice(page, check = () => true) {
   await expect.poll(async () => {
@@ -150,7 +160,15 @@ test('a take records from her frame, without the lead-in, and is one undo step',
 
   const voice = await savedVoice(page);
   expect(voice.offset).toBeCloseTo(2 / 12, 3);
-  expect(voice.trimStart).toBeGreaterThan(0); // the recorder ran before the first frame
+  // The recorder ran before the first frame (leadIn > 0), and that
+  // lead-in plus the mic delay is what was cut. trimStart alone can't
+  // show the first: when the first frame comes within the mic delay
+  // (22 ms) of the recorder starting — a fast CI run — it's rightly 0.
+  await expect.poll(() => takeLeadIn(page)).not.toBeNull();
+  const leadIn = await takeLeadIn(page);
+  expect(leadIn).toBeGreaterThan(0);
+  // The log rounds leadIn to 1 ms, so compare to within 5 ms.
+  expect(voice.trimStart).toBeCloseTo(Math.max(0, leadIn + MIC_DELAY_SECONDS), 2);
   expect(voice.trimEnd - voice.trimStart).toBeGreaterThan(0.3);
   // Leveled: a gain above 1 (capped at 8), or none if it's loud already.
   if ('gain' in voice) {

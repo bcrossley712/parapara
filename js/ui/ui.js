@@ -132,13 +132,16 @@ export function initUI(container, options = {}) {
   }, { signal, capture: true });
 
   // The layers panel closes on any tap outside it (Procreate's popover)
-  // — the canvas (swallowed above), the rail, the top bar, the strip.
-  // Its own Layers button toggles it instead.
+  // — the canvas (swallowed above), the rail, the top bar — except the
+  // frame strip's row (tiles, Add frame, transport): she keeps it open
+  // while moving between frames, as in Flipaclip (her request, after
+  // 8b-i). Its own Layers button toggles it instead.
   document.addEventListener('pointerdown', (event) => {
     if (!layersPanel.isOpen) return;
     const target = event.target;
     if (!(target instanceof Node)) return;
     if (layersPanel.element.contains(target) || layersBtn.contains(target)) return;
+    if (frameStrip.element.contains(target)) return;
     layersPanel.setOpen(false);
   }, { signal, capture: true });
 

@@ -1196,7 +1196,10 @@ and menu), `ui/dev-log-view.js` (DEV ONLY); screen routing in
   playback-stop swallow). **The layers panel counts too** (after 5c,
   her request — Procreate's popover): any tap outside it closes it
   (and its layer menu) — `ui.js`'s tap-outside listener, after the
-  dismiss listener so a canvas tap is still swallowed; its Layers
+  dismiss listener so a canvas tap is still swallowed — **except taps
+  on the frame strip's row** (tiles, Add frame, transport), which leave
+  it open so she can move between frames with it up (her request
+  after 8b-i, Flipaclip-style); its Layers
   button toggles it; picking a layer keeps it open; it isn't
   reopened at launch (`uiState.layersPanelOpen` retired — an old saved
   value is ignored); closing it mid-rename keeps the typed name. The
