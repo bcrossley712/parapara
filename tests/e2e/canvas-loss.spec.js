@@ -147,7 +147,7 @@ test('erasing the whole drawing on purpose still saves', async ({ page }) => {
   expect(drawn).toBeGreaterThan(1000);
 
   await page.getByRole('button', { name: 'Erase', exact: true }).click();
-  await page.locator('input[type="range"]').first().fill('60');
+  await page.getByRole('slider', { name: 'Size' }).fill('60');
   for (const y of [200, 300, 400, 500, 600, 700]) {
     const before = await savedDrawingBytes(page);
     await stroke(page, y, 200, 1700);
