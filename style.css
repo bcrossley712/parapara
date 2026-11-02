@@ -191,7 +191,10 @@ html, body {
   padding: 10px 4px;
 }
 
-.pp-brush-size {
+/* Size and Stabilizer (8a) sliders on the rail (js/ui/ui.js). The
+   stabilizer moves to a brush panel once there is one. */
+.pp-brush-size,
+.pp-stabilizer {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -202,11 +205,13 @@ html, body {
   margin-top: 8px;
 }
 
-.pp-brush-size input[type="range"] {
+.pp-brush-size input[type="range"],
+.pp-stabilizer input[type="range"] {
   width: 100%;
 }
 
-.pp-brush-size--disabled {
+.pp-brush-size--disabled,
+.pp-stabilizer--disabled {
   opacity: 0.4;
 }
 

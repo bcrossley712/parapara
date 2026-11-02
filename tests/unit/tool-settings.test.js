@@ -11,11 +11,13 @@ import assert from 'node:assert/strict';
 
 import { sanitizeToolSettings, MAX_BRUSH_SIZE, DEFAULT_COLOR } from '../../js/canvas/canvas.js';
 import * as storage from '../../js/storage/storage.js';
+import { DEFAULT_STABILIZER, MAX_STABILIZER } from '../../js/canvas/stabilizer.js';
 
 const DEFAULTS = {
   tool: 'draw',
   color: DEFAULT_COLOR,
   brushSizes: { draw: 6, erase: 6, smudge: 6 },
+  stabilizer: { draw: DEFAULT_STABILIZER, erase: DEFAULT_STABILIZER },
 };
 
 beforeEach(() => {
@@ -33,11 +35,17 @@ test('nothing saved yet gives the defaults', () => {
 });
 
 test('valid settings pass through unchanged (color lowercased)', () => {
-  const saved = { tool: 'smudge', color: '#FFAA00', brushSizes: { draw: 1, erase: 33, smudge: MAX_BRUSH_SIZE } };
+  const saved = {
+    tool: 'smudge',
+    color: '#FFAA00',
+    brushSizes: { draw: 1, erase: 33, smudge: MAX_BRUSH_SIZE },
+    stabilizer: { draw: 0, erase: MAX_STABILIZER },
+  };
   assert.deepEqual(sanitizeToolSettings(saved), {
     tool: 'smudge',
     color: '#ffaa00',
     brushSizes: { draw: 1, erase: 33, smudge: MAX_BRUSH_SIZE },
+    stabilizer: { draw: 0, erase: MAX_STABILIZER },
   });
 });
 
@@ -50,11 +58,13 @@ test('each bad field falls back on its own, keeping the good ones', () => {
       erase: 0,               // below range
       smudge: MAX_BRUSH_SIZE + 1, // above range
     },
+    stabilizer: { draw: 3, erase: MAX_STABILIZER + 1 },
   });
   assert.deepEqual(result, {
     tool: 'draw',
     color: DEFAULT_COLOR,
     brushSizes: { draw: 12, erase: 6, smudge: 6 },
+    stabilizer: { draw: 3, erase: DEFAULT_STABILIZER },
   });
 });
 
@@ -73,10 +83,27 @@ test('extra or unexpected fields are dropped', () => {
     tool: 'erase',
     color: '#000000',
     brushSizes: { draw: 2, erase: 3, smudge: 4, fill: 9 },
+    stabilizer: { draw: 1, erase: 2, smudge: 3, fill: 4 },
     zoom: 3,
   });
-  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'tool']);
+  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'stabilizer', 'tool']);
   assert.deepEqual(Object.keys(result.brushSizes).sort(), ['draw', 'erase', 'smudge']);
+  assert.deepEqual(Object.keys(result.stabilizer).sort(), ['draw', 'erase']);
+});
+
+test('stabilizer: settings saved before 8a get the midway default', () => {
+  const result = sanitizeToolSettings({ tool: 'erase', color: '#000000', brushSizes: { draw: 2, erase: 3, smudge: 4 } });
+  assert.deepEqual(result.stabilizer, { draw: DEFAULT_STABILIZER, erase: DEFAULT_STABILIZER });
+  assert.equal(DEFAULT_STABILIZER, 5);
+});
+
+test('stabilizer: non-integer, string, negative and garbage values fall back', () => {
+  assert.deepEqual(sanitizeToolSettings({ stabilizer: { draw: 2.5, erase: '7' } }).stabilizer,
+    { draw: DEFAULT_STABILIZER, erase: DEFAULT_STABILIZER });
+  assert.deepEqual(sanitizeToolSettings({ stabilizer: { draw: -1, erase: 0 } }).stabilizer,
+    { draw: DEFAULT_STABILIZER, erase: 0 });
+  assert.deepEqual(sanitizeToolSettings({ stabilizer: 'high' }).stabilizer,
+    { draw: DEFAULT_STABILIZER, erase: DEFAULT_STABILIZER });
 });
 
 // ---------------- storage ----------------

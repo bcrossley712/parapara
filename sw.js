@@ -37,6 +37,7 @@ const APP_SHELL = [
   './js/ui/dev-log-view.js',
   './js/canvas/canvas.js',
   './js/canvas/brush.js',
+  './js/canvas/stabilizer.js',
   './js/canvas/gestures.js',
   './js/canvas/region.js',
   './js/canvas/ink-map.js',

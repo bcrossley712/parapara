@@ -101,6 +101,18 @@ Sections: [Process lessons](#process-lessons) ·
   brush object, not a change to input or smoothing.
 - **Smoothing:** quadratic curves through midpoints of consecutive
   samples, plus coalesced pointer events so fast strokes keep detail.
+- **Stabilizer (8a): trailing, not a pulled string.** Two common
+  kinds: a time-based trail that glides to the stylus when she pauses
+  (Procreate's StreamLine; Flipaclip's help only says higher = smoother)
+  and Krita/Lazy Nezumi's pulled string (the line moves only once the
+  stylus is a set distance ahead). The string cuts corners and feels
+  odd without an on-canvas guide, which she doesn't want. Trailing
+  needs a frame loop while the stylus rests (iPadOS sends no moves
+  then). Per tool like Flipaclip's per-brush slider; not smudge (its
+  feel is on hold). 11 notches because the rail's slider is short.
+  Default midway (5) — his call, so she feels it straight away. Built
+  ahead of symmetry and brush variety: it works on input points, not
+  `stamp()`, so it doesn't touch the code they share.
 - **Palm rejection:** first pointer down wins; pointers landing while
   a stroke is active are ignored. Works in real use; doesn't handle
   every ordering (e.g. palm first).

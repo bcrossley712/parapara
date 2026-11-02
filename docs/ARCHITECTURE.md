@@ -20,7 +20,8 @@ Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying
 **Files:** `js/canvas/canvas.js` (input dispatch, tools, viewport, layer
 surfaces, committed copy — its returned API is the only way other
 modules touch the canvas), `brush.js` (brush-tip seam:
-`stamp(ctx, point, size)`), `gestures.js` (pure pan/zoom/rotate math,
+`stamp(ctx, point, size)`), `stabilizer.js` (8a, pure: the trailing
+line), `gestures.js` (pure pan/zoom/rotate math,
 tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`),
 `ink-map.js` (lost-canvas rule).
 
@@ -32,6 +33,17 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 
 ### How it works
 
+- **Stabilizer (8a)** ([why](DESIGN_NOTES.md#drawing-engine)): the
+  line trails the stylus and catches up when she pauses. Draw and erase
+  only, each with its own strength 0–10 (default 5; 0 = off, strokes
+  exactly as before). Pointer samples → `stabilizer.push` → the usual
+  `extendStroke` (midpoint smoothing, stamping); an animation-frame loop
+  (`tick`) glides the line to a resting stylus; on lift `finish` takes
+  it to the stylus, then the stroke commits. Time-based (timestamps,
+  not sample count), so the feel doesn't depend on the stylus's report
+  rate. Strength → lag: `MAX_STABILIZER_LAG_MS` (150 ms) at 10, on a
+  curve so low notches stay subtle — the one constant to tune on the
+  iPad. Symmetry (planned) mirrors the stabilizer's output points.
 - **Gestures — match Sketchbook defaults**
   ([why](DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -101,6 +113,11 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   commits on pointerup.
 - Every paint operation marks the dirty rect (`stamp()`, smudge step,
   fill bounds) — a mark outside it won't be undoable or revertible.
+- **Nothing of a stroke outlives it.** The stabilizer's catch-up runs
+  only between pointerdown and lift: `endStroke` finishes it before
+  `commit()`; a touch that becomes a gesture, and `destroy`, stop it
+  without drawing (`stopStabilizer`). A new way for a stroke to end
+  must do one or the other, or the loop paints after the commit.
 - Anything that replaces layer pixels outside a stroke (`setImage`,
   `swapRegion`, `clear`) must also update the committed copy.
 - No `willReadFrequently: true` on the main canvas context.
@@ -1100,7 +1117,8 @@ palette — UI only), `storage/colors.js` (pure list rules,
     *commits* (not on picker moves or picks); `meta.recentColors`.
   - **Palette:** per project, 10, saved on the project record; edits
     aren't undoable (as in Procreate).
-- **Tool settings** (tool, color, per-tool sizes) are remembered
+- **Tool settings** (tool, color, per-tool sizes, per-tool stabilizer
+  — draw and erase, 8a) are remembered
   app-wide, not per project, and carry from one project into the next.
   Per project: the open frame and active layer. App-wide: whether the
   layers panel was open, which screen she was on, and the last
@@ -1111,6 +1129,10 @@ palette — UI only), `storage/colors.js` (pure list rules,
 
 - Tool-settings validation lives in `canvas.js`
   (`sanitizeToolSettings`); bad fields fall back individually.
+  Settings saved before 8a have no `stabilizer` and get the default (5).
+- **The Stabilizer slider sits on the rail only until there's a brush
+  panel** (his decision, 2026-11-01) — then it moves there, as in
+  Flipaclip's brush settings.
 
 ---
 

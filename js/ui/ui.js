@@ -8,11 +8,13 @@
 // native confirm()/alert()/date-input/color chrome, per the working
 // agreement.
 //
-// The rail so far: draw/erase/fill/smudge, brush size, color; the rest
+// The rail so far: draw/erase/fill/smudge, color, brush size,
+// stabilizer (8a); the rest
 // (mic/pan) lands with its build step. The color picker lives in
 // color-picker.js, the frame strip and transport in timeline/.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
+import { MAX_STABILIZER } from '../canvas/stabilizer.js';
 import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
 import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
@@ -28,8 +30,8 @@ import { createExportSheet } from './export-sheet.js';
 
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
-// options.onSettingsChange: called after the user changes tool, color
-//   or brush size, so main.js can save. Not called for the initial
+// options.onSettingsChange: called after the user changes tool, color,
+//   brush size or stabilizer, so main.js can save. Not called for the initial
 //   setup.
 // options.appActions: for the gear menu — { getVersionLabel,
 //   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
@@ -359,6 +361,27 @@ export function initUI(container, options = {}) {
   sizeControl.appendChild(sizeInput);
   rail.appendChild(sizeControl);
 
+  // Stabilizer strength (8a), 0–10, under Size and styled like it. On
+  // the rail only until there's a brush panel — then it moves there
+  // (Flipaclip keeps it in brush settings). Draw and erase each
+  // remember their own; off (disabled) for fill and smudge.
+  const stabilizerControl = document.createElement('label');
+  stabilizerControl.className = 'pp-stabilizer';
+  const stabilizerText = document.createElement('span');
+  stabilizerText.textContent = 'Stabilizer';
+  const stabilizerInput = document.createElement('input');
+  stabilizerInput.type = 'range';
+  stabilizerInput.min = '0';
+  stabilizerInput.max = String(MAX_STABILIZER);
+  stabilizerInput.step = '1';
+  stabilizerInput.addEventListener('input', () => {
+    canvasApi.setStabilizer(Number(stabilizerInput.value));
+    onSettingsChange();
+  });
+  stabilizerControl.appendChild(stabilizerText);
+  stabilizerControl.appendChild(stabilizerInput);
+  rail.appendChild(stabilizerControl);
+
   // Gear menu (settings-panel.js) at the bottom of the rail: version,
   // check for updates, and (temporary) dev tools.
   const gearBtn = document.createElement('button');
@@ -405,6 +428,13 @@ export function initUI(container, options = {}) {
     sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
     if (size !== null) {
       sizeInput.value = String(size);
+    }
+
+    const strength = canvasApi.getStabilizer();
+    stabilizerInput.disabled = strength === null;
+    stabilizerControl.classList.toggle('pp-stabilizer--disabled', strength === null);
+    if (strength !== null) {
+      stabilizerInput.value = String(strength);
     }
   }
 

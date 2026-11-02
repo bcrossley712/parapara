@@ -144,7 +144,7 @@ icon, manifest `name`/`short_name`, and repo copy.
      at `bcrossley712.github.io` (passkeys are tied to the address).
      - **Push 1 — the Worker, setup and automatic backup: done**
        (above; its remaining iPad checks are under Open iPad checks).
-     - **Push 2 — restore: built, awaiting push and iPad checks**
+     - **Push 2 — restore: pushed, awaiting iPad checks**
        (empty gallery → Restore from backup; Backup sheet → Restore… /
        Turn off on this iPad; [ARCHITECTURE →
        Backup](docs/ARCHITECTURE.md#backup)). Checks under Open iPad
@@ -152,12 +152,26 @@ icon, manifest `name`/`short_name`, and repo copy.
    - **Then** share links and Krita reference import on the same
      backend — decide when they're reached whether she still wants
      share links, now that video sharing works.
-2. Then the requested extras under Open items — **she's eager for the
-   stabilizer** (2026-11-01; he wants the extras ASAP after 7b). It's
-   in the brush block (stabilizer + symmetry + brush variety, one pass
-   through `stamp()` and the stroke path).
+2. **Step 8 — the brush block** (requested extras under Open items;
+   he wants them ASAP after 7b, alongside 7b's iPad testing):
+   - **8a — stabilizer: built, awaiting push and iPad checks.** Rail
+     slider under Size (0–10, default 5), draw and erase each their
+     own; [ARCHITECTURE → Canvas and
+     drawing](docs/ARCHITECTURE.md#canvas-and-drawing). Built ahead of
+     the rest on purpose (it works on input points, not `stamp()`).
+   - **8b — symmetry + brush variety** together (both change
+     `stamp()`), then flip drawing. **When a brush panel is built, the
+     Stabilizer slider moves into it** (his decision, 2026-11-01).
 
 **Open iPad checks** (send the activity log with any of them):
+- **Stabilizer (8a):** with her stylus, at 5 a wobbly line comes out
+  smoother and trails a little, glides up when she pauses mid-line, and
+  ends exactly where she lifts; 0 feels like before; 10 isn't
+  uselessly slow (if the top or the middle is wrong, it's
+  `MAX_STABILIZER_LAG_MS` in `stabilizer.js`). Each of Draw/Erase keeps
+  its own value after a relaunch; greyed out for Fill and Smudge; the
+  "Stabilizer" label fits the rail. Ask her how it compares with
+  Flipaclip's.
 - **Restore (7b push 2), first:** in **Safari on her iPad** (its own
   storage): Restore from backup → Continue → Touch ID offers the
   Parapara! passkey → the list shows her animations with thumbnails →
@@ -299,14 +313,8 @@ if it shows:
   - **Brush variety** (sizes, chisel tips, edge blending) — **build
     with symmetry**: both change `stamp()`, and a directional tip's
     mirrored stamp must mirror its angle too.
-  - **Stabilizer** (requested after 4c — Flipaclip's; smooths out the
-    wobble as she draws): a strength setting that makes the line trail
-    the stylus. **Build with the brush block** — same stroke path in
-    `canvas.js` and the same tool-settings UI. Draw and erase, not fill
-    (smudge: decide then); strength remembered app-wide like size; the
-    line catches up to the stylus on lift; symmetry mirrors the
-    stabilized points. Pull forward on its own if the wobble bothers
-    her sooner. Today: fixed midpoint smoothing only.
+  - **Stabilizer — built in 8a** (Current state). Symmetry must mirror
+    its output points, not the raw stylus.
   - **Erasers** (observed in 4a; she'll want them, not urgent): the
     eraser is the pen's round hard tip with the same 6 px default and
     1–60 range (its size is already remembered separately). She'll
@@ -520,8 +528,11 @@ bitmap. Planned fields are marked. Extend additively.
 (index `projectId`), `blobs` (index `projectId`; `{ id, projectId,
 type, buffer }` — layer bitmaps, reference images, the sound file
 (5a, its own MIME type) and the gallery thumbnail
-`thumb-<projectId>`), `meta` (`lastProjectId`, `toolSettings`,
-`uiState` = `{ screen: 'gallery' | 'editor', hideHeadphonesTip }`
+`thumb-<projectId>`), `meta` (`lastProjectId`,
+`toolSettings` = `{ tool, color, brushSizes: { draw, erase, smudge },
+stabilizer: { draw, erase } }` (8a: stabilizer 0–10, missing = 5;
+`sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
+hideHeadphonesTip }`
 (5c; missing = false; `layersPanelOpen` retired after 5c, ignored);
 `recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never

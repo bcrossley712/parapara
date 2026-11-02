@@ -40,6 +40,7 @@
 // into timeline/storage internals directly.
 
 import { roundBrush } from './brush.js';
+import { createStabilizer, MAX_STABILIZER, DEFAULT_STABILIZER } from './stabilizer.js';
 import {
   distance,
   midpoint,
@@ -118,6 +119,10 @@ export const EXPORT_TIMEOUT_MS = 15000;
 // fill has no radius).
 const TOOLS = ['draw', 'erase', 'fill', 'smudge'];
 const SIZED_TOOLS = ['draw', 'erase', 'smudge'];
+// Tools the stabilizer (8a) applies to, each with its own strength
+// (Flipaclip has one per brush). Not fill (no line), not smudge (its
+// feel is on hold until there are more brushes).
+const STABILIZED_TOOLS = ['draw', 'erase'];
 const DEFAULT_TOOL = 'draw';
 const DEFAULT_BRUSH_SIZE = 6;
 
@@ -146,7 +151,19 @@ export function sanitizeToolSettings(raw) {
       : DEFAULT_BRUSH_SIZE;
   }
 
-  return { tool, color, brushSizes };
+  // 8a; missing (settings saved before it) = the default.
+  const savedStabilizer = input.stabilizer && typeof input.stabilizer === 'object'
+    ? input.stabilizer
+    : {};
+  const stabilizer = {};
+  for (const name of STABILIZED_TOOLS) {
+    const value = savedStabilizer[name];
+    stabilizer[name] = Number.isInteger(value) && value >= 0 && value <= MAX_STABILIZER
+      ? value
+      : DEFAULT_STABILIZER;
+  }
+
+  return { tool, color, brushSizes, stabilizer };
 }
 
 // Fill: per-channel color-distance tolerance for what counts as "the
@@ -540,6 +557,8 @@ export function initCanvas(container, options = {}) {
   // tools. Fill has no size concept (a flood fill has no radius), so
   // it isn't tracked here.
   const brushSizes = sanitizeToolSettings(null).brushSizes; // defaults
+  // Stabilizer strength per tool (8a), 0–10; only draw and erase.
+  const stabilizerStrengths = sanitizeToolSettings(null).stabilizer;
 
   // Pressure/tilt from PointerEvent aren't read yet — deliberately,
   // per the architecture note that the brush engine shouldn't bake in
@@ -988,9 +1007,55 @@ export function initCanvas(container, options = {}) {
     emitEyedropper('pick', hex);
   }
 
-  function beginStroke(point) {
+  // --- stabilizer (8a): the line trails the stylus ---
+  //
+  // Draw/erase points go through the stabilizer (stabilizer.js) before
+  // extendStroke, so everything after it — midpoint smoothing,
+  // stamping, dirty rects, undo — is unchanged. While a stabilized
+  // stroke is down, an animation-frame loop keeps the line gliding up
+  // to a resting stylus (iPadOS sends no moves while it's still). On
+  // lift the line finishes at the stylus before the stroke commits, so
+  // nothing outlives the stroke. Strength 0 = off: points pass straight
+  // through and strokes draw exactly as before 8a.
+  let stabilizer = null;
+  let stabilizerFrame = 0;
+
+  function startStabilizer(point, time) {
+    stopStabilizer();
+    const strength = STABILIZED_TOOLS.includes(tool) ? stabilizerStrengths[tool] : 0;
+    if (strokeBlocked || !(strength > 0)) return;
+    stabilizer = createStabilizer(strength, point, time);
+    stabilizerFrame = requestAnimationFrame(stabilizerTick);
+  }
+
+  function stabilizerTick(now) {
+    stabilizerFrame = 0;
+    if (!stabilizer) return;
+    for (const p of stabilizer.tick(now)) extendStroke(p);
+    stabilizerFrame = requestAnimationFrame(stabilizerTick);
+  }
+
+  // Drops the stabilizer without drawing the rest (a stroke that became
+  // a gesture, or the canvas going away). endStroke finishes it instead.
+  function stopStabilizer() {
+    if (stabilizerFrame) cancelAnimationFrame(stabilizerFrame);
+    stabilizerFrame = 0;
+    stabilizer = null;
+  }
+
+  // A stylus sample during a stroke (pointermove, coalesced).
+  function feedStroke(point, time) {
+    if (!stabilizer) {
+      extendStroke(point);
+      return;
+    }
+    for (const p of stabilizer.push(point, time)) extendStroke(p);
+  }
+
+  function beginStroke(point, time) {
     p0 = null;
     p1 = point;
+    stopStabilizer();
     if (strokeBlocked) return;
 
     if (tool === 'smudge') {
@@ -1008,6 +1073,7 @@ export function initCanvas(container, options = {}) {
     // Stamp once immediately so a tap with no movement still leaves a
     // mark instead of rendering nothing.
     stamp(point, brushSizes[tool]);
+    startStabilizer(point, time);
   }
 
   function extendStroke(point) {
@@ -1043,6 +1109,14 @@ export function initCanvas(container, options = {}) {
   }
 
   function endStroke() {
+    if (stabilizer) {
+      // Lift: the line finishes at the stylus. Repeating the last point
+      // closes the midpoint curve onto it (it otherwise stops halfway
+      // along the last segment, too short to notice without a trail).
+      for (const p of stabilizer.finish()) extendStroke(p);
+      if (p0 !== null) extendStroke(p1);
+      stopStabilizer();
+    }
     activePointerId = null;
     p0 = null;
     p1 = null;
@@ -1289,6 +1363,7 @@ export function initCanvas(container, options = {}) {
           }
           p0 = null;
           p1 = null;
+          stopStabilizer();
           return;
         }
 
@@ -1325,7 +1400,7 @@ export function initCanvas(container, options = {}) {
         return;
       }
 
-      beginStroke(point);
+      beginStroke(point, event.timeStamp);
       return;
     }
 
@@ -1347,7 +1422,7 @@ export function initCanvas(container, options = {}) {
       return;
     }
 
-    beginStroke(toCanvasPoint(event));
+    beginStroke(toCanvasPoint(event), event.timeStamp);
   }
 
   function onPointerMove(event) {
@@ -1431,7 +1506,7 @@ export function initCanvas(container, options = {}) {
       : [];
 
     for (const e of (events.length ? events : [event])) {
-      extendStroke(toCanvasPoint(e));
+      feedStroke(toCanvasPoint(e), e.timeStamp);
     }
   }
 
@@ -1592,6 +1667,16 @@ export function initCanvas(container, options = {}) {
     getBrushSize() {
       return tool === 'fill' ? null : brushSizes[tool];
     },
+    // Stabilizer strength (8a), 0–10, for the active tool; null for
+    // tools it doesn't apply to (fill, smudge). Takes effect from the
+    // next stroke.
+    setStabilizer(strength) {
+      if (!STABILIZED_TOOLS.includes(tool)) return;
+      stabilizerStrengths[tool] = strength;
+    },
+    getStabilizer() {
+      return STABILIZED_TOOLS.includes(tool) ? stabilizerStrengths[tool] : null;
+    },
     setColor(hex) {
       color = hex;
     },
@@ -1615,7 +1700,7 @@ export function initCanvas(container, options = {}) {
     // returns — what main.js saves, and what ui.js syncs its controls
     // from after applySettings().
     getSettings() {
-      return { tool, color, brushSizes: { ...brushSizes } };
+      return { tool, color, brushSizes: { ...brushSizes }, stabilizer: { ...stabilizerStrengths } };
     },
 
     // Applies saved settings, cleaning them first (see
@@ -1625,6 +1710,7 @@ export function initCanvas(container, options = {}) {
       tool = clean.tool;
       color = clean.color;
       Object.assign(brushSizes, clean.brushSizes);
+      Object.assign(stabilizerStrengths, clean.stabilizer);
     },
 
     // Undoable like any edit. Clearing an already-blank layer is a
@@ -1899,6 +1985,7 @@ export function initCanvas(container, options = {}) {
     // layers need that memory. Unusable afterwards.
     destroy() {
       areaObserver.disconnect();
+      stopStabilizer();
       inputBlocked = true;
       for (const surface of surfaces.values()) {
         surface.canvas.width = 0;
