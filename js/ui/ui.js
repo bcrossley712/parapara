@@ -9,12 +9,18 @@
 // agreement.
 //
 // The rail so far: draw/erase/fill/smudge, color, symmetry (8b-i),
-// brush size (on a curve since 8b-i), stabilizer (8a); the rest
-// (mic/pan) lands with its build step. The color picker lives in
+// brush size (on a curve since 8b-i); tapping the current Draw or
+// Erase button opens the brush panel (8b-ii: tips, size, strength,
+// stabilizer — brush-panel.js). The rest (mic/pan) lands with its
+// build step. The color picker lives in
 // color-picker.js, the frame strip and transport in timeline/.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
-import { MAX_STABILIZER } from '../canvas/stabilizer.js';
+
+// Tools with a brush panel (8b-ii); smudge gets one with 8b-iii.
+const BRUSH_PANEL_TOOLS = ['draw', 'erase'];
+import { TIP_LABELS } from '../canvas/brush.js';
+import { createBrushPanel } from './brush-panel.js';
 import { sliderToSize, sizeToSlider, SIZE_SLIDER_STEPS } from '../canvas/size-curve.js';
 import { createSymmetryMenu } from './symmetry-menu.js';
 import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
@@ -33,7 +39,7 @@ import { createExportSheet } from './export-sheet.js';
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
 // options.onSettingsChange: called after the user changes tool, color,
-//   brush size or stabilizer, so main.js can save. Not called for the initial
+//   brush tip, size, strength or stabilizer, so main.js can save. Not called for the initial
 //   setup.
 // options.appActions: for the gear menu — { getVersionLabel,
 //   checkForUpdate, applyUpdate, freshReload } (see settings-panel.js).
@@ -156,6 +162,7 @@ export function initUI(container, options = {}) {
       || frameStrip.isMenuOpen
       || onionBadge.isMenuOpen
       || symmetryMenu.isMenuOpen
+      || brushPanel.isOpen
       || transport.isMenuOpen;
   }
 
@@ -252,8 +259,17 @@ export function initUI(container, options = {}) {
   canvasApi.applySettings(settings);
   const startSettings = canvasApi.getSettings();
 
+  // Tapping the tool that's already chosen opens its brush panel
+  // (draw and erase, 8b-ii) — as the current frame tile opens its menu.
+  const toolButtons = {};
   const pickTool = (tool) => {
     setEyedropperArmed(false); // picking a tool cancels the eyedropper
+    if (canvasApi.getSettings().tool === tool && BRUSH_PANEL_TOOLS.includes(tool)) {
+      if (brushPanel.isOpen) brushPanel.close();
+      else brushPanel.open(toolButtons[tool], brushState());
+      return;
+    }
+    brushPanel.close();
     setActiveTool(tool);
     onSettingsChange();
   };
@@ -261,6 +277,79 @@ export function initUI(container, options = {}) {
   const eraseBtn = createToolButton('Erase', () => pickTool('erase'));
   const fillBtn = createToolButton('Fill', () => pickTool('fill'));
   const smudgeBtn = createToolButton('Smudge', () => pickTool('smudge'));
+  toolButtons.draw = drawBtn;
+  toolButtons.erase = eraseBtn;
+  // Draw and Erase show their tip's name under the label, so she can
+  // tell which tip she'll get without drawing (the accessible name
+  // stays "Draw"/"Erase").
+  const tipNames = {};
+  for (const tool of BRUSH_PANEL_TOOLS) {
+    const btn = toolButtons[tool];
+    btn.classList.add('pp-tool-btn--tipped');
+    btn.setAttribute('aria-label', btn.textContent);
+    const name = document.createElement('span');
+    name.className = 'pp-tool-btn__tip';
+    btn.appendChild(name);
+    tipNames[tool] = name;
+  }
+
+  // The brush panel (8b-ii). Its changes go to the canvas for the
+  // active tool's current tip, then back into the panel and rail.
+  const brushPanel = createBrushPanel({
+    container: shell,
+    signal,
+    maxSize: MAX_BRUSH_SIZE,
+    onTip: (name) => {
+      canvasApi.setTip(name);
+      syncBrushControls();
+      onSettingsChange();
+    },
+    onSize: (px) => {
+      canvasApi.setBrushSize(px);
+      syncBrushControls();
+      onSettingsChange();
+    },
+    onStrength: (percent) => {
+      canvasApi.setBrushStrength(percent);
+      syncBrushControls();
+      onSettingsChange();
+    },
+    onStabilizer: (value) => {
+      canvasApi.setStabilizer(value);
+      onSettingsChange();
+    },
+  });
+
+  function brushState() {
+    const settings = canvasApi.getSettings();
+    return {
+      tool: settings.tool,
+      tip: canvasApi.getTip(),
+      size: canvasApi.getBrushSize(),
+      strength: canvasApi.getBrushStrength(),
+      stabilizer: canvasApi.getStabilizer(),
+      color: settings.color,
+      tipStrength: (name) => canvasApi.getTipSetting(name)?.strength ?? 100,
+    };
+  }
+
+  // Puts the active tool's brush settings into the rail and, if open,
+  // the panel.
+  function syncBrushControls() {
+    const settings = canvasApi.getSettings();
+    for (const tool of BRUSH_PANEL_TOOLS) {
+      tipNames[tool].textContent = TIP_LABELS[settings.tips[tool]];
+    }
+    const size = canvasApi.getBrushSize();
+    sizeInput.disabled = size === null;
+    sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
+    if (size !== null) {
+      sizeInput.value = String(sizeToSlider(size, MAX_BRUSH_SIZE));
+      sizeInput.setAttribute('aria-valuetext', `${size}`);
+    }
+    sizeText.textContent = size === null ? 'Size' : `Size ${size}`;
+    if (brushPanel.isOpen) brushPanel.render(brushState());
+  }
   rail.appendChild(drawBtn);
   rail.appendChild(eraseBtn);
   rail.appendChild(fillBtn);
@@ -377,32 +466,15 @@ export function initUI(container, options = {}) {
     canvasApi.setBrushSize(size);
     sizeText.textContent = `Size ${size}`;
     sizeInput.setAttribute('aria-valuetext', `${size}`);
+    if (brushPanel.isOpen) brushPanel.render(brushState());
     onSettingsChange();
   });
   sizeControl.appendChild(sizeText);
   sizeControl.appendChild(sizeInput);
   rail.appendChild(sizeControl);
 
-  // Stabilizer strength (8a), 0–10, under Size and styled like it. On
-  // the rail only until there's a brush panel — then it moves there
-  // (Flipaclip keeps it in brush settings). Draw and erase each
-  // remember their own; off (disabled) for fill and smudge.
-  const stabilizerControl = document.createElement('label');
-  stabilizerControl.className = 'pp-stabilizer';
-  const stabilizerText = document.createElement('span');
-  stabilizerText.textContent = 'Stabilizer';
-  const stabilizerInput = document.createElement('input');
-  stabilizerInput.type = 'range';
-  stabilizerInput.min = '0';
-  stabilizerInput.max = String(MAX_STABILIZER);
-  stabilizerInput.step = '1';
-  stabilizerInput.addEventListener('input', () => {
-    canvasApi.setStabilizer(Number(stabilizerInput.value));
-    onSettingsChange();
-  });
-  stabilizerControl.appendChild(stabilizerText);
-  stabilizerControl.appendChild(stabilizerInput);
-  rail.appendChild(stabilizerControl);
+  // The Stabilizer (8a) moved from here into the brush panel (8b-ii),
+  // as in Flipaclip's brush settings.
 
   // Gear menu (settings-panel.js) at the bottom of the rail: version,
   // check for updates, and (temporary) dev tools.
@@ -440,26 +512,11 @@ export function initUI(container, options = {}) {
     fillBtn.classList.toggle('is-active', tool === 'fill');
     smudgeBtn.classList.toggle('is-active', tool === 'smudge');
 
-    // Each tool remembers its own size (see canvas.js) — sync the
-    // slider to whatever the newly active tool last used, rather than
-    // leaving it showing the previous tool's value. Fill has no size
-    // concept at all, so the control is disabled rather than shown
-    // with a meaningless number.
-    const size = canvasApi.getBrushSize();
-    sizeInput.disabled = size === null;
-    sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
-    if (size !== null) {
-      sizeInput.value = String(sizeToSlider(size, MAX_BRUSH_SIZE));
-      sizeInput.setAttribute('aria-valuetext', `${size}`);
-    }
-    sizeText.textContent = size === null ? 'Size' : `Size ${size}`;
-
-    const strength = canvasApi.getStabilizer();
-    stabilizerInput.disabled = strength === null;
-    stabilizerControl.classList.toggle('pp-stabilizer--disabled', strength === null);
-    if (strength !== null) {
-      stabilizerInput.value = String(strength);
-    }
+    // Each tool (and, for draw/erase, each tip) remembers its own size
+    // (see canvas.js) — sync the slider to whatever the newly active
+    // tool last used. Fill has no size concept at all, so the control
+    // is disabled rather than shown with a meaningless number.
+    syncBrushControls();
   }
 
   function createToolButton(label, onClick) {

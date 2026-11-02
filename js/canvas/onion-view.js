@@ -24,7 +24,9 @@ import { makeCanvas, freeCanvas } from './render-frame.js';
 // getContext(): the onion canvas's 2D context, created if needed.
 // hide(): removes the onion canvas and frees it.
 // canDraw(): false while drawing now would get in the way.
-export function createOnionView({ getContext, hide, canDraw = () => true, retryMs = 250 }) {
+// log(event, fields): DEV ONLY (activity log) — 'onion-draw' after a
+// draw, 'onion-failed' with the step that failed. Remove with the log.
+export function createOnionView({ getContext, hide, canDraw = () => true, retryMs = 250, log = () => {} }) {
   const decoded = new Map(); // frameId -> { blob, bitmap }
   const blobKeys = new WeakMap();
   let nextBlobKey = 1;
@@ -93,6 +95,7 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
       }
     } catch (err) {
       console.warn('Parapara! could not draw the onion skin:', err);
+      log('onion-failed', { step: 'decode', ghosts: ghosts.length, error: String(err?.message ?? err) });
       return;
     }
     if (destroyed || gen !== generation) return;
@@ -100,7 +103,13 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
       retry = setTimeout(() => { retry = null; if (gen === generation) draw(); }, retryMs);
       return;
     }
+    // iOS can refuse a canvas's context under memory pressure (null).
+    // Then nothing is drawn; the next show() tries again.
     const ctx = getContext();
+    if (!ctx) {
+      log('onion-failed', { step: 'canvas', ghosts: ghosts.length });
+      return;
+    }
     const { width, height } = ctx.canvas;
     ctx.canvas.style.opacity = String(opacity);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -112,6 +121,11 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
     // the onion canvas at that ghost's strength.
     const scratch = makeCanvas(width, height);
     const sctx = scratch.getContext('2d');
+    if (!sctx) {
+      freeCanvas(scratch);
+      log('onion-failed', { step: 'scratch', ghosts: ghosts.length });
+      return;
+    }
     try {
       ghosts.forEach((ghost, i) => {
         sctx.globalCompositeOperation = 'source-over';
@@ -123,11 +137,15 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
         ctx.globalAlpha = ghost.alpha;
         ctx.drawImage(scratch, 0, 0);
       });
+    } catch (err) {
+      log('onion-failed', { step: 'draw', ghosts: ghosts.length, error: String(err?.message ?? err) });
+      return;
     } finally {
       ctx.globalAlpha = 1;
       freeCanvas(scratch);
     }
     drawnKey = key;
+    log('onion-draw', { ghosts: ghosts.length, size: `${width}x${height}` });
     releaseExcept(new Set(ghosts.map((g) => g.id)));
   }
 

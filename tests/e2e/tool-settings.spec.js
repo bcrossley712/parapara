@@ -6,6 +6,7 @@
 import { test, expect } from '@playwright/test';
 import {
   openApp, reloadApp, setVisibility, waitForToolSettings, sizeSlider, setBrushSize, expectBrushSize,
+  brushPanel, openBrushPanel, closeBrushPanel, setPanelSlider,
 } from './helpers.js';
 
 const toolButton = (page, name) => page.getByRole('button', { name, exact: true });
@@ -130,13 +131,20 @@ test('corrupted saved settings fall back to defaults instead of breaking startup
 
 // ---------------- stabilizer (8a) ----------------
 
-const stabilizerSlider = (page) => page.locator('.pp-stabilizer input[type="range"]');
+// In the brush panel since 8b-ii, so these open it on the active tool
+// (Draw unless said) and close it again.
+const stabilizerSlider = (page) => brushPanel(page).locator('.pp-brush-panel__stabilizer input');
 
-async function setStabilizer(page, value) {
-  await stabilizerSlider(page).evaluate((el, v) => {
-    el.value = String(v);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  }, value);
+async function setStabilizer(page, value, tool = 'Draw') {
+  await openBrushPanel(page, tool);
+  await setPanelSlider(page, 'stabilizer', value);
+  await closeBrushPanel(page, tool);
+}
+
+async function expectStabilizer(page, tool, value) {
+  await openBrushPanel(page, tool);
+  await expect(stabilizerSlider(page)).toHaveValue(String(value));
+  await closeBrushPanel(page, tool);
 }
 
 // Page point for a canvas pixel (the view is at fit, unrotated).
@@ -199,28 +207,24 @@ async function drawZigzag(page) {
   // The stroke commits on lift, synchronously.
 }
 
-test('stabilizer: midway by default, per tool, off for fill and smudge, remembered', async ({ page }) => {
+test('stabilizer: midway by default, per tool, in the brush panel, remembered', async ({ page }) => {
   await openApp(page);
-  await expect(stabilizerSlider(page)).toHaveValue('5');
+  await expect(page.locator('.pp-stabilizer')).toHaveCount(0); // off the rail since 8b-ii
+  await expectStabilizer(page, 'Draw', 5);
 
-  await setStabilizer(page, 8);                // draw
+  await setStabilizer(page, 8, 'Draw');
   await toolButton(page, 'Erase').click();
-  await expect(stabilizerSlider(page)).toHaveValue('5');
-  await setStabilizer(page, 2);                // erase
-  await toolButton(page, 'Fill').click();
-  await expect(stabilizerSlider(page)).toBeDisabled();
+  await expectStabilizer(page, 'Erase', 5);
+  await setStabilizer(page, 2, 'Erase');
   await toolButton(page, 'Smudge').click();
-  await expect(stabilizerSlider(page)).toBeDisabled();
 
   await waitForToolSettings(page, { tool: 'smudge', stabilizer: { draw: 8, erase: 2 } });
   await reloadApp(page);
 
-  await expect(stabilizerSlider(page)).toBeDisabled();
   await toolButton(page, 'Draw').click();
-  await expect(stabilizerSlider(page)).toBeEnabled();
-  await expect(stabilizerSlider(page)).toHaveValue('8');
+  await expectStabilizer(page, 'Draw', 8);
   await toolButton(page, 'Erase').click();
-  await expect(stabilizerSlider(page)).toHaveValue('2');
+  await expectStabilizer(page, 'Erase', 2);
 });
 
 test('stabilizer: a wobbly line comes out flatter, and still ends where the stylus lifted', async ({ page }) => {

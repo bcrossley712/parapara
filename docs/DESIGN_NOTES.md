@@ -1154,6 +1154,19 @@ these forces a redo of what's built; each is additive.
   - **Three pushes**, so symmetry reaches her while brush choices are
     tuned: engine + symmetry + curved size; panel + tips; smudge +
     stamps. The stamp seam is reworked once, in the first.
+  - **8b-ii decisions (2026-11-02, his calls on the proposal):** the
+    old round tip stays as **Pen**, the default, so nothing she drew
+    or set changes and the new tips are opt-in. Size and strength
+    are per tool *and* tip — her partial eraser needs Erase's own
+    strength, and Procreate/Flipaclip keep brush and eraser settings
+    apart. Stabilizer stays per tool (Flipaclip: per brush) so her
+    current setting carries over and each tip has one less thing to
+    tune. Strength applies per stroke (the buffer), not per stamp —
+    per-stamp builds up blotchy. The rail's buttons name the tip so
+    she knows what she'll get before drawing. Sketchbook's
+    three-finger swipe down for brushes was left out: she uses the
+    buttons. Shaped tips are pre-drawn sprites rather than per-stamp
+    gradients, for her 9th-gen iPad at size 200.
 - **Adjustable shortcut bar (deferred to after step 6).** The idea is to
   let her put the actions she uses most in a bar, like Clip Studio's
   command bar. It takes:

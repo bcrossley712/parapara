@@ -23,6 +23,37 @@ export async function setBrushSize(page, px) {
 }
 export const expectBrushSize = (page, px) => expect(sizeSlider(page)).toHaveAttribute('aria-valuetext', String(px));
 
+// The brush panel (8b-ii): tapping the current Draw or Erase button
+// opens it, tapping it again closes it. `tool` is 'Draw' or 'Erase'
+// and must already be the active tool.
+export const brushPanel = (page) => page.locator('.pp-brush-panel:not([hidden])');
+export async function openBrushPanel(page, tool) {
+  if (await brushPanel(page).count()) return;
+  await page.getByRole('button', { name: tool, exact: true }).click();
+  await expect(brushPanel(page)).toBeVisible();
+}
+export async function closeBrushPanel(page, tool) {
+  if (!(await brushPanel(page).count())) return;
+  await page.getByRole('button', { name: tool, exact: true }).click();
+  await expect(brushPanel(page)).toHaveCount(0);
+}
+// Sets one of the panel's sliders ('size' — a curve position, use
+// sizeToSlider; 'strength'; 'stabilizer') the way a drag would.
+export async function setPanelSlider(page, which, value) {
+  await brushPanel(page).locator(`.pp-brush-panel__${which} input`).evaluate((el, v) => {
+    el.value = String(v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
+}
+// Picks a tip for `tool` ('Draw' / 'Erase', already active), sets its
+// strength if given, and closes the panel.
+export async function pickTip(page, tool, tipLabel, { strength } = {}) {
+  await openBrushPanel(page, tool);
+  await brushPanel(page).getByRole('button', { name: tipLabel, exact: true }).click();
+  if (strength !== undefined) await setPanelSlider(page, 'strength', strength);
+  await closeBrushPanel(page, tool);
+}
+
 // Opens the app into the editor. A fresh install starts on the empty
 // gallery (2d), so this makes a new animation from there; an install
 // that was left in the editor reopens it.

@@ -104,7 +104,8 @@ test('a drawing saved before the layer change still opens', async ({ page }) => 
 
   // Drawing on it saves to the same bitmap as before.
   const before = await blobBytes(page, 'b1');
-  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  // Draw is already the tool (a second tap would open its brush panel).
+  await expect(page.getByRole('button', { name: 'Draw', exact: true })).toHaveClass(/is-active/);
   const box = await page.locator('.pp-canvas').boundingBox();
   await page.mouse.move(box.x + 50, box.y + 50);
   await page.mouse.down();

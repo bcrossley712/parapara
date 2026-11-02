@@ -630,6 +630,23 @@ window.addEventListener('pagehide', () => flushAll());
 launch();
 reportInterruptedMemoryTest(); // developer only, step 4a-i
 
+// DEV ONLY (activity log): errors nothing else caught — a failed
+// promise or a thrown handler — so a silent failure shows up in the log
+// (added while looking for missing onion ghosts, after 8b-ii). Capped
+// per launch so a repeating error can't push everything else out.
+// Remove with the log.
+const MAX_ERROR_LINES = 20;
+let errorLines = 0;
+function logUncaught(kind, err) {
+  if (errorLines >= MAX_ERROR_LINES) return;
+  errorLines += 1;
+  const message = String(err?.message ?? err ?? 'unknown').slice(0, 200);
+  const where = String(err?.stack ?? '').split('\n').find((l) => l.includes('.js')) ?? '';
+  devLog.add('error', { kind, message, where: where.trim().slice(0, 160) });
+}
+window.addEventListener('error', (event) => logUncaught('error', event.error ?? event.message));
+window.addEventListener('unhandledrejection', (event) => logUncaught('promise', event.reason));
+
 async function launch() {
   devLog.add('launch');
   appActions.getVersionLabel().then((v) => devLog.add('version', v), () => {});
@@ -992,6 +1009,7 @@ function mountEditor(session, { canSave }) {
   devLog.add('open', {
     project: short(project.id), frames: project.frames.length, layers: project.layers.length,
     at: tag(session.frame.id), canSave,
+    onion: project.onionSkin.on ? `${project.onionSkin.before}/${project.onionSkin.after}` : 'off', // DEV ONLY
     made: liveCanvasCount(), // before this project makes any: what earlier ones left
   });
 
@@ -1763,8 +1781,13 @@ function mountEditor(session, { canSave }) {
     getContext: () => canvasApi.getOnionContext(),
     hide: () => canvasApi.hideOnion(),
     canDraw: () => !canvasApi.isBusy(),
+    log: (event, fields) => devLog.add(event, fields), // DEV ONLY
   });
   onionView.setOpacity(project.onionSkin.opacity);
+  // DEV ONLY (activity log): the last 'onion-ghosts' line written, so a
+  // line is added only when what's asked for changes, not on every
+  // frame-cache update.
+  let onionLogged = '';
   ui.onion.render(project.onionSkin);
 
   function updateOnion() {
@@ -1773,9 +1796,19 @@ function mountEditor(session, { canSave }) {
       return;
     }
     const ghosts = [];
-    for (const ghost of ghostFrames(project.frames, session.frame.id, project.onionSkin)) {
+    const asked = ghostFrames(project.frames, session.frame.id, project.onionSkin);
+    for (const ghost of asked) {
       const blob = (frameCache.get(ghost.id) ?? frameCache.latest(ghost.id))?.blob;
       if (blob) ghosts.push({ ...ghost, blob });
+    }
+    // DEV ONLY: which ghosts she should see and how many have a picture.
+    if (project.onionSkin.on) {
+      const fields = { at: tag(session.frame.id), asked: asked.length, cached: ghosts.length };
+      const line = JSON.stringify(fields);
+      if (line !== onionLogged) devLog.add('onion-ghosts', fields);
+      onionLogged = line;
+    } else {
+      onionLogged = '';
     }
     onionView.show(ghosts);
   }
@@ -1783,6 +1816,9 @@ function mountEditor(session, { canSave }) {
   function setOnion(changes) {
     const next = sanitizeOnion({ ...project.onionSkin, ...changes });
     project.onionSkin = next;
+    devLog.add('onion', { // DEV ONLY
+      on: next.on ? 'yes' : 'no', before: next.before, after: next.after, opacity: next.opacity,
+    });
     onionView.setOpacity(next.opacity);
     ui.onion.render(next);
     scheduleProjectSave();

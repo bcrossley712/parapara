@@ -39,7 +39,16 @@
 // shapes (see PROJECT_NOTES.md schema) once those exist — no reaching
 // into timeline/storage internals directly.
 
-import { roundBrush } from './brush.js';
+import {
+  getTip,
+  applyGrain,
+  sanitizeTipName,
+  TIPS,
+  TIP_DEFAULTS,
+  DEFAULT_TIP,
+  MIN_STRENGTH,
+  MAX_STRENGTH,
+} from './brush.js';
 import { mirrorPoints, mergeOverlapping, sanitizeSymmetry } from './symmetry.js';
 import { createStabilizer, MAX_STABILIZER, DEFAULT_STABILIZER } from './stabilizer.js';
 import {
@@ -129,11 +138,27 @@ const STABILIZED_TOOLS = ['draw', 'erase'];
 const DEFAULT_TOOL = 'draw';
 const DEFAULT_BRUSH_SIZE = 6;
 
+// Tools that pick a brush tip (8b-ii), each remembering its last tip
+// and, per tip, its own size and strength (Draw-Pencil and
+// Erase-Pencil are separate). Smudge keeps a plain size until 8b-iii.
+const TIPPED_TOOLS = ['draw', 'erase'];
+
+const isSize = (v) => Number.isInteger(v) && v >= 1 && v <= MAX_BRUSH_SIZE;
+const isStrength = (v) => Number.isInteger(v) && v >= MIN_STRENGTH && v <= MAX_STRENGTH;
+
 // Turns whatever was saved (possibly from an older app version, or
 // corrupted) into valid settings. Each field is checked on its own: a
 // bad color doesn't throw away a good tool or sizes, and anything
 // missing or invalid falls back to its default. Pure — no DOM — so
 // it's unit-tested directly.
+//
+// Shape: { tool, color, brushSizes: { draw, erase, smudge },
+// stabilizer: { draw, erase }, tips: { draw, erase },
+// tipSettings: { draw: { [tip]: { size, strength } }, erase: … } }.
+// brushSizes.draw/erase are the current tip's size (kept so the saved
+// shape still reads as before); tipSettings is the source of truth.
+// Settings saved before 8b-ii have no tipSettings: their draw/erase
+// sizes become Pen's, the tip they were drawn with.
 export function sanitizeToolSettings(raw) {
   const input = raw && typeof raw === 'object' ? raw : {};
 
@@ -146,13 +171,6 @@ export function sanitizeToolSettings(raw) {
   const savedSizes = input.brushSizes && typeof input.brushSizes === 'object'
     ? input.brushSizes
     : {};
-  const brushSizes = {};
-  for (const name of SIZED_TOOLS) {
-    const size = savedSizes[name];
-    brushSizes[name] = Number.isInteger(size) && size >= 1 && size <= MAX_BRUSH_SIZE
-      ? size
-      : DEFAULT_BRUSH_SIZE;
-  }
 
   // 8a; missing (settings saved before it) = the default.
   const savedStabilizer = input.stabilizer && typeof input.stabilizer === 'object'
@@ -166,7 +184,39 @@ export function sanitizeToolSettings(raw) {
       : DEFAULT_STABILIZER;
   }
 
-  return { tool, color, brushSizes, stabilizer };
+  // 8b-ii.
+  const savedTips = input.tips && typeof input.tips === 'object' ? input.tips : {};
+  const savedTipSettings = input.tipSettings && typeof input.tipSettings === 'object'
+    ? input.tipSettings
+    : null;
+  const tips = {};
+  const tipSettings = {};
+  for (const name of TIPPED_TOOLS) {
+    tips[name] = sanitizeTipName(savedTips[name]);
+    const savedTool = savedTipSettings && savedTipSettings[name] && typeof savedTipSettings[name] === 'object'
+      ? savedTipSettings[name]
+      : {};
+    tipSettings[name] = {};
+    for (const tip of TIPS) {
+      const saved = savedTool[tip] && typeof savedTool[tip] === 'object' ? savedTool[tip] : {};
+      const fallback = TIP_DEFAULTS[name][tip];
+      // Before 8b-ii: the old per-tool size was Pen's.
+      const legacySize = !savedTipSettings && tip === DEFAULT_TIP ? savedSizes[name] : undefined;
+      tipSettings[name][tip] = {
+        size: isSize(saved.size) ? saved.size : (isSize(legacySize) ? legacySize : fallback.size),
+        strength: isStrength(saved.strength) ? saved.strength : fallback.strength,
+      };
+    }
+  }
+
+  const brushSizes = {};
+  for (const name of SIZED_TOOLS) {
+    brushSizes[name] = TIPPED_TOOLS.includes(name)
+      ? tipSettings[name][tips[name]].size
+      : (isSize(savedSizes[name]) ? savedSizes[name] : DEFAULT_BRUSH_SIZE);
+  }
+
+  return { tool, color, brushSizes, stabilizer, tips, tipSettings };
 }
 
 // Fill: per-channel color-distance tolerance for what counts as "the
@@ -578,10 +628,26 @@ export function initCanvas(container, options = {}) {
     strokeCtx = strokeCanvas.getContext('2d');
   }
 
-  // What the stroke in progress is: erase or draw, and how strongly it
-  // applies (always 1 until 8b-ii's tips have a strength).
+  // What the stroke in progress is: erase or draw, its tip (8b-ii),
+  // size, and how strongly it applies (the tip's strength, 0–1).
   let strokeErase = false;
   let strokeStrength = 1;
+  let strokeTip = getTip(DEFAULT_TIP);
+  let strokeSize = DEFAULT_BRUSH_SIZE;
+  let strokeStamp = () => {};
+  // Where a grained stroke's region is copied to have the grain cut
+  // into it before it goes on the layer. Grows to the biggest box
+  // composed; released when the stroke ends.
+  let grainCanvas = null;
+
+  function grainScratch(w, h) {
+    if (!grainCanvas) grainCanvas = document.createElement('canvas');
+    if (grainCanvas.width < w || grainCanvas.height < h) {
+      grainCanvas.width = Math.max(grainCanvas.width, w);
+      grainCanvas.height = Math.max(grainCanvas.height, h);
+    }
+    return grainCanvas.getContext('2d');
+  }
   // Boxes stamped since the layer was last rebuilt, per symmetry copy.
   let pendingParts = [];
 
@@ -605,7 +671,16 @@ export function initCanvas(container, options = {}) {
       ctx.drawImage(committedCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
       ctx.globalAlpha = strokeStrength;
       ctx.globalCompositeOperation = strokeErase ? 'destination-out' : 'source-over';
-      ctx.drawImage(strokeCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+      if (strokeTip.grain) {
+        // Paper grain (8b-ii): the stroke, cut by the canvas-fixed grain.
+        const g = grainScratch(r.w, r.h);
+        g.clearRect(0, 0, r.w, r.h);
+        g.drawImage(strokeCanvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+        applyGrain(g, strokeTip.grain, r);
+        ctx.drawImage(grainCanvas, 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
+      } else {
+        ctx.drawImage(strokeCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+      }
       ctx.restore();
     }
   }
@@ -615,6 +690,10 @@ export function initCanvas(container, options = {}) {
   // outlives it.
   function clearStrokeBuffer() {
     pendingParts = [];
+    if (grainCanvas) {
+      grainCanvas.width = 0; // frees its memory (iOS counts canvas memory)
+      grainCanvas = null;
+    }
     const r = clampRect(dirty, width, height);
     if (r) strokeCtx.clearRect(r.x, r.y, r.w, r.h);
   }
@@ -678,19 +757,27 @@ export function initCanvas(container, options = {}) {
   }
 
   let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
-  let brush = roundBrush; // only tip today — see brush.js for the seam
   let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
   // Symmetry (8b-i): the project's mode (main.js sets it per project),
   // and the mode the stroke in progress started with.
   let symmetry = 'off';
   let strokeSymmetry = 'off';
 
-  // Per-tool brush size memory — draw/erase/smudge each remember
-  // their own size independently (matches how Procreate/Sketchbook/
-  // etc. behave) rather than one shared size that carries between
-  // tools. Fill has no size concept (a flood fill has no radius), so
-  // it isn't tracked here.
-  const brushSizes = sanitizeToolSettings(null).brushSizes; // defaults
+  // Size memory. Draw and erase (8b-ii) remember a tip each and, per
+  // tip, its size and strength (tipSettings — see sanitizeToolSettings);
+  // smudge keeps one size (brushSizes.smudge). Fill has no size (a
+  // flood fill has no radius).
+  const defaults = sanitizeToolSettings(null);
+  const brushSizes = defaults.brushSizes;
+  const tips = defaults.tips;
+  const tipSettings = defaults.tipSettings;
+  // The tip setting the active tool uses, or null (fill, smudge).
+  const currentTipSetting = () => (TIPPED_TOOLS.includes(tool) ? tipSettings[tool][tips[tool]] : null);
+  // The active tool's size, or null for fill.
+  function currentSize() {
+    if (tool === 'fill') return null;
+    return currentTipSetting()?.size ?? brushSizes[tool];
+  }
   // Stabilizer strength per tool (8a), 0–10; only draw and erase.
   const stabilizerStrengths = sanitizeToolSettings(null).stabilizer;
 
@@ -886,7 +973,7 @@ export function initCanvas(container, options = {}) {
   function stamp(point, size) {
     const copies = mirrorPoints(point, strokeSymmetry, width, height);
     for (let i = 0; i < copies.length; i++) {
-      brush.stamp(strokeCtx, copies[i], size);
+      strokeStamp(strokeCtx, copies[i]);
       const rect = rectAroundPoint(copies[i], size);
       markDirty(rect, i);
       markPending(rect, i);
@@ -894,8 +981,8 @@ export function initCanvas(container, options = {}) {
   }
 
   function stampAlongLine(a, b) {
-    const size = brushSizes[tool];
-    const spacing = Math.max(1, size * brush.spacingRatio);
+    const size = strokeSize;
+    const spacing = Math.max(1, size * strokeTip.spacingRatio);
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
     const steps = Math.max(1, Math.ceil(dist / spacing));
     for (let i = 1; i <= steps; i++) {
@@ -905,8 +992,8 @@ export function initCanvas(container, options = {}) {
   }
 
   function stampAlongQuadratic(start, control, end) {
-    const size = brushSizes[tool];
-    const spacing = Math.max(1, size * brush.spacingRatio);
+    const size = strokeSize;
+    const spacing = Math.max(1, size * strokeTip.spacingRatio);
     // Control-polygon length as a cheap upper-bound estimate of arc
     // length — good enough to pick a stamp count, doesn't need to be
     // exact.
@@ -1220,15 +1307,21 @@ export function initCanvas(container, options = {}) {
     // Stamps go into the stroke buffer at full opacity in the stroke's
     // color (erase's color doesn't matter, only its coverage);
     // composeStroke applies them to the layer as paint or erasing.
+    // The tip, size and strength are fixed for the stroke (8b-ii).
     strokeErase = tool === 'erase';
-    strokeStrength = 1;
+    const setting = currentTipSetting();
+    strokeTip = getTip(tips[tool]);
+    strokeSize = setting.size;
+    strokeStrength = setting.strength / MAX_STRENGTH;
+    const stampColor = strokeErase ? '#000000' : color;
+    strokeStamp = strokeTip.stamper(strokeSize, stampColor);
     strokeCtx.globalCompositeOperation = 'source-over';
     strokeCtx.globalAlpha = 1;
-    strokeCtx.fillStyle = strokeErase ? '#000000' : color;
+    strokeCtx.fillStyle = stampColor;
 
     // Stamp once immediately so a tap with no movement still leaves a
     // mark instead of rendering nothing.
-    stamp(point, brushSizes[tool]);
+    stamp(point, strokeSize);
     composeStroke();
     startStabilizer(point, time);
   }
@@ -1814,24 +1907,45 @@ export function initCanvas(container, options = {}) {
     setTool(next) {
       tool = next;
     },
-    // Not called anywhere yet — only one brush exists (see brush.js)
-    // — but the API accepting a brush instead of hardcoding roundBrush
-    // is the seam itself, so it's here from the start.
-    setBrush(next) {
-      brush = next;
+    // Brush tip (8b-ii) for the active tool: one of brush.js's TIPS.
+    // Draw and erase only — a no-op (and null) for fill and smudge.
+    // Takes effect from the next stroke, like every brush setting.
+    setTip(name) {
+      if (!TIPPED_TOOLS.includes(tool)) return;
+      tips[tool] = sanitizeTipName(name);
+      brushSizes[tool] = tipSettings[tool][tips[tool]].size;
+    },
+    getTip() {
+      return TIPPED_TOOLS.includes(tool) ? tips[tool] : null;
+    },
+    // A tip's size and strength for the active tool (the panel's
+    // previews), or null for fill and smudge.
+    getTipSetting(name) {
+      return TIPPED_TOOLS.includes(tool) ? { ...tipSettings[tool][sanitizeTipName(name)] } : null;
     },
     setBrushSize(px) {
       // Fill has no size concept (a flood fill has no radius) — no
       // memory slot for it, so setting size while Fill is active is
       // a no-op rather than silently creating a meaningless entry.
       if (tool === 'fill') return;
+      const setting = currentTipSetting();
+      if (setting) setting.size = px;
       brushSizes[tool] = px;
     },
     // Lets ui.js sync the size slider to the newly active tool's
     // remembered size when the tool changes. Returns null for fill,
     // meaning "no size control applies."
     getBrushSize() {
-      return tool === 'fill' ? null : brushSizes[tool];
+      return currentSize();
+    },
+    // Strength in percent (8b-ii), MIN_STRENGTH–MAX_STRENGTH, of the
+    // active tool's tip; null for fill and smudge.
+    setBrushStrength(percent) {
+      const setting = currentTipSetting();
+      if (setting) setting.strength = percent;
+    },
+    getBrushStrength() {
+      return currentTipSetting()?.strength ?? null;
     },
     // Stabilizer strength (8a), 0–10, for the active tool; null for
     // tools it doesn't apply to (fill, smudge). Takes effect from the
@@ -1877,7 +1991,19 @@ export function initCanvas(container, options = {}) {
     // returns — what main.js saves, and what ui.js syncs its controls
     // from after applySettings().
     getSettings() {
-      return { tool, color, brushSizes: { ...brushSizes }, stabilizer: { ...stabilizerStrengths } };
+      const tipCopy = {};
+      for (const name of TIPPED_TOOLS) {
+        tipCopy[name] = {};
+        for (const tip of TIPS) tipCopy[name][tip] = { ...tipSettings[name][tip] };
+      }
+      return {
+        tool,
+        color,
+        brushSizes: { ...brushSizes },
+        stabilizer: { ...stabilizerStrengths },
+        tips: { ...tips },
+        tipSettings: tipCopy,
+      };
     },
 
     // Applies saved settings, cleaning them first (see
@@ -1888,6 +2014,8 @@ export function initCanvas(container, options = {}) {
       color = clean.color;
       Object.assign(brushSizes, clean.brushSizes);
       Object.assign(stabilizerStrengths, clean.stabilizer);
+      Object.assign(tips, clean.tips);
+      Object.assign(tipSettings, clean.tipSettings);
     },
 
     // Undoable like any edit. Clearing an already-blank layer is a

@@ -279,10 +279,9 @@ textarea,
   transform: translateY(-50%);
 }
 
-/* Size and Stabilizer (8a) sliders on the rail (js/ui/ui.js). The
-   stabilizer moves to a brush panel once there is one. */
-.pp-brush-size,
-.pp-stabilizer {
+/* The Size slider on the rail (js/ui/ui.js). The Stabilizer moved to
+   the brush panel (8b-ii). */
+.pp-brush-size {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -293,13 +292,11 @@ textarea,
   margin-top: 8px;
 }
 
-.pp-brush-size input[type="range"],
-.pp-stabilizer input[type="range"] {
+.pp-brush-size input[type="range"] {
   width: 100%;
 }
 
-.pp-brush-size--disabled,
-.pp-stabilizer--disabled {
+.pp-brush-size--disabled {
   opacity: 0.4;
 }
 
@@ -2613,4 +2610,91 @@ textarea,
 
 .pp-canvas-area.has-sound-panel .pp-playback-status {
   bottom: calc(var(--pp-sound-panel-height) + 16px);
+}
+
+/* Draw/Erase show their brush tip's name under the label (8b-ii). */
+.pp-tool-btn--tipped {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+}
+
+.pp-tool-btn__tip {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.pp-tool-btn.is-open {
+  box-shadow: inset 0 0 0 2px var(--pp-bg);
+}
+
+/* The brush panel (8b-ii, js/ui/brush-panel.js): right of the Draw or
+   Erase button, like the color picker. */
+.pp-brush-panel {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 264px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font);
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.pp-brush-panel[hidden] {
+  display: none;
+}
+
+.pp-brush-panel__title {
+  font-weight: 600;
+}
+
+.pp-brush-panel__tips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.pp-brush-panel__tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--pp-bg);
+  color: var(--pp-ink);
+  font-family: var(--pp-font);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pp-brush-panel__tip.is-current {
+  border-color: var(--pp-accent);
+  font-weight: 600;
+}
+
+.pp-brush-panel__sample {
+  width: 96px;
+  height: 30px;
+}
+
+.pp-brush-panel__slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.pp-brush-panel__slider input[type="range"] {
+  width: 100%;
 }

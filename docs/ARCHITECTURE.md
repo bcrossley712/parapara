@@ -19,9 +19,10 @@ Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying
 
 **Files:** `js/canvas/canvas.js` (input dispatch, tools, viewport, layer
 surfaces, committed copy — its returned API is the only way other
-modules touch the canvas), `brush.js` (brush-tip seam:
-`stamp(ctx, point, size)`, point = one symmetry copy with
-`flipX`/`flipY`), `stabilizer.js` (8a, pure: the trailing
+modules touch the canvas), `brush.js` (8b-ii: the tips — shape,
+spacing, grain; `getTip(name).stamper(size, color)` → `(ctx, point)`,
+point = one symmetry copy with `flipX`/`flipY`; the paper grain;
+panel samples), `stabilizer.js` (8a, pure: the trailing
 line), `symmetry.js` (8b-i, pure: mirror points, `mergeOverlapping`),
 `size-curve.js` (8b-i, pure: the size slider's curve),
 `gestures.js` (pure pan/zoom/rotate math,
@@ -52,9 +53,27 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   layer. After each batch of stamps `composeStroke` rebuilds just the
   newly touched boxes of the layer: committed copy, then the whole
   stroke at `strokeStrength` (source-over, or destination-out for
-  erase). Strength is always 1 until 8b-ii's tips; at 1 the pixels
-  match stamping straight on, within a channel rounding of 1–2. Smudge
-  and fill still paint the layer directly (they read it).
+  erase). `strokeStrength` is the tip's strength (8b-ii); at 1 the
+  pixels match stamping straight on, within a channel rounding of 1–2.
+  So a stroke doesn't darken where it crosses itself; the next stroke
+  does (Procreate's default). Smudge and fill still paint the layer
+  directly (they read it).
+- **Brush tips (8b-ii)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
+  Pen (the old round tip — default, pixels unchanged), Pencil, Chalk,
+  Chisel, Paintbrush, Soft; draw and erase each use any of them.
+  Tip, size and strength are fixed at pointerdown (`strokeTip`,
+  `strokeSize`, `strokeStamp`). Shaped tips are sprites drawn once per
+  size and color (`cachedSprite`), stamped mirrored for a mirrored
+  copy — so Chisel's fixed "/" nib leans "\" across a vertical axis.
+  Paintbrush is a disc of bristles stamped close together (streaks in
+  any direction, no direction needed). **Grain** (Pencil fine, Chalk
+  coarse): a 256 px tiling alpha mask from seeded noise
+  (`grainAlpha`), applied in `composeStroke` with the pattern anchored
+  at canvas (0, 0) — the grain stays put like paper. Grain needs a
+  scratch canvas the size of the composed box (`grainCanvas`), freed
+  when the stroke ends. Feel values (spacing, bristles, gradients,
+  grain levels, default strengths in `TIP_DEFAULTS`) are first tries —
+  tune on the iPad.
 - **Symmetry (8b-i):** `project.symmetry`, set with
   `canvasApi.setSymmetry` on open; fixed per stroke (`strokeSymmetry`,
   taken at pointerdown). `stamp()` stamps each copy from
@@ -144,6 +163,15 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   overlapping copy boxes (`mergeOverlapping`) first — two overlapping
   patches swapped one after the other read each other's pixels on
   redo.
+- **Every tip stays inside a circle of diameter `size`** — the dirty
+  rect is `rectAroundPoint(point, size)`. A new tip that reaches
+  further leaves marks undo can't take back (`brush.spec.js` checks
+  each tip, mirrored).
+- **Pen's stamp is the old `arc` fill** — keep it, so drawings and
+  tests made before 8b-ii match.
+- **Grain is anchored to the canvas**: `applyGrain` must translate by
+  the box's position, and fill only that box; anchoring it to the
+  stroke or stamp makes grain swim (`brush.spec.js` checks).
 - **A new pixel path that mirrors** goes through `mirrorPoints` with
   `strokeSymmetry`, never the live `symmetry` (it can change mid-stroke).
 - **Nothing of a stroke outlives it.** The stabilizer's catch-up runs
@@ -159,7 +187,7 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 
 ### iPad-only checks
 
-Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`.
+Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`. Since 8b-ii: how each tip looks to her, and whether large Soft, Paintbrush and Chalk strokes keep up (sprites and grain cost more per move than Pen).
 
 ---
 
@@ -1138,7 +1166,8 @@ on her iPad; a background photo in the video once it's on.
 ## Colors and tool settings
 
 **Files:** `js/ui/color-picker.js` (HSV picker, eyedropper button, recents,
-palette — UI only), `storage/colors.js` (pure list rules,
+palette — UI only), `ui/brush-panel.js` (8b-ii: tips, size, strength,
+stabilizer — UI only), `storage/colors.js` (pure list rules,
 `MAX_RECENTS`, `MAX_PALETTE`); tool-settings validation in
 `canvas.js` (`sanitizeToolSettings`).
 
@@ -1153,8 +1182,16 @@ palette — UI only), `storage/colors.js` (pure list rules,
     *commits* (not on picker moves or picks); `meta.recentColors`.
   - **Palette:** per project, 10, saved on the project record; edits
     aren't undoable (as in Procreate).
+- **Brush panel (8b-ii):** tapping Draw or Erase when it's already the
+  tool opens it (as the current frame tile opens its menu); a tap
+  anywhere else closes it, and a canvas tap then only closes it.
+  Smudge and Fill have none until 8b-iii. The Draw/Erase buttons show
+  the tip's name under the label (accessible name stays
+  "Draw"/"Erase"). The rail keeps Size; the panel has Size too (same
+  curve, number shown), Strength 1–100% and Stabilizer.
 - **Tool settings** (tool, color, per-tool sizes, per-tool stabilizer
-  — draw and erase, 8a) are remembered
+  — draw and erase, 8a; 8b-ii: last tip per tool, size and strength
+  per tool *and* tip) are remembered
   app-wide, not per project, and carry from one project into the next.
   Per project: the open frame and active layer. App-wide: whether the
   layers panel was open, which screen she was on, and the last
@@ -1171,9 +1208,15 @@ palette — UI only), `storage/colors.js` (pure list rules,
   `sizeToSlider` (`size-curve.js`); the label and `aria-valuetext`
   show the size. Saved sizes stay pixels (1–`MAX_BRUSH_SIZE`). E2E sets
   it with `setBrushSize` / checks `expectBrushSize` (helpers).
-- **The Stabilizer slider sits on the rail only until there's a brush
-  panel** (his decision, 2026-11-01) — then it moves there, as in
-  Flipaclip's brush settings.
+- **Tip settings (8b-ii) are the source of truth** for draw/erase
+  sizes: `brushSizes.draw/erase` only mirror the current tip's size
+  (kept so the saved shape still reads as before); smudge's size lives
+  in `brushSizes.smudge`. Settings saved before 8b-ii have no
+  `tipSettings` — their draw/erase sizes become Pen's. Stabilizer
+  stays per tool, not per tip (his call — Flipaclip has it per brush).
+- **Don't open a panel from a tool button's first tap** — the first
+  tap picks the tool; e2e tests rely on a tap of an inactive tool
+  never opening anything (helpers: `pickTip`, `openBrushPanel`).
 
 ---
 

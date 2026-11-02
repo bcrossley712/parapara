@@ -31,6 +31,7 @@ const APP_SHELL = [
   './js/ui/reference-bar.js',
   './js/ui/image-menu.js',
   './js/ui/symmetry-menu.js',
+  './js/ui/brush-panel.js',
   './js/ui/sound-panel.js',
   './js/ui/countdown.js',
   './js/ui/export-sheet.js',

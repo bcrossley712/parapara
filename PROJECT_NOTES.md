@@ -132,16 +132,22 @@ links):
 1. **8b — symmetry + brush variety**, three pushes (scoped
    2026-11-02, [why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)),
    then flip drawing:
-   - **8b-i — done.** QOL after it (built, not yet pushed; checks
-     below): the layers panel stays open on frame-strip taps; no
-     long-press text selection.
-   - **8b-ii:** brush panel (tap the selected Draw/Erase button; tips,
-     size with the number shown, strength, Stabilizer moves here),
-     with Pencil, Chalk/charcoal (canvas-fixed paper grain), Chisel
-     (fixed angle), Paintbrush (soft and streaky, no wet mixing) and a
-     Soft tip. **Erase can use any tip**, with its own strength (her
-     "eraser that doesn't erase all the way"). Remembered per tool:
-     last tip; per tip: size and strength.
+   - **8b-i — done**, with its QOL (layers panel stays open on frame
+     taps, no long-press selection; verified 2026-11-02).
+   - **8b-ii — built, not pushed** (checks below): brush panel (tap the selected Draw/Erase
+     button; tips, size with the number shown, strength, Stabilizer
+     moves here), with Pencil, Chalk/charcoal (canvas-fixed paper
+     grain), Chisel (fixed angle), Paintbrush (soft and streaky, no
+     wet mixing) and a Soft tip. **Erase can use any tip**, with its
+     own strength (her "eraser that doesn't erase all the way").
+     Decided 2026-11-02: today's hard round tip stays as **Pen**, the
+     default, so nothing she has changes; size and strength are kept
+     per tool *and* tip (Draw-Pencil ≠ Erase-Pencil); last tip per
+     tool; Stabilizer stays per tool (Flipaclip has it per brush — a
+     deliberate departure); strength applies per stroke (a stroke
+     doesn't darken where it crosses itself, the next one does);
+     the Draw/Erase buttons show the tip's name; no three-finger
+     swipe for brushes; no panel for Smudge/Fill until 8b-iii.
    - **8b-iii:** smudge rebuilt for blending (she uses it to blend —
      any way that achieves it is fine) on the soft tip, with its own
      strength; stamps (a tap places one shape, a drag leaves a spaced
@@ -159,12 +165,24 @@ scoping)"; how it works is in [ARCHITECTURE →
 Backup](docs/ARCHITECTURE.md#backup).
 
 **Open iPad checks** (send the activity log with any of them):
-- **After 8b-i (QOL), once pushed:** with Layers open, tapping frame
-  tiles, Add frame, prev/next or Play leaves it open, and the panel's
-  thumbnails show the new frame; a tap on the canvas, rail or top bar
-  still closes it. A long press anywhere (canvas, rail, gallery) no
-  longer selects text or shows Copy or the magnifier; renaming a layer
-  or project and typing a hex color still work.
+- **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
+  already the tool opens the brush panel; a canvas tap closes it
+  without drawing. Her old Pen size is unchanged. Each tip looks right
+  to her — Pencil and Chalk's grain stays put on the paper; Chisel
+  leans the other way across a symmetry axis; Paintbrush streaks; Soft
+  fades. Erase at ~50% fades instead of clearing. Big (100+) Soft,
+  Paintbrush and Chalk strokes keep up with her stylus. Tip, size and
+  strength come back after closing the app. Expect a tuning round on
+  default sizes and strengths.
+- **Onion ghosts not showing (seen 2026-11-02, 8-layer project; cause
+  unknown):** after the push, turn onion skin on in that project, step
+  between a few frames (including one whose top layers are empty),
+  and send the log. `onion-ghosts asked=/cached=` says whether the
+  cache had pictures; `onion-draw` that they were drawn;
+  `onion-failed step=` (decode, canvas, scratch, draw) or any `error`
+  line says what broke. Drawn but unseen → a painted layer is covering
+  them (ghosts sit under every layer; on frame 2 its top layer is
+  ~600 KB of paint) — then ask her how her layers are arranged.
 - **Whenever convenient:** a 48-frame export's time, with the editor
   fine after (no lost-canvas banner); a 1–3 fps video in Photos;
   sharing to Files; switching apps mid-export stops it with a
@@ -206,6 +224,8 @@ if it shows:
   `project-import-failed`;
 - **backup (7b):** `backup-failed` (with `error`, or `step` while
   turning on); `restore-failed` (with `step` and `error`).
+- **onion skin and anything uncaught (after 8b-ii):** `onion-failed`,
+  `error` (an error nothing else caught; at most 20 per launch).
 
 **Open items**
 - **Silent sound after the background — WebKit bug, worked around
@@ -423,7 +443,7 @@ Don't break, Testing tips, iPad-only checks).
 | [Reference image](docs/ARCHITECTURE.md#reference-image) | `canvas/reference.js`, `transform.js`, `ui/image-menu.js`, `reference-bar.js` |
 | [Sound](docs/ARCHITECTURE.md#sound) | `audio/*`, `ui/sound-panel.js` |
 | [Export and sharing](docs/ARCHITECTURE.md#export-and-sharing) | `export/*`, `ui/export-sheet.js` |
-| [Colors and tool settings](docs/ARCHITECTURE.md#colors-and-tool-settings) | `ui/color-picker.js`, `storage/colors.js` |
+| [Colors and tool settings](docs/ARCHITECTURE.md#colors-and-tool-settings) | `ui/color-picker.js`, `ui/brush-panel.js`, `storage/colors.js` |
 | [Editor UI, menus and screens](docs/ARCHITECTURE.md#editor-ui-menus-and-screens) | `ui/ui.js`, `gallery.js`, `confirm-dialog.js`, `icons.js`, `settings-panel.js`, `dev-log-view.js` |
 | [PWA, layout and updates](docs/ARCHITECTURE.md#pwa-layout-and-updates) | `index.html`, `manifest.json`, `style.css`, `sw.js`, `updater.js` |
 
@@ -446,7 +466,10 @@ and the `showNotice` wrapper in `main.js` (and the guard-context
 assertions in `canvas-loss.spec.js`), `frameCache.memory`,
 `liveCanvasCount` and its counter in `render-frame.js`, `canvasApi.onDebug`,
 `storageLogFields` in `storage.js` (6d; keep `storageEstimate` if a
-storage warning is ever built), and the
+storage warning is ever built), the onion lines (`onion`,
+`onion-ghosts`, `onion-draw`, `onion-failed`: `log` in
+`onion-view.js`, `onionLogged` and the `onion=` field in `main.js`),
+`logUncaught` in `main.js`, and the
 `.pp-dev-log` CSS. It keeps 300 lines in localStorage
 (`parapara-dev-log`); Copy takes the last 60 (`DEV_LOG_COPY_LINES`).
 
@@ -496,8 +519,11 @@ type, buffer }` — layer bitmaps, reference images, the sound file
 (5a, its own MIME type) and the gallery thumbnail
 `thumb-<projectId>`), `meta` (`lastProjectId`,
 `toolSettings` = `{ tool, color, brushSizes: { draw, erase, smudge },
-stabilizer: { draw, erase } }` (8a: stabilizer 0–10, missing = 5;
-`sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
+stabilizer: { draw, erase }, tips: { draw, erase },
+tipSettings: { draw: { [tip]: { size, strength } }, erase: … } }`
+(8a: stabilizer 0–10, missing = 5; 8b-ii: tips from brush.js `TIPS`,
+missing = 'pen'; strength 1–100; missing tipSettings = defaults with
+the old draw/erase sizes on Pen; `sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
 hideHeadphonesTip }`
 (5c; missing = false; `layersPanelOpen` retired after 5c, ignored);
 `recentColors` = `['#rrggbb', …]` newest first).

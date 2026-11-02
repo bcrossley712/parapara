@@ -76,3 +76,35 @@ test('Copy takes the newest 60 lines, Copy all the whole log', async ({ page, co
   expect(lines.length).toBeGreaterThan(100);
   expect(lines[0]).toBe('00:00:00.000 test n=1');
 });
+
+// Added while looking for onion ghosts that never showed on her iPad
+// (after 8b-ii): the toggle, which ghosts were asked for and had a
+// picture, and each draw.
+test('the log records onion skin: the toggle, the ghosts asked for, and each draw', async ({ page }) => {
+  await openApp(page);
+  await stroke(page);
+  await page.getByRole('button', { name: 'Add frame' }).click();
+  await expect(page.locator('.pp-frame-strip__tile')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Onion skin', exact: true }).click();
+  // The ghost is drawn once frame 1's cached picture arrives (the log
+  // view shows the log as it was when opened).
+  await expect(page.locator('.pp-onion')).toHaveCount(1);
+
+  const text = await openLog(page);
+  await expect(text).toContainText(/ onion on=yes before=1 after=1 opacity=0\.4/);
+  // Frame 1's picture arrives from the cache, then it's drawn.
+  await expect(text).toContainText(/ onion-ghosts at=f2#\w+ asked=1 cached=1/);
+  await expect(text).toContainText(/ onion-draw ghosts=1 size=1920x1080/);
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await reloadApp(page);
+  const after = await openLog(page);
+  await expect(after).toContainText(/ open project=\w+ frames=2 .*onion=1\/1/);
+});
+
+test('an error nothing else caught is logged', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => { Promise.reject(new Error('test rejection')); });
+  const text = await openLog(page);
+  await expect(text).toContainText(/ error kind=promise message=test rejection/);
+});
