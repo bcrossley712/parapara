@@ -118,8 +118,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   sound (import, sound panel, hold-to-record over music, mixer,
   Listen/Set start) and export (MP4 with sound through the share
   sheet, Include images per project); **7a** project files (gallery ⋯
-  → Save as file, top bar → Import); **7b push 1**, automatic backup
-  to Cloudflare (her first backup ran 2026-11-01). How each works is
+  → Save as file, top bar → Import); **7b** automatic backup to
+  Cloudflare and restore (both verified 2026-11-02); **8a** stabilizer
+  (as she expects, 2026-11-02). How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
@@ -127,17 +128,28 @@ icon, manifest `name`/`short_name`, and repo copy.
 **Next** (his order, 2026-11-01: her requested extras before share
 links):
 
-1. **Confirm on the iPad:** 7b push 2 (restore) and 8a (stabilizer) —
-   both pushed; checks below. Restore matters most: until
-   it's confirmed, the backup is unproven.
-2. **8b — symmetry + brush variety** together (both change
-   `stamp()`), then flip drawing. **When a brush panel is built, the
-   Stabilizer slider moves into it** (his decision, 2026-11-01).
-   Scope from Open items → the brush block.
-3. **Share links and Krita reference import** on the backup's
+1. **8b — symmetry + brush variety**, three pushes (scoped
+   2026-11-02, [why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)),
+   then flip drawing:
+   - **8b-i — built, not yet pushed** (checks below): stroke buffer,
+     tip seam with mirror flags, symmetry (rail menu, per project,
+     guide line, one undo entry with a patch per copy), curved 1–200
+     size slider. How: ARCHITECTURE → Canvas and drawing.
+   - **8b-ii:** brush panel (tap the selected Draw/Erase button; tips,
+     size with the number shown, strength, Stabilizer moves here),
+     with Pencil, Chalk/charcoal (canvas-fixed paper grain), Chisel
+     (fixed angle), Paintbrush (soft and streaky, no wet mixing) and a
+     Soft tip. **Erase can use any tip**, with its own strength (her
+     "eraser that doesn't erase all the way"). Remembered per tool:
+     last tip; per tip: size and strength.
+   - **8b-iii:** smudge rebuilt for blending (she uses it to blend —
+     any way that achieves it is fine) on the soft tip, with its own
+     strength; stamps (a tap places one shape, a drag leaves a spaced
+     trail; shapes drawn by us, e.g. a web, star, heart).
+2. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
-4. The rest of the requested extras under Open items.
+3. The rest of the requested extras under Open items.
 
 Step 7's decisions (passkey with PRF instead of a recovery code,
 encryption on the iPad, one invite per family, what's kept and for how
@@ -147,31 +159,17 @@ scoping)"; how it works is in [ARCHITECTURE →
 Backup](docs/ARCHITECTURE.md#backup).
 
 **Open iPad checks** (send the activity log with any of them):
-- **Stabilizer (8a):** with her stylus, at 5 a wobbly line comes out
-  smoother and trails a little, glides up when she pauses mid-line, and
-  ends exactly where she lifts; 0 feels like before; 10 isn't
-  uselessly slow (if the top or the middle is wrong, it's
-  `MAX_STABILIZER_LAG_MS` in `stabilizer.js`). Each of Draw/Erase keeps
-  its own value after a relaunch; greyed out for Fill and Smudge; the
-  "Stabilizer" label fits the rail. Ask her how it compares with
-  Flipaclip's.
-- **Restore (7b push 2), first:** in **Safari on her iPad** (its own
-  storage): Restore from backup → Continue → Touch ID offers the
-  Parapara! passkey → the list shows her animations with thumbnails →
-  restore all → they open and play, sound included; then Backup there
-  says backed up, and **Turn off on this iPad** before closing Safari
-  (otherwise it stays a second device on her backup). Log:
-  `backup-passkey signin=yes secret=yes handle=yes`, `backup-on
-  via=restore`, `restore projects=…`. In the installed app: Backup →
-  Restore… lists everything as "On this iPad" with no Touch ID. Also
-  whenever convenient: hide the app mid-restore, then Restore again
-  finishes the rest.
-- **Backup (7b push 1), as she draws:** a stroke later gives
-  `backup projects=1 blobs=1` (2 with the thumbnail) after ~2 min or
-  Back up now; airplane mode → Back up now says no internet, then
-  backs up once online; closing the app mid-run, then it finishes on
-  reopening; R2 → Objects shows only random names under `vaults/`.
-  The 3-day notice only if it really happens.
+- **8b-i, once pushed:** drawing with symmetry off feels and looks
+  exactly as before (the stroke buffer is new underneath every
+  stroke) — no lag on long strokes, no flicker. Symmetry: each mode
+  mirrors draw, erase and smudge, with the stabilizer's trail on the
+  copies too; one undo removes the stroke and its copies; the guide is
+  easy to see but not in the way, and isn't in the video or the
+  gallery thumbnail; the mode comes back with the project, and a new
+  project starts Off. Size: small sizes are as easy to pick as before,
+  200 is reachable, sizes she'd saved come back the same. Rail still
+  fits (Symmetry label and gear visible). Log: `symmetry mode=…`,
+  `stroke … parts=N` for a mirrored stroke.
 - **Whenever convenient:** a 48-frame export's time, with the editor
   fine after (no lost-canvas banner); a 1–3 fps video in Photos;
   sharing to Files; switching apps mid-export stops it with a
@@ -281,19 +279,14 @@ if it shows:
     fixed axis at canvas center (not movable), saved per project; draw,
     erase and smudge mirror, fill doesn't. Mirrored stamps must grow the
     dirty rect.
-  - **Brush variety** (sizes, chisel tips, edge blending) — **build
-    with symmetry**: both change `stamp()`, and a directional tip's
-    mirrored stamp must mirror its angle too.
+  - **Brush variety** — scoped into 8b (Current state → Next). A
+    directional tip's mirrored stamp must mirror its angle too.
   - **Stabilizer — built in 8a.** Symmetry must mirror
     its output points, not the raw stylus.
-  - **Erasers** (observed in 4a; she'll want them, not urgent): the
-    eraser is the pen's round hard tip with the same 6 px default and
-    1–60 range (its size is already remembered separately). She'll
-    want softer edges and different sizes — part of brush variety.
-    **Don't just widen the size slider:** the rail's slider is small,
-    so a bigger range makes precise sizes harder to pick; bigger sizes
-    need a different size control (or eraser presets) when this is
-    built.
+  - **Erasers and bigger sizes** — in 8b: Erase uses any tip with a
+    strength; sizes go to 1–200 on a curved slider (most of its length
+    on small sizes), the norm in Procreate, rather than widening a
+    linear slider.
 - **Frame-cache encode timeout?** The cache flattens with `toBlob`
   (`encodePNG`); a `toBlob` that never calls back (seen on the sandbox
   build) would keep "Getting ready" up forever. Same fix as
@@ -308,7 +301,8 @@ if it shows:
   plan a compact layout (a rail that scrolls or collapses, a strip
   that scrolls with the transport, smaller controls) as its own step.
 - **Color opacity** — not in the picker on purpose; revisit if she
-  asks.
+  asks. (8b's per-brush strength is a brush setting, as in Flipaclip's
+  brush Opacity — the picker stays without it.)
 - **Storage warning — dropped (6d scoping, 2026-10-29).** Without a
   project backup her only remedy is deleting drawings (a video can't be
   opened as a project again), and ~80% of Safari's quota likely never
@@ -476,7 +470,7 @@ bitmap. Planned fields are marked. Extend additively.
       palette: [ '#rrggbb', ... ],            // 2e, max 10; older projects: missing = []
       referenceHidden: false,                 // 3a, Hide images; missing = false
       exportImages: false,                    // 6d, Include images in the video; missing = false
-      symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // planned (after main build); missing = 'off'
+      symmetry: 'off' | 'vertical' | 'horizontal' | 'both',   // 8b-i; missing = 'off' (sanitizeSymmetry)
       // no thumbnail field: its blob id is derived, thumb-<projectId>
       audioClips: [ { id, kind, blobRef, trimStart, trimEnd, offset, gain, leveling, volume } ]
                                               // 5a; seconds; offset = where it starts, missing = 0;

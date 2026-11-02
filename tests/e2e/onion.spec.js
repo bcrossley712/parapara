@@ -113,7 +113,11 @@ test('off by default; on, the frames around hers show as red and green ghosts', 
     .map((el) => el.className.split(' ')[0]));
   expect(order[0]).toBe('pp-reference');
   expect(order[1]).toBe('pp-onion');
-  expect(order.slice(2).every((name) => name === 'pp-layer')).toBe(true);
+  // Then the layers, then the symmetry guide (8b-i, display only, above
+  // them).
+  expect(order[order.length - 1]).toBe('pp-symmetry-guide');
+  expect(order.slice(2, -1).length).toBeGreaterThan(0);
+  expect(order.slice(2, -1).every((name) => name === 'pp-layer')).toBe(true);
 
   // Moving to frame 1: frame 2 is now the "after" ghost; nothing before.
   await goToFrame(page, 1);

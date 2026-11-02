@@ -6,6 +6,11 @@
 // are set by the caller before stamping, so a brush only needs to
 // know its own shape, not color or draw/erase mode.
 //
+// 8b-i: stamps land in canvas.js's stroke buffer, not the layer, and
+// `point` is one symmetry copy: { x, y, flipX, flipY }. A directional
+// tip (chisel, 8b-ii) mirrors its own angle from flipX/flipY; the round
+// tip has no direction, so it ignores them.
+//
 // This is the seam for tip variety (chisel, textured, etc.) later:
 // adding a new tip means adding a new object here with a stamp()
 // function, not touching pointer-handling/smoothing/palm-rejection in

@@ -3,7 +3,8 @@
 // A robot user draws, erases, smudges, undoes, redoes, adds, switches,
 // deletes and drags frames (4d), copies a layer's drawing and pastes
 // it into whichever layer is active, on any frame (4d),
-// switches layers, plays and stops, hides the app, has saves fail
+// switches layers, draws with symmetry on (8b-i: a mark and its
+// mirrored copy, one undo step), plays and stops, hides the app, has saves fail
 // (out of space), and has a layer canvas lose its pixels (what iOS did
 // on her iPad, after 4c). A model follows along. Every mark is a short
 // line at its own spot, so at the end each one can be checked — on
@@ -32,6 +33,9 @@ const HISTORY_CAP = 30; // history.js
 const SPOTS = [];
 for (let y = 80; y <= 960; y += 55) for (let x = 80; x <= 1200; x += 70) SPOTS.push({ x, y });
 const SCRIBBLE_Y = 1045;
+// Symmetric marks (8b-i) start at spots this far left, so their
+// mirrored copy (vertical axis) lands right of every spot.
+const MIRROR_MAX_X = 600;
 
 // mulberry32: small, seeded, good enough.
 function rng(seed) {
@@ -79,6 +83,12 @@ async function line(page, x0, y, x1) {
   await page.mouse.down();
   for (let i = 1; i <= 6; i++) await page.mouse.move(sx(x0 + ((x1 - x0) * i) / 6), sy(y));
   await page.mouse.up();
+}
+
+async function setSymmetry(page, label) {
+  await page.locator('.pp-symmetry-btn').click();
+  await page.locator('.pp-symmetry-menu').getByRole('menuitemradio', { name: label, exact: true }).click();
+  await expect(page.locator('.pp-symmetry-btn')).toHaveAttribute('aria-label', `Symmetry: ${label}`);
 }
 
 async function pickTool(page, name) {
@@ -233,8 +243,29 @@ for (const seed of SEEDS) {
       return true;
     }
 
+    // A mark with Vertical symmetry on: it and its mirrored copy are one
+    // stroke, so one undo entry. Symmetry goes off again afterwards (it
+    // isn't undoable, so the model doesn't track it).
+    async function mirroredMark() {
+      if (!(await closeMenuByTap())) return false;
+      const index = model.spots.findIndex((s) => s.x <= MIRROR_MAX_X);
+      if (index < 0) return false;
+      const [spot] = model.spots.splice(index, 1);
+      const mirror = { x: 1920 - spot.x - 24, y: spot.y };
+      const frame = model.timeline[await currentIndex(page)];
+      const layer = await activeLayer(page);
+      await setSymmetry(page, 'Vertical');
+      await line(page, spot.x, spot.y, spot.x + 24);
+      await setSymmetry(page, 'Off');
+      const marks = [{ frame, layer, spot, present: true }, { frame, layer, spot: mirror, present: true }];
+      model.marks.push(...marks);
+      push({ type: 'paste', marks });
+      return true;
+    }
+
     const actions = [
       [30, 'mark', markStroke],
+      [4, 'mirrored mark', mirroredMark],
       [6, 'scribble', async () => {
         const tool = pick(['Erase', 'Smudge']);
         await pickTool(page, tool);

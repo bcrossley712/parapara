@@ -8,6 +8,8 @@
 // Entry shape (tagged, so 2c's layer-structure entries can be added
 // alongside without changing this file):
 //   { type: 'pixels', frameId, layerId, rect: {x, y, w, h}, patch: ImageData, bytes }
+//   (a mirrored stroke, 8b-i: parts: [{ rect, patch }] instead of
+//   rect/patch — still one entry; only bytes matters here)
 //
 // Each entry holds exactly ONE patch at a time. On undo, `swap` puts
 // the stored "before" pixels back and returns the entry carrying the

@@ -13,7 +13,7 @@
 // simulations (a canvas emptied, and one that ignores drawImage).
 
 import { test, expect } from '@playwright/test';
-import { openApp, savedDrawingBytes, waitForDrawingSave, setVisibility } from './helpers.js';
+import { openApp, savedDrawingBytes, waitForDrawingSave, setVisibility, setBrushSize } from './helpers.js';
 
 const toast = (page) => page.locator('.pp-toast__text');
 const banner = (page) => page.locator('.pp-banner');
@@ -147,7 +147,7 @@ test('erasing the whole drawing on purpose still saves', async ({ page }) => {
   expect(drawn).toBeGreaterThan(1000);
 
   await page.getByRole('button', { name: 'Erase', exact: true }).click();
-  await page.getByRole('slider', { name: 'Size' }).fill('60');
+  await setBrushSize(page, 60);
   for (const y of [200, 300, 400, 500, 600, 700]) {
     const before = await savedDrawingBytes(page);
     await stroke(page, y, 200, 1700);

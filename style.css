@@ -191,6 +191,77 @@ html, body {
   padding: 10px 4px;
 }
 
+/* Symmetry (8b-i, js/ui/symmetry-menu.js): icon over a small label,
+   lit (accent) while a mode is on. */
+.pp-symmetry-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  font-size: 11px;
+}
+
+.pp-symmetry-btn__icon {
+  display: flex;
+}
+
+.pp-symmetry-btn__text {
+  overflow-wrap: anywhere;
+}
+
+.pp-symmetry-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pp-symmetry-menu__icon {
+  display: flex;
+  opacity: 0.85;
+}
+
+.pp-symmetry-menu__item.is-current {
+  background: var(--pp-ink-light);
+  font-weight: 600;
+}
+
+/* The symmetry guide (canvas.js): faint lines on the axes, inside the
+   wrapper so they follow the view. Same on-screen thickness at any
+   zoom (--pp-view-scale is the view's zoom); gone during playback. */
+.pp-symmetry-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pp-symmetry-guide[hidden],
+.pp-symmetry-guide__line[hidden],
+.pp-canvas.is-playing .pp-symmetry-guide {
+  display: none;
+}
+
+.pp-symmetry-guide__line {
+  position: absolute;
+  background: rgba(64, 140, 255, 0.55);
+}
+
+.pp-symmetry-guide__line--vertical {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: calc(1.5px / var(--pp-view-scale, 1));
+  transform: translateX(-50%);
+}
+
+.pp-symmetry-guide__line--horizontal {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: calc(1.5px / var(--pp-view-scale, 1));
+  transform: translateY(-50%);
+}
+
 /* Size and Stabilizer (8a) sliders on the rail (js/ui/ui.js). The
    stabilizer moves to a brush panel once there is one. */
 .pp-brush-size,
@@ -1602,7 +1673,9 @@ html, body {
   display: none;
 }
 
-.pp-image-menu {
+/* The Image menu, and the rail's Symmetry menu (8b-i) styled the same. */
+.pp-image-menu,
+.pp-symmetry-menu {
   position: absolute;
   z-index: 20;
   display: flex;

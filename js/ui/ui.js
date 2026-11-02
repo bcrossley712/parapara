@@ -8,13 +8,15 @@
 // native confirm()/alert()/date-input/color chrome, per the working
 // agreement.
 //
-// The rail so far: draw/erase/fill/smudge, color, brush size,
-// stabilizer (8a); the rest
+// The rail so far: draw/erase/fill/smudge, color, symmetry (8b-i),
+// brush size (on a curve since 8b-i), stabilizer (8a); the rest
 // (mic/pan) lands with its build step. The color picker lives in
 // color-picker.js, the frame strip and transport in timeline/.
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 import { MAX_STABILIZER } from '../canvas/stabilizer.js';
+import { sliderToSize, sizeToSlider, SIZE_SLIDER_STEPS } from '../canvas/size-curve.js';
+import { createSymmetryMenu } from './symmetry-menu.js';
 import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
 import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
@@ -62,6 +64,8 @@ import { createExportSheet } from './export-sheet.js';
 // options.share: the Share button and its sheet (step 6a; see
 //   export-sheet.js) — { onOpen (the button: main.js decides whether
 //   to open the sheet), onMake, onCancel, onShare, onClose }.
+// options.onSymmetry(mode): the rail's Symmetry menu (8b-i); main.js
+//   keeps the mode and calls setSymmetry(mode) back.
 // options.onGallery: the top bar's Gallery button. Omit (or null) to
 //   leave the button out — when saving doesn't work there's no gallery
 //   to go back to.
@@ -72,7 +76,8 @@ import { createExportSheet } from './export-sheet.js';
 // render(state), setPlayhead(index)), pickAudio(onFile),
 // exportSheet (the Share sheet: show(state), close(), isOpen),
 // setHistoryState(canUndo, canRedo), setRecentColors(list),
-// setPalette(list), pickImage(onFile), setAdjusting(on, opacity),
+// setPalette(list), setSymmetry(mode), pickImage(onFile),
+// setAdjusting(on, opacity),
 // setAdjustBusy(busy) (the adjust bar's controls off while a photo is
 // being prepared),
 // destroy() }. destroy() removes
@@ -94,6 +99,7 @@ export function initUI(container, options = {}) {
     onion: onionCallbacks = {},
     share: shareCallbacks = {},
     onGallery = null,
+    onSymmetry = () => {},
   } = options;
   container.innerHTML = '';
 
@@ -146,6 +152,7 @@ export function initUI(container, options = {}) {
       || layersPanel.isMenuOpen
       || frameStrip.isMenuOpen
       || onionBadge.isMenuOpen
+      || symmetryMenu.isMenuOpen
       || transport.isMenuOpen;
   }
 
@@ -271,6 +278,11 @@ export function initUI(container, options = {}) {
   colorSwatch.appendChild(swatchBadge);
   rail.appendChild(colorSwatch);
 
+  // Symmetry (8b-i): a menu of modes, under the color — it changes what
+  // her pen does, so it's on the rail, not the top bar.
+  const symmetryMenu = createSymmetryMenu((mode) => onSymmetry(mode), { container: shell, signal });
+  rail.appendChild(symmetryMenu.button);
+
   const currentColor = () => canvasApi.getSettings().color;
   const picker = createColorPicker(startSettings.color, {
     onChange: (hex) => {
@@ -349,12 +361,19 @@ export function initUI(container, options = {}) {
   sizeText.textContent = 'Size';
   const sizeInput = document.createElement('input');
   sizeInput.type = 'range';
-  sizeInput.min = '1';
-  sizeInput.max = String(MAX_BRUSH_SIZE);
+  // On a curve (8b-i, size-curve.js): the slider's positions aren't
+  // pixels — most of its length is small sizes, so 1–200 still leaves
+  // fine control where she needs it. The number shows the size.
+  sizeInput.min = '0';
+  sizeInput.max = String(SIZE_SLIDER_STEPS);
+  sizeInput.step = '1';
   // Value is set by setActiveTool() below, from the active tool's
   // remembered size.
   sizeInput.addEventListener('input', () => {
-    canvasApi.setBrushSize(Number(sizeInput.value));
+    const size = sliderToSize(Number(sizeInput.value), MAX_BRUSH_SIZE);
+    canvasApi.setBrushSize(size);
+    sizeText.textContent = `Size ${size}`;
+    sizeInput.setAttribute('aria-valuetext', `${size}`);
     onSettingsChange();
   });
   sizeControl.appendChild(sizeText);
@@ -427,8 +446,10 @@ export function initUI(container, options = {}) {
     sizeInput.disabled = size === null;
     sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
     if (size !== null) {
-      sizeInput.value = String(size);
+      sizeInput.value = String(sizeToSlider(size, MAX_BRUSH_SIZE));
+      sizeInput.setAttribute('aria-valuetext', `${size}`);
     }
+    sizeText.textContent = size === null ? 'Size' : `Size ${size}`;
 
     const strength = canvasApi.getStabilizer();
     stabilizerInput.disabled = strength === null;
@@ -592,6 +613,7 @@ export function initUI(container, options = {}) {
     setHistoryState,
     setRecentColors: (list) => picker.setRecents(list),
     setPalette: (list) => picker.setPalette(list),
+    setSymmetry: (mode) => symmetryMenu.render(mode),
     pickImage,
     pickAudio,
     setAdjusting,

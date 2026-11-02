@@ -1125,6 +1125,35 @@ these forces a redo of what's built; each is additive.
   doing them in one pass touches that code once. A directional tip
   (chisel) needs its mirrored stamps to mirror the tip's angle too, not
   just the position.
+- **8b scoping (2026-11-02).** Her list: pencil, an eraser that
+  doesn't erase all the way, paintbrush, chalk/charcoal, chisel,
+  stamps (shapes, e.g. a web); smudge is how she blends.
+  - **Per-stroke buffer.** Overlapping stamps stack, so any partial
+    tip reaches full strength within one stroke. Stamps go to a stroke
+    canvas and the layer region is rebuilt from the committed copy plus
+    the stroke at the tip's strength. That's what makes a partial
+    eraser, and pencil/charcoal's lighter look, possible; at strength 1
+    it gives today's pixels. It's the engine change, so it goes in
+    first, with symmetry.
+  - **Grain is fixed to the canvas** (applied to the stroke buffer),
+    as Sketchbook's and Procreate's pencils feel — per-stamp noise
+    goes blotchy.
+  - **No pressure** (capacitive stylus), so no tapering; not faked
+    from speed.
+  - **Paintbrush is soft and streaky, not wet mixing** (his call) —
+    so it doesn't depend on the smudge rebuild.
+  - **Erase uses any tip** (his call, "see how it turns out"), as in
+    Procreate and Sketchbook.
+  - **Size:** none of her apps moves the slider's range around the
+    current size (he'd first asked for ±50 px on the rail). Procreate
+    puts the full range on a curve; Flipaclip adds a hold-and-drag on
+    the toolbar plus a Thickness slider in brush settings. Chosen: one
+    curved 1–200 range on the rail and in the panel (the panel shows
+    the number). Fallback if small sizes are fiddly on the rail:
+    Flipaclip's hold-and-drag.
+  - **Three pushes**, so symmetry reaches her while brush choices are
+    tuned: engine + symmetry + curved size; panel + tips; smudge +
+    stamps. The stamp seam is reworked once, in the first.
 - **Adjustable shortcut bar (deferred to after step 6).** The idea is to
   let her put the actions she uses most in a bar, like Clip Studio's
   command bar. It takes:

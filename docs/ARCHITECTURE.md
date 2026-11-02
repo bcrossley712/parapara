@@ -20,12 +20,15 @@ Sections: [Canvas and drawing](#canvas-and-drawing) · [Layers, undo and copying
 **Files:** `js/canvas/canvas.js` (input dispatch, tools, viewport, layer
 surfaces, committed copy — its returned API is the only way other
 modules touch the canvas), `brush.js` (brush-tip seam:
-`stamp(ctx, point, size)`), `stabilizer.js` (8a, pure: the trailing
-line), `gestures.js` (pure pan/zoom/rotate math,
+`stamp(ctx, point, size)`, point = one symmetry copy with
+`flipX`/`flipY`), `stabilizer.js` (8a, pure: the trailing
+line), `symmetry.js` (8b-i, pure: mirror points, `mergeOverlapping`),
+`size-curve.js` (8b-i, pure: the size slider's curve),
+`gestures.js` (pure pan/zoom/rotate math,
 tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`),
 `ink-map.js` (lost-canvas rule).
 
-**Constants:** `MAX_BRUSH_SIZE` (60) and `DEFAULT_COLOR` are exported
+**Constants:** `MAX_BRUSH_SIZE` (200 since 8b-i) and `DEFAULT_COLOR` are exported
 from `canvas.js` as the single source of truth. Gesture thresholds in
 `gestures.js`: 150 ms / 8 px window; zoom 0.25–8× (fit = 1×);
 double-tap gap 350 ms; third finger joins within 200 ms; three-finger
@@ -43,7 +46,25 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   not sample count), so the feel doesn't depend on the stylus's report
   rate. Strength → lag: `MAX_STABILIZER_LAG_MS` (150 ms) at 10, on a
   curve so low notches stay subtle — the one constant to tune on the
-  iPad. Symmetry (planned) mirrors the stabilizer's output points.
+  iPad. Symmetry mirrors the stabilizer's output points.
+- **Stroke buffer (8b-i)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
+  draw/erase stamps go onto one full-size stroke canvas, never the
+  layer. After each batch of stamps `composeStroke` rebuilds just the
+  newly touched boxes of the layer: committed copy, then the whole
+  stroke at `strokeStrength` (source-over, or destination-out for
+  erase). Strength is always 1 until 8b-ii's tips; at 1 the pixels
+  match stamping straight on, within a channel rounding of 1–2. Smudge
+  and fill still paint the layer directly (they read it).
+- **Symmetry (8b-i):** `project.symmetry`, set with
+  `canvasApi.setSymmetry` on open; fixed per stroke (`strokeSymmetry`,
+  taken at pointerdown). `stamp()` stamps each copy from
+  `mirrorPoints` (original, x-flip, y-flip, both — index stable);
+  smudge smears each copy between its own mirrored points; fill
+  doesn't mirror. The dirty rect is kept per copy (`dirtyParts`), and
+  a stroke whose copies don't overlap commits as `parts` — one
+  before-patch each — so undo never holds a box spanning the canvas.
+  The guide (`.pp-symmetry-guide`) is a div in the wrapper above the
+  layers, hidden while the playback picture shows (`is-playing`).
 - **Gestures — match Sketchbook defaults**
   ([why](DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -113,6 +134,18 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   commits on pointerup.
 - Every paint operation marks the dirty rect (`stamp()`, smudge step,
   fill bounds) — a mark outside it won't be undoable or revertible.
+  With symmetry, mark the copy's own part (`markDirty(rect, index)`).
+- **Draw/erase stamps go to the stroke buffer, never the layer**, and
+  only `composeStroke` moves them across. The buffer is emptied
+  (`clearStrokeBuffer`) on commit, revert, and a blocked stroke's end —
+  a new way for a stroke to end must do the same, or the next stroke
+  starts with the old one in it.
+- **Undo patches must not overlap**: commit and revert merge
+  overlapping copy boxes (`mergeOverlapping`) first — two overlapping
+  patches swapped one after the other read each other's pixels on
+  redo.
+- **A new pixel path that mirrors** goes through `mirrorPoints` with
+  `strokeSymmetry`, never the live `symmetry` (it can change mid-stroke).
 - **Nothing of a stroke outlives it.** The stabilizer's catch-up runs
   only between pointerdown and lift: `endStroke` finishes it before
   `commit()`; a touch that becomes a gesture, and `destroy`, stop it
@@ -186,7 +219,10 @@ and the glue in `main.js`.
     to that frame), **in memory only, never saved**.
   - Entries store only what changed — usually one layer cropped to the
     stroke's bounds — and hold **one patch at a time** (undo swaps in
-    "before" and keeps "after"; redo the reverse).
+    "before" and keeps "after"; redo the reverse). A mirrored stroke
+    (8b-i) is still one `'pixels'` entry, holding `parts: [{ rect,
+    patch }]` (non-overlapping) instead of `rect`/`patch`;
+    `swapPixels` swaps each.
   - Caps: **30 steps and ~150 MB**, oldest dropped first. **The byte
     budget counts undo and redo together.**
   - Capture uses **one committed copy of the active layer only** (never
@@ -1130,6 +1166,11 @@ palette — UI only), `storage/colors.js` (pure list rules,
 - Tool-settings validation lives in `canvas.js`
   (`sanitizeToolSettings`); bad fields fall back individually.
   Settings saved before 8a have no `stabilizer` and get the default (5).
+- **The size slider is on a curve (8b-i):** its value is a position
+  (0–`SIZE_SLIDER_STEPS`), never pixels — convert with `sliderToSize` /
+  `sizeToSlider` (`size-curve.js`); the label and `aria-valuetext`
+  show the size. Saved sizes stay pixels (1–`MAX_BRUSH_SIZE`). E2E sets
+  it with `setBrushSize` / checks `expectBrushSize` (helpers).
 - **The Stabilizer slider sits on the rail only until there's a brush
   panel** (his decision, 2026-11-01) — then it moves there, as in
   Flipaclip's brush settings.
@@ -1142,14 +1183,15 @@ palette — UI only), `storage/colors.js` (pure list rules,
 dismissal, destroy), `ui/gallery.js`, `ui/confirm-dialog.js`
 (`showConfirm` / `showPrompt`), `ui/icons.js`,
 `ui/settings-panel.js` (gear menu; its Developer section is
-temporary), `ui/dev-log-view.js` (DEV ONLY); screen routing in
+temporary), `ui/symmetry-menu.js` (8b-i: the rail's Symmetry button
+and menu), `ui/dev-log-view.js` (DEV ONLY); screen routing in
 `main.js`.
 
 ### How it works
 
 - **Menus vs the canvas** (after 5b, Procreate's way): a touch on the
-  canvas while a menu or popover is open (color picker, Image, layer,
-  frame, onion settings, fps, gear) only closes it — no stroke, fill or
+  canvas while a menu or popover is open (color picker, Image,
+  Symmetry, layer, frame, onion settings, fps, gear) only closes it — no stroke, fill or
   pick, and fingers joining it are ignored until all are up (the
   playback-stop swallow). **The layers panel counts too** (after 5c,
   her request — Procreate's popover): any tap outside it closes it

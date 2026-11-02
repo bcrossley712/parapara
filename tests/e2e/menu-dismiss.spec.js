@@ -37,6 +37,11 @@ const menus = [
     shown: (page) => page.locator('.pp-image-menu'),
   },
   {
+    name: 'the Symmetry menu',
+    open: (page) => page.locator('.pp-symmetry-btn').click(),
+    shown: (page) => page.locator('.pp-symmetry-menu'),
+  },
+  {
     name: 'the frame menu',
     open: (page) => page.locator('.pp-frame-strip__tile.is-current').click(),
     shown: (page) => page.locator('.pp-frame-menu'),

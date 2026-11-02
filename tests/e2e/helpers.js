@@ -7,6 +7,21 @@
 // *doesn't* happen (there's nothing to poll for).
 
 import { expect } from '@playwright/test';
+import { sizeToSlider } from '../../js/canvas/size-curve.js';
+import { MAX_BRUSH_SIZE } from '../../js/canvas/canvas.js';
+
+// The rail's size slider (on a curve since 8b-i: its value is a
+// position, not pixels). setBrushSize sets it the way a drag would
+// (value + input event) to the position for `px`; brushSizeShown reads
+// the size it says (aria-valuetext).
+export const sizeSlider = (page) => page.locator('.pp-brush-size input[type="range"]');
+export async function setBrushSize(page, px) {
+  await sizeSlider(page).evaluate((el, v) => {
+    el.value = String(v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, sizeToSlider(px, MAX_BRUSH_SIZE));
+}
+export const expectBrushSize = (page, px) => expect(sizeSlider(page)).toHaveAttribute('aria-valuetext', String(px));
 
 // Opens the app into the editor. A fresh install starts on the empty
 // gallery (2d), so this makes a new animation from there; an install

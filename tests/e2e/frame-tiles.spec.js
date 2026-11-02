@@ -13,7 +13,7 @@
 // take to fill in on the iPad.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, closeLayersPanel } from './helpers.js';
+import { openApp, reloadApp, closeLayersPanel, setBrushSize } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const addFrameBtn = (page) => page.getByRole('button', { name: 'Add frame' });
@@ -88,7 +88,7 @@ test('a tile shows its frame and keeps its number; a new frame starts as blank p
   await openApp(page);
   await settled(page);
   // A thick stroke on the left half of frame 1.
-  await page.getByRole('slider', { name: 'Size' }).fill('60');
+  await setBrushSize(page, 60);
   await stroke(page, 200, 300, 800, 800);
   await expect.poll(() => darkIn(page, 1)).toBeGreaterThan(20);
   const one = await tilePixels(page, 1);
@@ -109,7 +109,7 @@ test('a tile shows its frame and keeps its number; a new frame starts as blank p
 test('undo and redo update the tile', async ({ page }) => {
   await openApp(page);
   await settled(page);
-  await page.getByRole('slider', { name: 'Size' }).fill('60');
+  await setBrushSize(page, 60);
   await stroke(page, 300, 300, 1500, 700);
   await expect.poll(() => darkIn(page, 1)).toBeGreaterThan(20);
   await page.getByRole('button', { name: 'Undo' }).click();
@@ -121,7 +121,7 @@ test('undo and redo update the tile', async ({ page }) => {
 test("hiding a layer updates every frame's tile, and showing it brings them back", async ({ page }) => {
   await openApp(page);
   await settled(page);
-  await page.getByRole('slider', { name: 'Size' }).fill('60');
+  await setBrushSize(page, 60);
   await stroke(page, 300, 300, 1500, 700);
   await addFrame(page);
   await stroke(page, 300, 700, 1500, 300);
@@ -180,7 +180,7 @@ test("a tile shows its frame's photo unless Hide images is on", async ({ page })
 test('tiles are drawn again after reopening the project', async ({ page }) => {
   await openApp(page);
   await settled(page);
-  await page.getByRole('slider', { name: 'Size' }).fill('60');
+  await setBrushSize(page, 60);
   await stroke(page, 300, 300, 1500, 700);
   await addFrame(page);
   await goToFrame(page, 1);

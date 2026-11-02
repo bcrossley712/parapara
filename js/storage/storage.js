@@ -139,6 +139,7 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     palette: [],                   // saved swatches (2e) — see colors.js
     referenceHidden: false,        // Hide images (3a); missing = false
     exportImages: false,           // Include images in the video (6d); missing = false
+    symmetry: 'off',               // 8b-i: 'off' | 'vertical' | 'horizontal' | 'both'; missing = 'off'
     audioClips: [],
   };
 }

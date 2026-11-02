@@ -40,6 +40,7 @@
 // into timeline/storage internals directly.
 
 import { roundBrush } from './brush.js';
+import { mirrorPoints, mergeOverlapping, sanitizeSymmetry } from './symmetry.js';
 import { createStabilizer, MAX_STABILIZER, DEFAULT_STABILIZER } from './stabilizer.js';
 import {
   distance,
@@ -76,8 +77,10 @@ const DEFAULT_HEIGHT = 1080;
 // Upper bound for brush size — shared with ui.js (imported there for
 // the size slider's max) so the two don't drift out of sync, and used
 // here to size the smudge tool's scratch canvas once instead of
-// reallocating it per stroke.
-export const MAX_BRUSH_SIZE = 60;
+// reallocating it per stroke. 200 since 8b-i (was 60): the slider is
+// on a curve (size-curve.js), so the bigger range doesn't cost
+// precision at small sizes.
+export const MAX_BRUSH_SIZE = 200;
 
 // Smudge: how strongly each individual step blends sampled pixels
 // into the new position (0 = no effect, 1 = fully replaces), and how
@@ -195,6 +198,27 @@ export function initCanvas(container, options = {}) {
   // (reference.js). main.js tells it what to show; adjust mode (below)
   // moves it.
   const reference = createReferenceView(stack, width, height);
+
+  // Symmetry guide (8b-i): faint lines on the axes, inside the wrapper
+  // so they turn and zoom with the page. Display only — not a layer,
+  // never in readVisible, thumbnails, playback or the export. Kept
+  // above the layers (applyLayers) and hidden while the playback
+  // picture shows.
+  const symmetryGuide = document.createElement('div');
+  symmetryGuide.className = 'pp-symmetry-guide';
+  symmetryGuide.hidden = true;
+  const guideVertical = document.createElement('div');
+  guideVertical.className = 'pp-symmetry-guide__line pp-symmetry-guide__line--vertical';
+  const guideHorizontal = document.createElement('div');
+  guideHorizontal.className = 'pp-symmetry-guide__line pp-symmetry-guide__line--horizontal';
+  symmetryGuide.append(guideVertical, guideHorizontal);
+  stack.appendChild(symmetryGuide);
+
+  function renderSymmetryGuide() {
+    symmetryGuide.hidden = symmetry === 'off';
+    guideVertical.hidden = !(symmetry === 'vertical' || symmetry === 'both');
+    guideHorizontal.hidden = !(symmetry === 'horizontal' || symmetry === 'both');
+  }
 
   // Ink maps (see ink-map.js): which coarse cells of each layer have
   // paint, and which cells she has edited since the last check.
@@ -382,13 +406,15 @@ export function initCanvas(container, options = {}) {
       // append() moves an existing child, so this also re-orders.
       stack.appendChild(surface.canvas);
     }
-    // The playback picture (4b) stays above every layer.
+    // The symmetry guide (8b-i) above the layers, the playback picture
+    // (4b) above everything.
+    stack.appendChild(symmetryGuide);
     if (playbackCanvas) stack.appendChild(playbackCanvas);
 
     if (activeLayerId === null) {
       const top = order[order.length - 1];
       if (top !== undefined) activate(top);
-      else dirty = null;
+      else clearDirty();
     }
   }
 
@@ -464,6 +490,7 @@ export function initCanvas(container, options = {}) {
 
   function freePlaybackCanvas() {
     if (!playbackCanvas) return;
+    stack.classList.remove('is-playing');
     playbackCanvas.remove();
     playbackCanvas.width = 0;
     playbackCanvas.height = 0;
@@ -507,9 +534,89 @@ export function initCanvas(container, options = {}) {
   // Canvas-pixel box around everything painted since the last commit
   // (unclamped; clamped at commit). null = nothing uncommitted.
   let dirty = null;
+  // The same, one box per symmetry copy (8b-i; index = mirrorPoints'
+  // order, 0 = the stroke itself). Undo keeps these instead of their
+  // union: with 'both', a stroke near a corner has copies in all four
+  // corners, and their union would be most of the canvas (~8 MB per
+  // undo step). Without symmetry there's only part 0 — same as `dirty`.
+  let dirtyParts = [];
 
-  function markDirty(rect) {
+  function markDirty(rect, part = 0) {
     dirty = unionRect(dirty, rect);
+    dirtyParts[part] = unionRect(dirtyParts[part] ?? null, rect);
+  }
+
+  function clearDirty() {
+    dirty = null;
+    dirtyParts = [];
+  }
+
+  // --- the stroke buffer (8b-i) ---
+  //
+  // Draw/erase stamps don't go onto the layer: they go onto this
+  // full-size canvas, and the touched part of the layer is rebuilt as
+  // committed copy + stroke, at the stroke's strength. Overlapping
+  // stamps stack, so a see-through tip stamped straight onto the layer
+  // would reach full strength within one stroke; through the buffer
+  // the whole stroke is applied once — what an eraser that "doesn't
+  // erase all the way" (8b-ii) needs. At strength 1 the result is the
+  // same pixels as stamping straight on (source-over and
+  // destination-out both compose that way). Created once and kept,
+  // like the committed copy; cleared when the stroke ends either way.
+  let strokeCanvas = null;
+  let strokeCtx = null;
+  renewStrokeCanvas();
+
+  function renewStrokeCanvas() {
+    if (strokeCanvas) {
+      strokeCanvas.width = 0;
+      strokeCanvas.height = 0;
+    }
+    strokeCanvas = document.createElement('canvas');
+    strokeCanvas.width = width;
+    strokeCanvas.height = height;
+    strokeCtx = strokeCanvas.getContext('2d');
+  }
+
+  // What the stroke in progress is: erase or draw, and how strongly it
+  // applies (always 1 until 8b-ii's tips have a strength).
+  let strokeErase = false;
+  let strokeStrength = 1;
+  // Boxes stamped since the layer was last rebuilt, per symmetry copy.
+  let pendingParts = [];
+
+  function markPending(rect, part) {
+    pendingParts[part] = unionRect(pendingParts[part] ?? null, rect);
+  }
+
+  // Rebuilds the layer where the stroke has stamped since last time:
+  // committed pixels, then the whole stroke (it holds every stamp so
+  // far) at its strength. Only those boxes, so a long stroke costs no
+  // more per move than a short one.
+  function composeStroke() {
+    const rects = mergeOverlapping(pendingParts.map((r) => clampRect(r, width, height)));
+    pendingParts = [];
+    if (!ctx) return;
+    for (const r of rects) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      ctx.clearRect(r.x, r.y, r.w, r.h);
+      ctx.drawImage(committedCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+      ctx.globalAlpha = strokeStrength;
+      ctx.globalCompositeOperation = strokeErase ? 'destination-out' : 'source-over';
+      ctx.drawImage(strokeCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+      ctx.restore();
+    }
+  }
+
+  // Empties the stroke buffer where this stroke stamped. Called when a
+  // stroke commits, is reverted, or is dropped — nothing of a stroke
+  // outlives it.
+  function clearStrokeBuffer() {
+    pendingParts = [];
+    const r = clampRect(dirty, width, height);
+    if (r) strokeCtx.clearRect(r.x, r.y, r.w, r.h);
   }
 
   // Copies `rect` of the main canvas into the committed copy.
@@ -521,35 +628,62 @@ export function initCanvas(container, options = {}) {
   // Puts the committed pixels back over everything uncommitted — how a
   // touch that became a gesture loses its first mark (or fill).
   function revertUncommitted() {
+    clearStrokeBuffer();
+    const rects = committedParts();
     const rect = clampRect(dirty, width, height);
-    dirty = null;
+    clearDirty();
     if (!rect) return;
     emitDebug('revert', { layer: activeLayerId, rect: `${rect.x},${rect.y} ${rect.w}x${rect.h}` });
-    noteEdit(activeLayerId, rect);
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
-    ctx.clearRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.drawImage(committedCanvas, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+    for (const r of rects) {
+      noteEdit(activeLayerId, r);
+      ctx.clearRect(r.x, r.y, r.w, r.h);
+      ctx.drawImage(committedCanvas, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+    }
     ctx.restore();
+  }
+
+  // The uncommitted boxes, clamped to the page, with overlapping ones
+  // merged — what commit and revert work on.
+  function committedParts() {
+    return mergeOverlapping(dirtyParts.map((r) => clampRect(r, width, height)));
   }
 
   // Commits whatever is dirty: reads the "before" patch from the copy,
   // syncs the copy, and tells listeners. Nothing dirty (a smudge tap
   // with no drag, a fill on an already-filled area) = no change at all,
   // so no undo step and no save.
+  //
+  // A mirrored stroke (8b-i) whose copies don't overlap commits as
+  // `parts` — one before-patch per copy — so undo holds only what
+  // changed. `rect` is then the box around all of them (for the log).
   function commit() {
+    clearStrokeBuffer();
+    const rects = committedParts();
     const rect = clampRect(dirty, width, height);
-    dirty = null;
-    if (!rect) return;
-    const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
-    syncCommitted(rect);
-    notifyChange({ rect, before, layerId: activeLayerId, tool });
+    clearDirty();
+    if (!rect || rects.length === 0) return;
+    if (rects.length === 1) {
+      const only = rects[0];
+      const before = committedCtx.getImageData(only.x, only.y, only.w, only.h);
+      syncCommitted(only);
+      notifyChange({ rect: only, before, layerId: activeLayerId, tool });
+      return;
+    }
+    const parts = rects.map((r) => ({ rect: r, before: committedCtx.getImageData(r.x, r.y, r.w, r.h) }));
+    for (const r of rects) syncCommitted(r);
+    notifyChange({ rect, before: null, parts, layerId: activeLayerId, tool });
   }
 
   let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
   let brush = roundBrush; // only tip today — see brush.js for the seam
   let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
+  // Symmetry (8b-i): the project's mode (main.js sets it per project),
+  // and the mode the stroke in progress started with.
+  let symmetry = 'off';
+  let strokeSymmetry = 'off';
 
   // Per-tool brush size memory — draw/erase/smudge each remember
   // their own size independently (matches how Procreate/Sketchbook/
@@ -605,6 +739,8 @@ export function initCanvas(container, options = {}) {
   function applyViewport() {
     stack.style.transform =
       `translate(${viewportX}px, ${viewportY}px) rotate(${viewportRotation}rad) scale(${viewportScale})`;
+    // The symmetry guide keeps the same on-screen thickness at any zoom.
+    stack.style.setProperty('--pp-view-scale', String(viewportScale));
   }
 
   function resetViewport() {
@@ -743,10 +879,18 @@ export function initCanvas(container, options = {}) {
   // --- draw/erase: stamp the active brush along the smoothed path ---
 
   // Every draw/erase stamp goes through here so the dirty rect can't
-  // miss one.
+  // miss one. Stamps land in the stroke buffer (composeStroke puts
+  // them on the layer), once per symmetry copy (8b-i) — the point is
+  // already the stabilizer's output, so the copies trail with it. Each
+  // copy carries flipX/flipY so a directional tip can mirror itself.
   function stamp(point, size) {
-    brush.stamp(ctx, point, size);
-    markDirty(rectAroundPoint(point, size));
+    const copies = mirrorPoints(point, strokeSymmetry, width, height);
+    for (let i = 0; i < copies.length; i++) {
+      brush.stamp(strokeCtx, copies[i], size);
+      const rect = rectAroundPoint(copies[i], size);
+      markDirty(rect, i);
+      markPending(rect, i);
+    }
   }
 
   function stampAlongLine(a, b) {
@@ -780,7 +924,7 @@ export function initCanvas(container, options = {}) {
 
   // --- smudge: sample a patch behind the stroke, blend it forward ---
 
-  function smudgeStep(from, to, size) {
+  function smudgeStep(from, to, size, part = 0) {
     const half = size / 2;
 
     // Sample a patch centered on the previous position, then paint it
@@ -804,7 +948,7 @@ export function initCanvas(container, options = {}) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(scratchCanvas, 0, 0, size, size, to.x - half, to.y - half, size, size);
     ctx.restore();
-    markDirty(rectAroundPoint(to, size));
+    markDirty(rectAroundPoint(to, size), part);
   }
 
   // Bug fix: smudge originally called smudgeStep once per pointer
@@ -821,12 +965,16 @@ export function initCanvas(container, options = {}) {
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
     const steps = Math.max(1, Math.ceil(dist / spacing));
 
-    let prev = from;
+    // Symmetry (8b-i): each copy smears between its own mirrored
+    // points. Smudge picks its paint up from the layer, so every copy
+    // carries the colors on its own side.
+    let prev = mirrorPoints(from, strokeSymmetry, width, height);
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       const point = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
-      smudgeStep(prev, point, size);
-      prev = point;
+      const next = mirrorPoints(point, strokeSymmetry, width, height);
+      for (let c = 0; c < next.length; c++) smudgeStep(prev[c], next[c], size, c);
+      prev = next;
     }
   }
 
@@ -1056,6 +1204,8 @@ export function initCanvas(container, options = {}) {
     p0 = null;
     p1 = point;
     stopStabilizer();
+    // Fixed for the whole stroke, so changing it can't split one.
+    strokeSymmetry = symmetry;
     if (strokeBlocked) return;
 
     if (tool === 'smudge') {
@@ -1067,12 +1217,19 @@ export function initCanvas(container, options = {}) {
       return;
     }
 
-    ctx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
-    ctx.fillStyle = color;
+    // Stamps go into the stroke buffer at full opacity in the stroke's
+    // color (erase's color doesn't matter, only its coverage);
+    // composeStroke applies them to the layer as paint or erasing.
+    strokeErase = tool === 'erase';
+    strokeStrength = 1;
+    strokeCtx.globalCompositeOperation = 'source-over';
+    strokeCtx.globalAlpha = 1;
+    strokeCtx.fillStyle = strokeErase ? '#000000' : color;
 
     // Stamp once immediately so a tap with no movement still leaves a
     // mark instead of rendering nothing.
     stamp(point, brushSizes[tool]);
+    composeStroke();
     startStabilizer(point, time);
   }
 
@@ -1103,6 +1260,7 @@ export function initCanvas(container, options = {}) {
       const mid2 = stampMidpoint(p1, p2);
       stampAlongQuadratic(mid1, p1, mid2);
     }
+    composeStroke();
 
     p0 = p1;
     p1 = p2;
@@ -1123,7 +1281,8 @@ export function initCanvas(container, options = {}) {
     if (strokeBlocked) {
       const reason = strokeBlocked;
       strokeBlocked = null;
-      dirty = null;
+      clearStrokeBuffer();
+      clearDirty();
       for (const listener of blockedListeners) listener(reason);
       return;
     }
@@ -1141,8 +1300,15 @@ export function initCanvas(container, options = {}) {
   // change = { rect, before, layerId, tool }: the committed rect, its
   // pixels before the edit (ImageData), the layer it was on, and what
   // made it (a TOOLS name, or 'clear' / 'dev' for the gear menu's).
+  // A mirrored stroke (8b-i) instead has before: null and
+  // parts: [{ rect, before }] (non-overlapping); rect then surrounds
+  // them all.
   function notifyChange(change) {
-    noteEdit(change.layerId, change.rect);
+    if (change.parts) {
+      for (const part of change.parts) noteEdit(change.layerId, part.rect);
+    } else {
+      noteEdit(change.layerId, change.rect);
+    }
     for (const listener of changeListeners) listener(change);
   }
 
@@ -1637,7 +1803,7 @@ export function initCanvas(container, options = {}) {
     canvas = surface.canvas;
     ctx = surface.ctx;
     canvas.classList.add('pp-layer--active');
-    dirty = null;
+    clearDirty();
     syncCommitted({ x: 0, y: 0, w: width, h: height });
     return true;
   }
@@ -1679,6 +1845,17 @@ export function initCanvas(container, options = {}) {
     },
     setColor(hex) {
       color = hex;
+    },
+
+    // Symmetry (8b-i): 'off' | 'vertical' | 'horizontal' | 'both'
+    // (anything else is off). Per project — main.js sets it on open.
+    // Takes effect from the next stroke; shows or hides the guide.
+    setSymmetry(mode) {
+      symmetry = sanitizeSymmetry(mode);
+      renderSymmetryGuide();
+    },
+    getSymmetry() {
+      return symmetry;
     },
 
     // Eyedropper (see above). Arming while a touch is down waits for
@@ -1820,7 +1997,8 @@ export function initCanvas(container, options = {}) {
 
     // Calls `listener({ rect, before, layerId })` after every committed
     // edit (stroke end, fill, clear) — before is the rect's ImageData
-    // from before the edit. Returns an unsubscribe function.
+    // from before the edit. A mirrored stroke (8b-i) gives
+    // `parts: [{ rect, before }]` instead, with before null. Returns an unsubscribe function.
     onChange(listener) {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
@@ -1930,7 +2108,7 @@ export function initCanvas(container, options = {}) {
       if (!surface) return 'ok';
       const status = fillSurface(surface, image);
       if (id === activeLayerId) {
-        dirty = null;
+        clearDirty();
         syncCommitted({ x: 0, y: 0, w: width, h: height });
       }
       return status;
@@ -1996,7 +2174,7 @@ export function initCanvas(container, options = {}) {
       order = [];
       canvas = null;
       ctx = null;
-      for (const c of [committedCanvas, scratchCanvas]) {
+      for (const c of [committedCanvas, scratchCanvas, strokeCanvas]) {
         c.width = 0;
         c.height = 0;
       }
@@ -2043,6 +2221,7 @@ export function initCanvas(container, options = {}) {
         playbackCanvas.height = height;
         playbackCanvas.className = 'pp-layer pp-playback';
         stack.appendChild(playbackCanvas);
+        stack.classList.add('is-playing');
       }
       return playbackCanvas.getContext('2d');
     },

@@ -139,6 +139,7 @@ import {
 import { createRecorder, micError, micSettings } from './audio/recorder.js';
 import { computePeaks } from './audio/peaks.js';
 import { prepareImport } from './canvas/reference.js';
+import { sanitizeSymmetry } from './canvas/symmetry.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
 
@@ -981,6 +982,8 @@ function mountEditor(session, { canSave }) {
   project.audioClips = sanitizeAudioClips(project.audioClips);
   // Include images (6d): older projects have none (missing = off).
   project.exportImages = project.exportImages === true;
+  // Symmetry (8b-i): older projects have none (missing = off).
+  project.symmetry = sanitizeSymmetry(project.symmetry);
 
   // Activity log (dev only): a frame as "f3#1a2b" (its position, then
   // the end of its id, which never changes), a layer or blob id short.
@@ -1071,6 +1074,9 @@ function mountEditor(session, { canSave }) {
       },
     },
     // A setting, like fps: doesn't stop playback.
+    // Symmetry (8b-i): the rail's menu. Per project, saved, not undoable
+    // (like the palette).
+    onSymmetry: afterPlayback((mode) => setSymmetry(mode)),
     onion: {
       onToggle: () => setOnion({ on: !project.onionSkin.on }),
       onChange: (changes) => setOnion(changes),
@@ -1190,6 +1196,8 @@ function mountEditor(session, { canSave }) {
   for (const image of savedImages.values()) image.close?.();
   savedImages.clear();
   canvasApi.setReferenceHidden(project.referenceHidden === true);
+  canvasApi.setSymmetry(project.symmetry);
+  ui.setSymmetry(project.symmetry);
   applyReference(session.frame, savedReference);
   project.activeLayerId = canvasApi.getActiveLayerId();
   // Settings may have been cleaned up by the canvas (bad saved values).
@@ -1471,6 +1479,16 @@ function mountEditor(session, { canSave }) {
   // Include images (6d), from the sheet's switch: saved on the project
   // (a tracing project and a background one want opposite answers).
   // Separate from Hide images, which is only what she sees.
+  function setSymmetry(mode) {
+    const next = sanitizeSymmetry(mode);
+    if (next === project.symmetry) return;
+    project.symmetry = next;
+    canvasApi.setSymmetry(next);
+    ui.setSymmetry(next);
+    devLog.add('symmetry', { mode: next });
+    scheduleProjectSave();
+  }
+
   function setExportImages(on) {
     if (exporting || ui.exportSheet.phase !== 'start') return;
     project.exportImages = on;
@@ -2064,7 +2082,9 @@ function mountEditor(session, { canSave }) {
   // --- undo/redo (step 2b; layer entries added in 2c) ---
   //
   // One project-wide history, never saved. Entry types:
-  //   'pixels'        { frameId, layerId, rect, patch, bytes }
+  //   'pixels'        { frameId, layerId, rect, patch, bytes }, or for a
+  //                   mirrored stroke (8b-i) { frameId, layerId,
+  //                   parts: [{ rect, patch }], bytes }
   //   'layer-add'     { record }  record = { layer, index, refs, blob }
   //   'layer-delete'  { record }
   //   'layer-move'    { layerId, from, to }
@@ -2154,13 +2174,26 @@ function mountEditor(session, { canSave }) {
   }
 
   function swapPixels(entry) {
-    const patch = canvasApi.swapRegion(entry.rect, entry.patch, entry.layerId);
-    if (!patch) throw new Error(`Undo entry for missing layer ${entry.layerId}`);
+    let swapped;
+    if (entry.parts) {
+      // A mirrored stroke (8b-i): its rects never overlap, so each
+      // swaps on its own.
+      const parts = entry.parts.map((part) => {
+        const patch = canvasApi.swapRegion(part.rect, part.patch, entry.layerId);
+        if (!patch) throw new Error(`Undo entry for missing layer ${entry.layerId}`);
+        return { rect: part.rect, patch };
+      });
+      swapped = { ...entry, parts, bytes: parts.reduce((sum, p) => sum + p.patch.data.byteLength, 0) };
+    } else {
+      const patch = canvasApi.swapRegion(entry.rect, entry.patch, entry.layerId);
+      if (!patch) throw new Error(`Undo entry for missing layer ${entry.layerId}`);
+      swapped = { ...entry, patch, bytes: patch.data.byteLength };
+    }
     unsavedLayers.add(entry.layerId);
     if (session.frame.id === project.frames[0]) thumbnailStale = true;
     frameCache.touch(session.frame.id);
     panel.refreshThumbnail(entry.layerId);
-    return { ...entry, patch, bytes: patch.data.byteLength };
+    return swapped;
   }
 
   function applyMove(layerId, toIndex) {
@@ -2254,17 +2287,29 @@ function mountEditor(session, { canSave }) {
     if (history.redo((e) => applyEntry(e, 'redo'))) autosaver?.schedule();
   }
 
-  canvasApi.onChange(({ rect, before, layerId, tool }) => {
-    devLog.add('stroke', { tool, frame: tag(session.frame.id), layer: short(layerId), rect: `${rect.w}x${rect.h}` });
-    if (tool === 'draw' || tool === 'fill') noteColorUsed(canvasApi.getSettings().color);
-    history.push({
-      type: 'pixels',
-      frameId: session.frame.id,
-      layerId,
-      rect,
-      patch: before,
-      bytes: before.data.byteLength,
+  canvasApi.onChange(({ rect, before, parts, layerId, tool }) => {
+    devLog.add('stroke', {
+      tool, frame: tag(session.frame.id), layer: short(layerId), rect: `${rect.w}x${rect.h}`,
+      ...(parts ? { parts: parts.length } : {}),
     });
+    if (tool === 'draw' || tool === 'fill') noteColorUsed(canvasApi.getSettings().color);
+    // A mirrored stroke (8b-i) keeps one patch per copy, in one entry.
+    history.push(parts
+      ? {
+        type: 'pixels',
+        frameId: session.frame.id,
+        layerId,
+        parts: parts.map((p) => ({ rect: p.rect, patch: p.before })),
+        bytes: parts.reduce((sum, p) => sum + p.before.data.byteLength, 0),
+      }
+      : {
+        type: 'pixels',
+        frameId: session.frame.id,
+        layerId,
+        rect,
+        patch: before,
+        bytes: before.data.byteLength,
+      });
     markUnsaved(layerId);
     panel.refreshThumbnail(layerId);
   });

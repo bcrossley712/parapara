@@ -4,19 +4,15 @@
 // Run: npm run test:e2e
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, setVisibility, waitForToolSettings } from './helpers.js';
+import {
+  openApp, reloadApp, setVisibility, waitForToolSettings, sizeSlider, setBrushSize, expectBrushSize,
+} from './helpers.js';
 
 const toolButton = (page, name) => page.getByRole('button', { name, exact: true });
-const sizeSlider = (page) => page.locator('.pp-brush-size input[type="range"]');
 const swatchColor = (page) => page.locator('.pp-color-swatch').evaluate((el) => el.style.background);
 
-// Sets the range input the way a finger drag would: value + input event.
-async function setSize(page, value) {
-  await sizeSlider(page).evaluate((el, v) => {
-    el.value = String(v);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  }, value);
-}
+// Sets the size slider the way a finger drag would (helpers.js).
+const setSize = setBrushSize;
 
 async function setColorViaHex(page, hex) {
   await page.locator('.pp-color-swatch').click();
@@ -31,7 +27,7 @@ async function setColorViaHex(page, hex) {
 test('first launch uses the defaults', async ({ page }) => {
   await openApp(page);
   await expect(toolButton(page, 'Draw')).toHaveClass(/is-active/);
-  await expect(sizeSlider(page)).toHaveValue('6');
+  await expectBrushSize(page, 6);
 });
 
 test('tool, color and per-tool sizes survive a reload', async ({ page }) => {
@@ -52,14 +48,14 @@ test('tool, color and per-tool sizes survive a reload', async ({ page }) => {
   await reloadApp(page);
 
   await expect(toolButton(page, 'Smudge')).toHaveClass(/is-active/);
-  await expect(sizeSlider(page)).toHaveValue('9');
+  await expectBrushSize(page, 9);
   expect(await swatchColor(page)).toBe('rgb(255, 136, 0)');
 
   // Each tool kept its own size.
   await toolButton(page, 'Draw').click();
-  await expect(sizeSlider(page)).toHaveValue('20');
+  await expectBrushSize(page, 20);
   await toolButton(page, 'Erase').click();
-  await expect(sizeSlider(page)).toHaveValue('45');
+  await expectBrushSize(page, 45);
 });
 
 test('Fill as the last tool reopens with the size slider disabled', async ({ page }) => {
@@ -90,10 +86,12 @@ test('the remembered color is what actually gets drawn', async ({ page }) => {
     const c = document.querySelector('.pp-layer--active');
     return Array.from(c.getContext('2d').getImageData(960, 540, 1, 1).data);
   });
-  // ±1 per channel: overlapping anti-aliased stamp edges at sub-pixel
-  // positions (the stabilizer's, since 8a) can round a channel by one.
+  // ±2 per channel: overlapping anti-aliased stamp edges at sub-pixel
+  // positions (the stabilizer's, since 8a) can round a channel by one,
+  // and since 8b-i the stroke reaches the layer through the stroke
+  // buffer, which now and then rounds once more (seen: 168 for 170).
   const expected = [0, 170, 85, 255];
-  pixel.forEach((v, i) => expect(Math.abs(v - expected[i])).toBeLessThanOrEqual(1));
+  pixel.forEach((v, i) => expect(Math.abs(v - expected[i])).toBeLessThanOrEqual(2));
   expect(pixel[3]).toBe(255);
 });
 
@@ -125,9 +123,9 @@ test('corrupted saved settings fall back to defaults instead of breaking startup
   await reloadApp(page);
 
   await expect(toolButton(page, 'Draw')).toHaveClass(/is-active/);
-  await expect(sizeSlider(page)).toHaveValue('6');   // 999 rejected
+  await expectBrushSize(page, 6);   // 999 rejected
   await toolButton(page, 'Erase').click();
-  await expect(sizeSlider(page)).toHaveValue('12');  // valid one kept
+  await expectBrushSize(page, 12);  // valid one kept
 });
 
 // ---------------- stabilizer (8a) ----------------
