@@ -511,10 +511,14 @@ test('Set start: where it stops is the new start, as one undo step', async ({ pa
   await importSound(page, { buffer: wav(3) });
   await setStartBtn(page).click();
   await expect(setStartBtn(page)).toHaveText('Stop');
-  // The part moves along with the song.
+  // The part moves along with the song. Wait for 10% of the track
+  // (~0.3 s of this 3 s song) before stopping, so the stop always lands
+  // past the 0.1 s check below — a fixed 5 px was only ~0.02 s, and a
+  // stop right after it failed CI once (2026-11-01).
   const window0 = await page.locator('.pp-sound-panel__window').boundingBox();
+  const track = await page.locator('.pp-sound-panel__window').evaluate((el) => el.parentElement.getBoundingClientRect().width);
   await expect.poll(async () => (await page.locator('.pp-sound-panel__window').boundingBox()).x, { timeout: 5000 })
-    .toBeGreaterThan(window0.x + 5);
+    .toBeGreaterThan(window0.x + track * 0.1);
   await setStartBtn(page).click();
   await expect(setStartBtn(page)).toHaveText('Set start');
   const moved = await savedClipWhere(page, (c) => c.trimStart > 0.1);
