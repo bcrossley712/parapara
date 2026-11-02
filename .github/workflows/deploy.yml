@@ -7,6 +7,13 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    # A push that changes only the notes skips testing and deploying —
+    # nothing in the app changed. If any other file changes too, the
+    # whole workflow runs. Never add app or test paths here.
+    paths-ignore:
+      - 'PROJECT_NOTES.md'
+      - 'docs/**'
+      - 'README.md'
   workflow_dispatch: # allows a manual re-run from the Actions tab
 
 permissions:

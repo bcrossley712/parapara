@@ -119,7 +119,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   Listen/Set start) and export (MP4 with sound through the share
   sheet, Include images per project); **7a** project files (gallery ⋯
   → Save as file, top bar → Import); **7b** automatic backup to
-  Cloudflare and restore (both verified 2026-11-02); **8a** stabilizer
+  Cloudflare and restore (both verified 2026-11-02; decisions in
+  [design notes](docs/DESIGN_NOTES.md#planned-features) → "Backup (7b
+  scoping)"); **8a** stabilizer
   (as she expects, 2026-11-02); **8b-i** symmetry, stroke buffer and
   curved size (verified 2026-11-02). How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
@@ -134,35 +136,23 @@ links):
    then flip drawing:
    - **8b-i — done**, with its QOL (layers panel stays open on frame
      taps, no long-press selection; verified 2026-11-02).
-   - **8b-ii — built, not pushed** (checks below): brush panel (tap the selected Draw/Erase
-     button; tips, size with the number shown, strength, Stabilizer
-     moves here), with Pencil, Chalk/charcoal (canvas-fixed paper
-     grain), Chisel (fixed angle), Paintbrush (soft and streaky, no
-     wet mixing) and a Soft tip. **Erase can use any tip**, with its
-     own strength (her "eraser that doesn't erase all the way").
-     Decided 2026-11-02: today's hard round tip stays as **Pen**, the
-     default, so nothing she has changes; size and strength are kept
-     per tool *and* tip (Draw-Pencil ≠ Erase-Pencil); last tip per
-     tool; Stabilizer stays per tool (Flipaclip has it per brush — a
-     deliberate departure); strength applies per stroke (a stroke
-     doesn't darken where it crosses itself, the next one does);
-     the Draw/Erase buttons show the tip's name; no three-finger
-     swipe for brushes; no panel for Smudge/Fill until 8b-iii.
+   - **8b-ii — pushed, awaiting iPad checks** (below): the brush
+     panel (tap the selected Draw/Erase button) with Pen (today's tip,
+     still the default), Pencil, Chalk/charcoal, Chisel, Paintbrush
+     and Soft; Erase takes any tip with its own strength; the
+     Stabilizer moved into the panel. Decisions: [design
+     notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
+     → "8b-ii decisions"; how it works: ARCHITECTURE → Canvas and
+     drawing.
    - **8b-iii:** smudge rebuilt for blending (she uses it to blend —
      any way that achieves it is fine) on the soft tip, with its own
      strength; stamps (a tap places one shape, a drag leaves a spaced
-     trail; shapes drawn by us, e.g. a web, star, heart).
+     trail; a few shapes drawn by us, e.g. a web, star, heart — her
+     list, not a library).
 2. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
 3. The rest of the requested extras under Open items.
-
-Step 7's decisions (passkey with PRF instead of a recovery code,
-encryption on the iPad, one invite per family, what's kept and for how
-long, cost guards, the app staying at `bcrossley712.github.io`) are in
-[design notes](docs/DESIGN_NOTES.md#planned-features) → "Backup (7b
-scoping)"; how it works is in [ARCHITECTURE →
-Backup](docs/ARCHITECTURE.md#backup).
 
 **Open iPad checks** (send the activity log with any of them):
 - **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
@@ -290,18 +280,8 @@ if it shows:
   - **Flip drawing** (was 3c; the layer menu it goes in was built in
     4d): Flip H/V items in the layer menu. Flip = active layer, this
     frame, one `'pixels'` undo entry; lock/hide refuse it.
-  - **Symmetry** (was 3d): rail toggle, vertical/horizontal/both,
-    fixed axis at canvas center (not movable), saved per project; draw,
-    erase and smudge mirror, fill doesn't. Mirrored stamps must grow the
-    dirty rect.
-  - **Brush variety** — scoped into 8b (Current state → Next). A
-    directional tip's mirrored stamp must mirror its angle too.
-  - **Stabilizer — built in 8a.** Symmetry must mirror
-    its output points, not the raw stylus.
-  - **Erasers and bigger sizes** — in 8b: Erase uses any tip with a
-    strength; sizes go to 1–200 on a curved slider (most of its length
-    on small sizes), the norm in Procreate, rather than widening a
-    linear slider.
+  - Symmetry, brush variety, the stabilizer and erasers: built in 8
+    (Current state).
 - **Frame-cache encode timeout?** The cache flattens with `toBlob`
   (`encodePNG`); a `toBlob` that never calls back (seen on the sandbox
   build) would keep "Getting ready" up forever. Same fix as
@@ -552,7 +532,10 @@ fails a random set each run; CI is the full check):**
    once** (`npx playwright test --last-failed`); a test that passes on
    the rerun was the stall. Investigate only one that fails twice.
 3. **On every push:** CI runs the full suite on 4 workers and blocks
-   the deploy on any failure — the real gate. A cross-area failure
+   the deploy on any failure — the real gate. **A push that changes
+   only `PROJECT_NOTES.md`, `docs/` or `README.md` runs nothing** (no
+   tests, no deploy — `paths-ignore` in `deploy.yml`); a push that
+   also changes any app or test file runs everything. A cross-area failure
    caught here costs one fix-and-push; nothing broken reaches the
    iPad.
 
