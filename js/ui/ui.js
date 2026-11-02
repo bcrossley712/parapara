@@ -262,9 +262,13 @@ export function initUI(container, options = {}) {
   // Tapping the tool that's already chosen opens its brush panel
   // (draw and erase, 8b-ii) — as the current frame tile opens its menu.
   const toolButtons = {};
+  // With the eyedropper armed, tapping the current tool only cancels
+  // it — she's going back to drawing, not to her brush settings.
   const pickTool = (tool) => {
+    const wasPicking = canvasApi.isEyedropperArmed();
     setEyedropperArmed(false); // picking a tool cancels the eyedropper
     if (canvasApi.getSettings().tool === tool && BRUSH_PANEL_TOOLS.includes(tool)) {
+      if (wasPicking) return;
       if (brushPanel.isOpen) brushPanel.close();
       else brushPanel.open(toolButtons[tool], brushState());
       return;

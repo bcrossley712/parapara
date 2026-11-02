@@ -1183,7 +1183,8 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
   - **Palette:** per project, 10, saved on the project record; edits
     aren't undoable (as in Procreate).
 - **Brush panel (8b-ii):** tapping Draw or Erase when it's already the
-  tool opens it (as the current frame tile opens its menu); a tap
+  tool opens it (as the current frame tile opens its menu) — unless
+  the eyedropper is armed: then that tap only cancels it; a tap
   anywhere else closes it, and a canvas tap then only closes it.
   Smudge and Fill have none until 8b-iii. The Draw/Erase buttons show
   the tip's name under the label (accessible name stays
