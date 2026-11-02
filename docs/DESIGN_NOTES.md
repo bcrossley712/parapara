@@ -928,15 +928,12 @@ device-only.
     passkey on his iPhone as a spare key. It depends on **iCloud
     Keychain staying on** for her Apple ID (a child account in his
     Family Sharing can always be recovered).
-  - **Her Screen Time had to change for passkeys (2026-11-01):**
-    Corbado's PRF demo first failed with NotAllowedError (no Touch ID
-    sheet). Fixed by allowing Account Changes briefly to turn on
-    iCloud → Passwords → Sync this iPad, and allowing the Passwords app
-    (hidden, so AutoFill From was empty). Then Safari passed all three
-    checks: PRF at creation (with a value — CTAP 2.2), PRF at sign-in
-    with the same value, synced passkey (BE=1, BS=1). **The installed
-    app passed too** (dev Passkey test, 2026-11-01): PRF at creation,
-    the same secret at sign-in, synced, user handle returned.
+  - **Passkeys need iCloud Keychain syncing on her iPad.** With
+    Screen Time, that meant briefly allowing Account Changes (to turn
+    on iCloud → Passwords → Sync this iPad) and allowing the Passwords
+    app — without them the passkey sheet fails with NotAllowedError.
+    Safari and the installed app both passed PRF at creation and
+    sign-in, synced (2026-11-01). A friend's family may hit the same.
   - **Encrypted on the iPad** (AES-GCM, WebCrypto): blobs named by a
     keyed hash of their contents, so Cloudflare sees random ids,
     sizes and times — no names, no drawings — and identical files
@@ -1012,33 +1009,12 @@ device-only.
       pausing needs no deploy; `INVITES` and `SIGNING_KEY` are
       dashboard secrets. The Worker deploys from its own workflow when
       `worker/` changes; `worker/` is left off the published site.
-    - **The Passkey test was removed** — turning backup on exercises
-      the same path for real.
-    - **First backup on her iPad (2026-11-01):** turned on with Touch
-      ID (`backup-passkey prf=yes secret=yes synced=yes`); 11 projects,
-      182 blobs, 24.9 MB in 64 s — less than the iPad's 34.6 MB (no
-      database overhead, undo leftovers swept, shared blobs stored
-      once). Setup notes: Cloudflare's newer variable form has a
-      **Secret** toggle (no Type dropdown) and an environment choice
-      (Production); the Worker appears in Cloudflare only after the
-      workflow's first deploy; the first push failed CI because the
-      two Passkey-test files weren't deleted (a zip can't delete —
-      list deletions loudly at hand-off).
-  - **Push 2 plan (restore):** Restore from backup on an empty gallery
-    and in the Backup sheet → Next fetches a challenge (no invite) →
-    Touch ID inside the tap: `signInWithPasskey` with that challenge
-    and no `allowCredentials`; the user handle is the vault id → `POST
-    /v1/sessions` returns a device token and the wrapped secret →
-    `unwrapSecret` with the PRF output → `vaultKeys` → `backup.enable`
-    (without re-queuing what was just restored) → `GET /v1/projects`
-    with names and thumbnails from each latest manifest, current ones
-    plus "Deleted recently" (deleted, latest live manifest) → for each
-    chosen project its manifest and blobs (`getBlob`, `unseal`) →
-    `unpackProject` split so it takes a manifest + blob reader (zip or
-    backup) and **`keepIds`** (a project already on the device is
-    skipped) → `saveImportedProject` → settings back (`GET
-    /v1/settings`). Check: restore into Safari on her iPad or his
-    computer. Picking an old version stays deferred.
+    - **Her first backup (2026-11-01):** 11 projects, 182 blobs,
+      24.9 MB in 64 s — less than the iPad's 34.6 MB (no database
+      overhead, shared blobs stored once).
+    - **Cloudflare setup:** variables have a **Secret** toggle and an
+      environment (Production); the Worker appears only after the
+      workflow's first deploy.
   - **Push 2 decisions (2026-11-01, his OK to my leanings):**
     - **No Touch ID on a connected device:** it already holds the
       token and keys, so Restore lists straight away (getting a deleted

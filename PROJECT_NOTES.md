@@ -116,52 +116,35 @@ icon, manifest `name`/`short_name`, and repo copy.
   undo, layers, gallery, 2e's requests, reference image, frame cache,
   playback, onion skin, frame editing, menus closing on a canvas tap,
   sound (import, sound panel, hold-to-record over music, mixer,
-  Listen/Set start, sound back after the background — 2026-10-31) and
-  export (MP4 with sound through the share sheet, Include images per
-  project), 7a's project files (gallery ⋯ → Save as file, top
-  bar → Import — 2026-11-01), and 7b push 1, automatic backup (first
-  backup 2026-11-01: 11 projects, 182 blobs, 24.9 MB in 64 s; Worker
-  live at `parapara-backup.kmsmallengines.com`, invite `hers`). How each works is in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes with
-  the buttons, not gestures. She knows songs from streaming apps can't
-  be imported (bought downloads can).
+  Listen/Set start) and export (MP4 with sound through the share
+  sheet, Include images per project); **7a** project files (gallery ⋯
+  → Save as file, top bar → Import); **7b push 1**, automatic backup
+  to Cloudflare (her first backup ran 2026-11-01). How each works is
+  in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
+  with the buttons, not gestures. She knows songs from streaming apps
+  can't be imported (bought downloads can).
 
-**Next:**
+**Next** (his order, 2026-11-01: her requested extras before share
+links):
 
-1. **Step 7 — automatic backup (his priority, 2026-10-31).** It must
-   be carefree: no step she has to remember (his experience — a manual
-   backup was too old to help when his phone was wiped; only the
-   automatic one saved anything). A home-screen app can't write to
-   Files on its own, so automatic means a server: **Cloudflare Worker
-   + R2**. Build in this order (each confirmed on the iPad):
-   - **7a — done** (above).
-   - **7b — automatic backup to R2 and restore onto a fresh
-     install**, in two pushes ([decisions](docs/DESIGN_NOTES.md#planned-features)
-     → "Backup (7b scoping)"; how it works: [ARCHITECTURE →
-     Backup](docs/ARCHITECTURE.md#backup)). A **passkey with PRF**
-     (iCloud Keychain) instead of a recovery code, everything
-     **encrypted on the iPad**, one invite per family, the app stays
-     at `bcrossley712.github.io` (passkeys are tied to the address).
-     - **Push 1 — the Worker, setup and automatic backup: done**
-       (above; its remaining iPad checks are under Open iPad checks).
-     - **Push 2 — restore: pushed, awaiting iPad checks**
-       (empty gallery → Restore from backup; Backup sheet → Restore… /
-       Turn off on this iPad; [ARCHITECTURE →
-       Backup](docs/ARCHITECTURE.md#backup)). Checks under Open iPad
-       checks.
-   - **Then** share links and Krita reference import on the same
-     backend — decide when they're reached whether she still wants
-     share links, now that video sharing works.
-2. **Step 8 — the brush block** (requested extras under Open items;
-   he wants them ASAP after 7b, alongside 7b's iPad testing):
-   - **8a — stabilizer: built, awaiting push and iPad checks.** Rail
-     slider under Size (0–10, default 5), draw and erase each their
-     own; [ARCHITECTURE → Canvas and
-     drawing](docs/ARCHITECTURE.md#canvas-and-drawing). Built ahead of
-     the rest on purpose (it works on input points, not `stamp()`).
-   - **8b — symmetry + brush variety** together (both change
-     `stamp()`), then flip drawing. **When a brush panel is built, the
-     Stabilizer slider moves into it** (his decision, 2026-11-01).
+1. **Confirm on the iPad:** 7b push 2 (restore) and 8a (stabilizer) —
+   both pushed; checks below. Restore matters most: until
+   it's confirmed, the backup is unproven.
+2. **8b — symmetry + brush variety** together (both change
+   `stamp()`), then flip drawing. **When a brush panel is built, the
+   Stabilizer slider moves into it** (his decision, 2026-11-01).
+   Scope from Open items → the brush block.
+3. **Share links and Krita reference import** on the backup's
+   Cloudflare backend — ask her first whether she still wants share
+   links, now that video sharing works.
+4. The rest of the requested extras under Open items.
+
+Step 7's decisions (passkey with PRF instead of a recovery code,
+encryption on the iPad, one invite per family, what's kept and for how
+long, cost guards, the app staying at `bcrossley712.github.io`) are in
+[design notes](docs/DESIGN_NOTES.md#planned-features) → "Backup (7b
+scoping)"; how it works is in [ARCHITECTURE →
+Backup](docs/ARCHITECTURE.md#backup).
 
 **Open iPad checks** (send the activity log with any of them):
 - **Stabilizer (8a):** with her stylus, at 5 a wobbly line comes out
@@ -232,26 +215,14 @@ if it shows:
   turning on); `restore-failed` (with `step` and `error`).
 
 **Open items**
-- **Silent sound after the background — WebKit bug, worked around;
-  watch.** A home-screen app's Web Audio can come back silent after
-  the background ([WebKit
-  291892](https://bugs.webkit.org/show_bug.cgi?id=291892), also
-  276016, 276687 — open, not ours to fix). Pausing on the way out
-  (`audio.sleep`) and resuming in the Play tap **worked on her iPad
-  (2026-10-31, iPadOS 27.0.1)**: back after 1½ min, `play ctx=suspended`
-  → `running` → `sound-start`, sound heard. If silence comes back,
-  get the log; the fallback then is an `<audio>` element playing the
-  export's offline mix — a real project (playback timing runs on the
-  audio clock).
-- **GIF and PNG sequence export — cut from step 6 (2026-10-29), revisit
-  after the main build; ask her.** A departure from her apps (all offer
-  both), chosen on purpose: MP4 with sound covers "send it to a
-  friend", GIFs cost a recipient more than the video does, and adding
-  either later costs no more than now (nothing in the schema or 6d
-  depends on them). **Trigger:** she asks for either. The 6c scoping
-  (sheet choice, size, palette, timing, loop, code layout, tests) is in
-  [design notes](docs/DESIGN_NOTES.md#planned-features) → "GIF and PNG
-  sequence (6c, cut)" — start from there, not from scratch.
+- **Silent sound after the background — WebKit bug, worked around
+  (confirmed 2026-10-31); watch.** If silence comes back, get the log;
+  the fallback is an `<audio>` element playing the export's offline
+  mix — a real project. Details: ARCHITECTURE → Sound.
+- **GIF and PNG sequence export — cut from step 6 on purpose; revisit
+  if she asks for either.** Start from the scoping in [design
+  notes](docs/DESIGN_NOTES.md#planned-features) → "GIF and PNG
+  sequence (6c, cut)".
 - **Lost canvas — open bug, not recurring lately** (little use since
   the last fixes). She saw "This frame's drawing stopped showing…" now
   and then. Ask which ending she sees: "…loaded again" alone is the
@@ -313,7 +284,7 @@ if it shows:
   - **Brush variety** (sizes, chisel tips, edge blending) — **build
     with symmetry**: both change `stamp()`, and a directional tip's
     mirrored stamp must mirror its angle too.
-  - **Stabilizer — built in 8a** (Current state). Symmetry must mirror
+  - **Stabilizer — built in 8a.** Symmetry must mirror
     its output points, not the raw stylus.
   - **Erasers** (observed in 4a; she'll want them, not urgent): the
     eraser is the pen's round hard tip with the same 6 px default and
