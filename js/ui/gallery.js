@@ -121,6 +121,8 @@ export function createGallery(container, { callbacks, appActions = {} }) {
       freshReload: appActions.freshReload ?? (async () => window.location.reload()),
       showActivityLog: appActions.showActivityLog, // dev only (after 4b)
       openBackup: appActions.openBackup, // 7b
+      getAppColor: appActions.getAppColor,
+      setAppColor: appActions.setAppColor,
     },
     placement: 'below',
     onOpen: () => closeMenu(),

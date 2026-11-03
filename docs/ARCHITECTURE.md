@@ -1227,7 +1227,8 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
 dismissal, destroy), `ui/gallery.js`, `ui/confirm-dialog.js`
 (`showConfirm` / `showPrompt`), `ui/icons.js`,
 `ui/settings-panel.js` (gear menu; its Developer section is
-temporary), `ui/symmetry-menu.js` (8b-i: the rail's Symmetry button
+temporary), `ui/app-color.js` (the App color choices, pure; painted
+and saved by `main.js` `setAppColor`), `ui/symmetry-menu.js` (8b-i: the rail's Symmetry button
 and menu), `ui/dev-log-view.js` (DEV ONLY); screen routing in
 `main.js`.
 
@@ -1349,8 +1350,16 @@ registration, update checks/apply, version, fresh reload — no UI).
 - **Colors come from the named tokens in `style.css`'s `:root`**
   (light theme, after 8b-ii), named by job: surface, panel, text,
   control, border, stage, accent (purple), accent-soft (lavender),
-  on-accent. No new hex literals for UI chrome — a second theme
-  would only be a second set of values. Panels over the canvas use
+  on-accent. No new hex literals for UI chrome. **App color** overrides
+  only accent, accent-active, accent-soft, surface and sound-voice
+  (inline on `<html>`); anything else that should follow it is
+  `color-mix`ed from those (borders, the gallery backdrop, accent
+  washes). `APP_COLORS`' purple must equal `:root`'s values (a unit
+  test checks); a new choice must pass that test's contrast checks
+  and keep its bars light (the status bar's text stays dark).
+  `applyAppColor` also sets `theme-color` to the bars' color. Corners
+  use `--pp-radius-control` / `--pp-radius-panel`; areas are
+  separated by soft `--pp-shadow-color` shadows, not hairlines. Panels over the canvas use
   `--pp-panel` (a little see-through); bars and dialogs stay solid.
   Icons' knocked-out parts use `--pp-knockout`, which a button sets
   to its own fill. The sound panel's waveform reads `--pp-accent`,

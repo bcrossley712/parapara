@@ -434,6 +434,28 @@ Sections: [Process lessons](#process-lessons) ·
     lavender tile. The canvas surround stays neutral gray on purpose —
     a tinted backdrop changes how her drawing's colors look
     (Sketchbook and Procreate keep it gray too).
+  - **App color (his go-ahead; not in her other apps — a deliberate
+    extra):** six choices in the gear menu (purple default, pink,
+    teal, blue, orange, green), each a set: accent with white text
+    (≥ 4.5:1), pressed shade, pale tint, very pale bars, and a Voice
+    partner color. The bars follow the choice; `theme-color` is
+    updated with them, on the reading that only light vs dark decides
+    the status bar's text. Saved in uiState (truth) and mirrored to
+    localStorage, so the launch paints her color before the database
+    opens; the database wins if they disagree. Not in the backup
+    (uiState isn't) — revisit if a restore starting purple bothers
+    her. Her drawing colors, onion tints, the record red, the canvas
+    surround and the title's letters don't follow it.
+  - **Soft edges (her request: "everything has such straight defined
+    edges"):** soft inset shadows in the canvas area (and the
+    gallery) where the bars meet it, instead of 1 px lines; corners
+    12 px on controls, 18 px on panels; a wider, lighter canvas
+    shadow. The canvas keeps square corners (it's her drawing's
+    edge and the video's). **Fades** for panels and menus were
+    offered and deferred: panels are shown with `display`, so each
+    would need to stay in place, invisible and untappable, and
+    menu dismissal plus the visibility tests would change — its own
+    step if she still wants it.
   - **Not done:** a see-through top bar (the iPadOS 26 top-edge fix
     needs it solid); a see-through rail and strip — they sit beside
     the canvas, not over it, so it would only show gray. Sketchbook's

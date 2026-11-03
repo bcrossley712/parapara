@@ -159,10 +159,10 @@ scoped 2026-11-02; decisions: [design
 notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates) → "Light theme"):
 pale lavender bars with flat buttons, purple accent with lavender
 highlights, panels over the canvas a little see-through, teal Voice
-waveform, a multicolored "Parapara!" in the gallery. One theme, no
-setting; colors are named tokens in `style.css` `:root`. **Next, once
-scoped:** an App color choice in Settings (his go-ahead in principle,
-2026-11-02).
+waveform, a multicolored "Parapara!" in the gallery. Colors are
+named tokens in `style.css` `:root`. **Then, built and not yet sent:**
+App color (six swatches in the gear menu, both screens) and softer
+edges (shadows instead of hairlines between areas, rounder corners).
 
 **Open iPad checks** (send the activity log with any of them):
 - **After the light theme push:** the status bar's time and battery
@@ -173,6 +173,11 @@ scoped:** an App color choice in Settings (his go-ahead in principle,
   and lavender shades and how see-through the panels should be, and
   whether anything is hard to see (empty frame tiles, the gear, the
   hidden-images icon).
+- **After the App color push:** each of the six colors keeps the
+  status bar's text dark; her choice comes back after closing the
+  app, with no flash of purple first; the soft edges look right to
+  her. Note the App color isn't in the backup (uiState isn't) — a
+  restore starts purple.
 - **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
   already the tool opens the brush panel; a canvas tap closes it
   without drawing. Her old Pen size is unchanged. Each tip looks right
@@ -522,8 +527,11 @@ tipSettings: { draw: { [tip]: { size, strength } }, erase: … } }`
 (8a: stabilizer 0–10, missing = 5; 8b-ii: tips from brush.js `TIPS`,
 missing = 'pen'; strength 1–100; missing tipSettings = defaults with
 the old draw/erase sizes on Pen; `sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
-hideHeadphonesTip }`
-(5c; missing = false; `layersPanelOpen` retired after 5c, ignored);
+hideHeadphonesTip, appColor }`
+(5c; missing = false; `layersPanelOpen` retired after 5c, ignored;
+appColor after the light theme: an `APP_COLORS` id from
+`ui/app-color.js`, missing = 'purple', `sanitizeAppColor`; mirrored to
+localStorage `parapara-app-color` for the launch's first paint);
 `recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to

@@ -5,17 +5,22 @@
 
 :root {
   /* The app's colors, named by job (after 8b-ii: light theme, Sketchbook
-     style, her purple). Use these names, not hex literals, so a second
-     theme would only be a second set of values. */
+     style, her purple). Use these names, not hex literals. The App
+     color choice (js/ui/app-color.js) overrides accent, accent-active,
+     accent-soft, surface and sound-voice on <html>; these are purple's
+     values, and that file's purple must match them (a unit test
+     checks). Anything else that should follow the choice is mixed
+     from those five. */
   --pp-surface: #f5f1fc;       /* pale lavender — bars (top, rail, strip) and the app's own background */
-  --pp-gallery-bg: #eeebf3;    /* the gallery's scrolling area */
+  /* Mixed from the bar color, so it follows the App color choice. */
+  --pp-gallery-bg: color-mix(in srgb, var(--pp-surface) 55%, #e4e2de); /* the gallery's scrolling area */
   --pp-panel: rgba(255, 255, 255, 0.9); /* panels and menus floating over the canvas, a little see-through */
   --pp-panel-solid: #ffffff;   /* dialogs, toasts, banners */
   --pp-text: #2f2d33;          /* text and icons */
   --pp-text-muted: #75727a;    /* secondary text */
   --pp-control: #ebe9ee;       /* a button's resting fill inside panels */
   --pp-field: #f2f1f4;         /* text boxes */
-  --pp-border: #dcd6e8;        /* hairlines between areas */
+  --pp-border: color-mix(in srgb, var(--pp-accent) 12%, #dbd9d5); /* hairlines; a hint of the accent */
   --pp-border-strong: #b8b5bd; /* dashed outlines, rings */
   --pp-stage: #dddbd7;         /* around the canvas */
   --pp-track: #efedf2;         /* the sound panel's track backgrounds */
@@ -23,6 +28,7 @@
   --pp-accent-active: #6643ad; /* purple, pressed */
   --pp-accent-soft: #e6dcf8;   /* lavender — selected rows, pressed buttons */
   --pp-on-accent: #ffffff;     /* text and icons on the purple */
+  --pp-sound-voice: #1f9e9a;   /* teal — the Voice row's waveform, a partner to the accent */
   --pp-danger-text: #c63d32;   /* Delete items in menus */
   /* The gallery title's letters, in turn (each ≥ 3:1 on the bar — it's
      large bold text). */
@@ -35,6 +41,13 @@
      the hidden-images strike): the background the icon sits on. Buttons
      that change their fill set it to match. */
   --pp-knockout: var(--pp-surface);
+  /* Corners (softened after the light theme): buttons, rows and tiles;
+     panels, menus and dialogs. */
+  --pp-radius-control: 12px;
+  --pp-radius-panel: 18px;
+  /* Soft shadows instead of hairlines between areas — a purple-gray
+     that sits well under every App color. */
+  --pp-shadow-color: rgba(40, 30, 60, 0.1);
   --pp-font: system-ui, sans-serif;
 }
 
@@ -140,7 +153,6 @@ textarea,
   padding: env(safe-area-inset-top, 0px) 12px 0 12px;
   min-height: calc(52px + env(safe-area-inset-top, 0px));
   background: var(--pp-surface);
-  border-bottom: 1px solid var(--pp-border);
 }
 
 .pp-icon-btn {
@@ -150,7 +162,7 @@ textarea,
   width: 48px;
   height: 44px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: transparent;
   color: var(--pp-text);
   cursor: pointer;
@@ -205,13 +217,12 @@ textarea,
   width: 76px;
   padding: 12px 8px;
   background: var(--pp-surface);
-  border-right: 1px solid var(--pp-border);
   flex-shrink: 0;
 }
 
 .pp-tool-btn {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   padding: 12px 4px;
   background: transparent;
   color: var(--pp-text);
@@ -400,6 +411,13 @@ textarea,
   align-items: center;
   justify-content: center;
   background: var(--pp-stage);
+  /* Soft shadows from the bars around it (top, rail, strip) instead of
+     hairlines — the "soft edges" pass. Inset, so they paint under the
+     canvas and panels. */
+  box-shadow:
+    inset 0 10px 12px -10px var(--pp-shadow-color),
+    inset 10px 0 12px -10px var(--pp-shadow-color),
+    inset 0 -10px 12px -10px var(--pp-shadow-color);
   overflow: hidden;
 }
 
@@ -411,7 +429,7 @@ textarea,
   flex: none;
   background: #ffffff;
   touch-action: none;
-  box-shadow: 0 2px 12px rgba(40, 30, 60, 0.18);
+  box-shadow: 0 4px 24px rgba(40, 30, 60, 0.14);
   /* Hints the browser to optimize for the pan/zoom transform updates
      in canvas.js — scoped to just this, unlike the earlier
      willReadFrequently mistake which affected the whole canvas. */
@@ -463,7 +481,7 @@ textarea,
   aspect-ratio: 1;
   padding: 0;
   border: 2px solid var(--pp-border-strong);
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   cursor: pointer;
 }
 
@@ -476,7 +494,7 @@ textarea,
   width: 276px; /* 252 content: 8 recents or 5 palette swatches across */
   padding: 12px;
   background: var(--pp-panel);
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   color: var(--pp-text);
   font-family: var(--pp-font);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
@@ -590,7 +608,7 @@ textarea,
   width: 44px;
   height: 40px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   cursor: pointer;
@@ -657,7 +675,7 @@ textarea,
   flex-direction: column;
   min-width: 130px;
   padding: 6px;
-  border-radius: 10px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel-solid);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.18);
 }
@@ -716,7 +734,7 @@ textarea,
   color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
   /* The Developer section can outgrow the screen (setOpen caps the
      height to the space beside or below the gear): scroll inside. */
@@ -755,7 +773,7 @@ textarea,
 
 .pp-settings__btn {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   padding: 10px 12px;
   background: var(--pp-control);
   color: var(--pp-text);
@@ -789,6 +807,36 @@ textarea,
   opacity: 0.7;
 }
 
+/* App color (js/ui/app-color.js): a label over a row of swatches. Each
+   swatch is its color (--pp-swatch); the current one gets a ring. */
+.pp-settings__label {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--pp-text-muted);
+}
+
+.pp-settings__colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.pp-settings__color {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--pp-swatch);
+  box-shadow: 0 0 0 1px var(--pp-border-strong);
+  cursor: pointer;
+}
+
+.pp-settings__color[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px var(--pp-swatch);
+}
+
 .pp-settings__hint {
   margin-top: -4px;
   font-size: 12px;
@@ -808,7 +856,7 @@ textarea,
   gap: 12px;
   max-width: calc(100vw - 32px);
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel-solid);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -825,7 +873,7 @@ textarea,
 .pp-toast__btn {
   flex-shrink: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   padding: 6px 12px;
   background: var(--pp-accent);
   color: var(--pp-on-accent);
@@ -856,7 +904,7 @@ textarea,
   color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
@@ -886,7 +934,7 @@ textarea,
   height: 40px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   cursor: pointer;
@@ -923,7 +971,7 @@ textarea,
   gap: 6px;
   min-height: 52px;
   padding: 4px 4px 4px 0;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   cursor: pointer;
 }
@@ -1037,7 +1085,7 @@ textarea,
   transform: translateX(-50%);
   max-width: calc(100vw - 32px);
   padding: 10px 16px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel-solid);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -1074,7 +1122,6 @@ textarea,
   flex-shrink: 0;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--pp-surface);
-  border-top: 1px solid var(--pp-border);
   font-family: var(--pp-font);
 }
 
@@ -1099,7 +1146,7 @@ textarea,
   /* Set from the canvas's shape (frame-strip.js setAspect). */
   width: var(--pp-tile-width, 64px);
   height: var(--pp-tile-height, 48px);
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   font-family: inherit;
   cursor: pointer;
 }
@@ -1225,7 +1272,7 @@ textarea,
   height: 44px;
   padding: 0 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: transparent;
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -1277,7 +1324,7 @@ textarea,
   gap: 10px;
   width: 220px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
   color: var(--pp-text);
@@ -1307,7 +1354,7 @@ textarea,
   justify-content: center;
   height: 44px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -1347,7 +1394,7 @@ textarea,
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
   padding: 8px 14px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel-solid);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -1382,7 +1429,7 @@ textarea,
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 2px 8px rgba(40, 30, 60, 0.16);
 }
@@ -1395,7 +1442,7 @@ textarea,
   height: 44px;
   padding: 0;
   border: none;
-  border-radius: 9px;
+  border-radius: var(--pp-radius-control);
   background: transparent;
   color: var(--pp-text);
   cursor: pointer;
@@ -1425,7 +1472,7 @@ textarea,
   width: 260px;
   max-width: calc(100vw - 32px);
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
   color: var(--pp-text);
@@ -1465,7 +1512,7 @@ textarea,
   height: 44px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   cursor: pointer;
@@ -1541,6 +1588,8 @@ textarea,
   touch-action: pan-y;
   padding: 24px;
   background: var(--pp-gallery-bg);
+  /* The top bar's soft shadow (no hairline), as in the editor. */
+  box-shadow: inset 0 10px 12px -10px var(--pp-shadow-color);
 }
 
 .pp-gallery-screen.is-busy .pp-gallery {
@@ -1604,7 +1653,7 @@ textarea,
 }
 
 .pp-gallery-new:active {
-  background: rgba(122, 82, 199, 0.3);
+  background: color-mix(in srgb, var(--pp-accent) 30%, transparent);
   border-color: var(--pp-accent);
 }
 
@@ -1682,7 +1731,7 @@ textarea,
   width: 44px;
   height: 36px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: transparent;
   color: var(--pp-text);
   cursor: pointer;
@@ -1743,7 +1792,7 @@ textarea,
   flex-direction: column;
   min-width: 180px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
@@ -1763,7 +1812,7 @@ textarea,
   flex-direction: column;
   min-width: 160px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
@@ -1819,7 +1868,7 @@ textarea,
   gap: 12px;
   width: min(400px, 100%);
   padding: 20px;
-  border-radius: 16px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel-solid);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -1842,7 +1891,7 @@ textarea,
   width: 100%;
   padding: 10px 12px;
   border: 2px solid var(--pp-border);
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-field);
   color: var(--pp-text);
   font-family: inherit;
@@ -1939,7 +1988,7 @@ textarea,
   min-height: 56px;
   padding: 6px 10px 6px 6px;
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   font-family: inherit;
@@ -2031,7 +2080,7 @@ textarea,
   min-height: 44px;
   padding: 10px 18px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   font-family: inherit;
@@ -2214,7 +2263,6 @@ textarea,
 }
 
 .pp-sound-panel {
-  --pp-sound-voice: #1f9e9a;   /* the Voice row's waveform */
   --pp-sound-record: #e0574b;  /* the mic and the recording bar */
   position: absolute;
   left: 0;
@@ -2226,7 +2274,6 @@ textarea,
   gap: 6px;
   padding: 6px 0;
   background: var(--pp-panel);
-  border-top: 1px solid var(--pp-border);
   color: var(--pp-text);
   font-family: var(--pp-font);
   box-shadow: 0 -4px 16px rgba(40, 30, 60, 0.15);
@@ -2278,7 +2325,7 @@ textarea,
   gap: 1px;
   padding: 2px 4px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -2335,7 +2382,7 @@ textarea,
   z-index: 2;
   width: 240px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   border: 1px solid var(--pp-border);
   box-shadow: 0 6px 20px rgba(40, 30, 60, 0.16);
@@ -2371,7 +2418,7 @@ textarea,
   min-height: 36px;
   padding: 6px 12px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--pp-radius-control);
   background: var(--pp-control);
   color: var(--pp-text);
   font-family: inherit;
@@ -2466,7 +2513,7 @@ textarea,
   bottom: 0;
   border: 2px solid var(--pp-accent);
   border-radius: 6px;
-  background: rgba(122, 82, 199, 0.18);
+  background: color-mix(in srgb, var(--pp-accent) 18%, transparent);
   pointer-events: none;
 }
 
@@ -2480,13 +2527,13 @@ textarea,
   bottom: 2px;
   border: 2px solid var(--pp-accent);
   border-radius: 8px;
-  background: rgba(122, 82, 199, 0.12);
+  background: color-mix(in srgb, var(--pp-accent) 12%, transparent);
   cursor: grab;
 }
 
 .pp-sound-panel__row--voice .pp-sound-panel__clip {
   border-color: var(--pp-sound-voice);
-  background: rgba(31, 158, 154, 0.12);
+  background: color-mix(in srgb, var(--pp-sound-voice) 12%, transparent);
 }
 
 .pp-sound-panel__clip[hidden] {
@@ -2688,7 +2735,7 @@ textarea,
   gap: 10px;
   width: 264px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   color: var(--pp-text);
   font-family: var(--pp-font);
@@ -2717,7 +2764,7 @@ textarea,
   gap: 2px;
   padding: 6px 4px;
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--pp-radius-control);
   background: #ffffff;
   color: var(--pp-text);
   font-family: var(--pp-font);

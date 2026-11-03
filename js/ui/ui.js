@@ -503,6 +503,8 @@ export function initUI(container, options = {}) {
       frameMemoryTest: appActions.frameMemoryTest ?? (() => {}),
       micDelayTest: appActions.micDelayTest, // dev only (5c)
       openBackup: appActions.openBackup, // 7b
+      getAppColor: appActions.getAppColor,
+      setAppColor: appActions.setAppColor,
       showActivityLog: appActions.showActivityLog, // dev only (after 4b)
     },
     onOpen: () => { if (pickerOpen) setPickerOpen(false); },

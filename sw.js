@@ -24,6 +24,7 @@ const APP_SHELL = [
   './js/ui/ui.js',
   './js/ui/color-picker.js',
   './js/ui/settings-panel.js',
+  './js/ui/app-color.js',
   './js/ui/layers-panel.js',
   './js/ui/gallery.js',
   './js/ui/confirm-dialog.js',

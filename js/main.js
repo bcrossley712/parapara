@@ -142,21 +142,29 @@ import { prepareImport } from './canvas/reference.js';
 import { sanitizeSymmetry } from './canvas/symmetry.js';
 import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
+import {
+  applyAppColor, sanitizeAppColor, readStoredAppColor, writeStoredAppColor,
+} from './ui/app-color.js';
 
 // Colors for the developer "Fill all layers" memory test.
 const DEV_FILL_COLORS = ['#e05a47', '#f2a65a', '#e8d15a', '#7cc46b', '#4fb3c9', '#5a7be0', '#a065d6', '#d65aa8'];
 
 const appRoot = document.getElementById('app');
 
+// Her App color, painted before anything else from the localStorage
+// copy (the database answers later; loading uiState repaints from it).
+applyAppColor(document, readStoredAppColor(globalThis.localStorage));
+
 // --- app-wide state (survives switching screens) ---
 
 // Tool, color and brush sizes — app-wide, not per project, so they
 // follow her from one animation into the next (see storage.js).
 let toolSettings = null;
-// { screen: 'gallery' | 'editor', hideHeadphonesTip }
+// { screen: 'gallery' | 'editor', hideHeadphonesTip, appColor }
 // — remembered across launches. hideHeadphonesTip (5c): she chose
-// "Don't show again" on the headphones popup.
-let uiState = {};
+// "Don't show again" on the headphones popup. appColor (after the
+// light theme): an id from ui/app-color.js, missing = 'purple'.
+let uiState = { appColor: readStoredAppColor(globalThis.localStorage) };
 // The last colors she drew or filled with, newest first — app-wide
 // (colors.js), shown in every project's color picker.
 let recentColors = [];
@@ -224,7 +232,18 @@ const appActions = {
   freshReload: () => updater.freshReload(),
   showActivityLog: () => showDevLog({ read: (last) => devLog.read(last), clear: () => devLog.clear() }),
   openBackup: () => openBackupSheet(),
+  getAppColor: () => sanitizeAppColor(uiState.appColor),
+  setAppColor: (id) => setAppColor(id),
 };
+
+// Paints, mirrors to localStorage (for the next launch's first paint)
+// and saves. `save: false` for the launch's own repaint.
+function setAppColor(id, { save = true } = {}) {
+  const clean = applyAppColor(document, id);
+  writeStoredAppColor(globalThis.localStorage, clean);
+  if (save) setUiState({ appColor: clean });
+  else uiState.appColor = clean;
+}
 
 // --- automatic backup (step 7b) ---
 //
@@ -692,10 +711,17 @@ async function launch() {
       // were always in the editor.
       screen: saved?.screen === 'gallery' ? 'gallery' : 'editor',
       hideHeadphonesTip: saved?.hideHeadphonesTip === true,
+      appColor: sanitizeAppColor(saved?.appColor),
     };
+    setAppColor(uiState.appColor, { save: false });
   } catch (err) {
     console.warn('Parapara! could not load UI state:', err);
-    uiState = { screen: 'editor', hideHeadphonesTip: false };
+    // Keep the color the launch painted from localStorage.
+    uiState = {
+      screen: 'editor',
+      hideHeadphonesTip: false,
+      appColor: readStoredAppColor(globalThis.localStorage),
+    };
   }
 
   if (uiState.screen === 'editor') {

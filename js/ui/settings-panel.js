@@ -19,9 +19,13 @@
 //   (storage/dev-log.js): the last few hundred things that happened,
 //   to copy out when a drawing goes missing. Both screens.
 // - Backup (permanent, 7b): opens the Backup sheet. Both screens.
+// - App color (permanent, after the light theme): a row of swatches;
+//   a tap repaints the app at once. Both screens.
 //
 // Talks to the rest of the app only through the `actions` callbacks —
 // it doesn't know about the updater, canvas or storage.
+
+import { APP_COLORS } from './app-color.js';
 
 export function createSettingsPanel(actions) {
   const {
@@ -35,6 +39,8 @@ export function createSettingsPanel(actions) {
     micDelayTest,      // () => void, optional (editor only; 5c)
     openBackup,        // () => void, optional (7b)
     showActivityLog,   // () => void, optional
+    getAppColor,       // () => string, optional (an APP_COLORS id)
+    setAppColor,       // (id) => void, optional — paints and saves
   } = actions;
 
   const panel = document.createElement('div');
@@ -94,12 +100,42 @@ export function createSettingsPanel(actions) {
 
   const backupBtn = makeButton('Backup');
 
+  const colorLabel = document.createElement('div');
+  colorLabel.className = 'pp-settings__label';
+  colorLabel.textContent = 'App color';
+  const colorRow = document.createElement('div');
+  colorRow.className = 'pp-settings__colors';
+  colorRow.setAttribute('role', 'group');
+  colorRow.setAttribute('aria-label', 'App color');
+  const colorBtns = APP_COLORS.map((color) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pp-settings__color';
+    btn.style.setProperty('--pp-swatch', color.accent);
+    btn.setAttribute('aria-label', color.name);
+    btn.dataset.color = color.id;
+    btn.addEventListener('click', () => {
+      setAppColor(color.id);
+      showAppColor();
+    });
+    colorRow.append(btn);
+    return btn;
+  });
+
+  function showAppColor() {
+    const current = getAppColor?.();
+    for (const btn of colorBtns) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.color === current));
+    }
+  }
+
   const logBtn = makeButton('Activity log');
   const logHint = document.createElement('div');
   logHint.className = 'pp-settings__hint';
   logHint.textContent = 'What happened recently, to copy and send if a drawing goes missing.';
 
   panel.append(title, versionRow, checkBtn, status);
+  if (setAppColor) panel.append(colorLabel, colorRow);
   if (openBackup) panel.append(backupBtn);
   panel.append(devLabel, freshBtn, freshHint);
   if (showActivityLog) panel.append(logBtn, logHint);
@@ -213,6 +249,7 @@ export function createSettingsPanel(actions) {
       }
       if (!busy) status.textContent = '';
       refreshVersion();
+      showAppColor();
     }
   }
 
