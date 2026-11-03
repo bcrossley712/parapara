@@ -4,15 +4,37 @@
    audio-trim UI, etc.). */
 
 :root {
-  /* Recurring colors, named once here instead of repeated as hex
-     literals across selectors — see PROJECT_NOTES.md "Habits worth
-     keeping" for why this is worth doing even at small scale. */
-  --pp-bg: #faf4eb;          /* app background, warm off-white */
-  --pp-ink: #3a3226;         /* dark brown — rail, toast, canvas-area text */
-  --pp-ink-light: #55483a;   /* lighter brown — inactive tool buttons */
-  --pp-stage: #1e1a15;       /* near-black — canvas area backdrop */
-  --pp-accent: #f2a65a;      /* orange — active tool, primary actions */
-  --pp-accent-active: #e6944a; /* orange, pressed state */
+  /* The app's colors, named by job (after 8b-ii: light theme, Sketchbook
+     style, her purple). Use these names, not hex literals, so a second
+     theme would only be a second set of values. */
+  --pp-surface: #f5f1fc;       /* pale lavender — bars (top, rail, strip) and the app's own background */
+  --pp-gallery-bg: #eeebf3;    /* the gallery's scrolling area */
+  --pp-panel: rgba(255, 255, 255, 0.9); /* panels and menus floating over the canvas, a little see-through */
+  --pp-panel-solid: #ffffff;   /* dialogs, toasts, banners */
+  --pp-text: #2f2d33;          /* text and icons */
+  --pp-text-muted: #75727a;    /* secondary text */
+  --pp-control: #ebe9ee;       /* a button's resting fill inside panels */
+  --pp-field: #f2f1f4;         /* text boxes */
+  --pp-border: #dcd6e8;        /* hairlines between areas */
+  --pp-border-strong: #b8b5bd; /* dashed outlines, rings */
+  --pp-stage: #dddbd7;         /* around the canvas */
+  --pp-track: #efedf2;         /* the sound panel's track backgrounds */
+  --pp-accent: #7a52c7;        /* purple — active tool, primary actions */
+  --pp-accent-active: #6643ad; /* purple, pressed */
+  --pp-accent-soft: #e6dcf8;   /* lavender — selected rows, pressed buttons */
+  --pp-on-accent: #ffffff;     /* text and icons on the purple */
+  --pp-danger-text: #c63d32;   /* Delete items in menus */
+  /* The gallery title's letters, in turn (each ≥ 3:1 on the bar — it's
+     large bold text). */
+  --pp-title-1: #7a52c7;       /* purple */
+  --pp-title-2: #d13f7a;       /* pink */
+  --pp-title-3: #d0631a;       /* orange */
+  --pp-title-4: #138a85;       /* teal */
+  --pp-title-5: #3d6fd6;       /* blue */
+  /* What an icon's knocked-out parts are filled with (the gear's hole,
+     the hidden-images strike): the background the icon sits on. Buttons
+     that change their fill set it to match. */
+  --pp-knockout: var(--pp-surface);
   --pp-font: system-ui, sans-serif;
 }
 
@@ -28,10 +50,11 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  /* Dark, never seen (the app shell covers it): newer iPadOS reads the
-     page background, with theme-color, to style the status bar. A light
-     one turned its text black over a light frosted band. */
-  background: var(--pp-ink);
+  /* The top bar's color, never seen (the app shell covers it): newer
+     iPadOS reads the page background, with theme-color, to pick the
+     status bar's text color, so all of them must match the top bar
+     (light since the light theme, so its text should be dark). */
+  background: var(--pp-surface);
   overscroll-behavior: none;
   touch-action: none;
   /* No text selection or long-press menu anywhere (after 8b-i, her
@@ -41,6 +64,12 @@ html, body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* Sliders take the app's purple instead of the system blue (the hue
+   slider draws its own track and thumb, so this doesn't touch it). */
+input[type="range"] {
+  accent-color: var(--pp-accent);
 }
 
 /* iOS won't let you type in a field whose ancestor has user-select:
@@ -54,7 +83,7 @@ textarea,
 }
 
 /* The screens' permanent container (index.html) — and THE fixed box:
-   full-screen, solid dark, created once and never replaced. iPadOS 26
+   full-screen, solid (the top bar's color), created once and never replaced. iPadOS 26
    blurs the top of a home-screen web app (its frosted "scroll edge
    effect") unless the top edge sits in a fixed, full-width,
    solid-colored box, and it seems to latch onto the first such box it
@@ -65,7 +94,7 @@ textarea,
 #app {
   position: fixed;
   inset: 0;
-  background: var(--pp-ink);
+  background: var(--pp-surface);
 }
 
 /* App shell: tool rail + canvas area (js/ui/ui.js initUI).
@@ -85,8 +114,8 @@ textarea,
   position: absolute;
   inset: 0;
   flex-direction: column;
-  /* Dark, so any inset area (and the status bar) has a dark backdrop. */
-  background: var(--pp-ink);
+  /* The top bar's color, so any inset area (and the status bar) matches it. */
+  background: var(--pp-surface);
   /* iOS standalone PWAs paint under the status bar (index.html has
      viewport-fit=cover, which is what makes these env() vars resolve
      to nonzero values) — the padding keeps content out from under it.
@@ -99,8 +128,10 @@ textarea,
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* Top bar (js/ui/ui.js). Must stay dark: it sits under the iPad
-   status bar, whose text is white (black-translucent). */
+/* Top bar (js/ui/ui.js). Must stay solid and match theme-color, the
+   manifest and the page background: it sits under the iPad status bar,
+   which picks its text color from them. Its buttons sit flat on it, as
+   in Sketchbook; only the active one is filled. */
 .pp-top-bar {
   display: flex;
   align-items: center;
@@ -108,8 +139,8 @@ textarea,
   flex-shrink: 0;
   padding: env(safe-area-inset-top, 0px) 12px 0 12px;
   min-height: calc(52px + env(safe-area-inset-top, 0px));
-  background: var(--pp-ink);
-  border-bottom: 1px solid var(--pp-ink-light);
+  background: var(--pp-surface);
+  border-bottom: 1px solid var(--pp-border);
 }
 
 .pp-icon-btn {
@@ -120,14 +151,14 @@ textarea,
   height: 44px;
   border: none;
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: transparent;
+  color: var(--pp-text);
   cursor: pointer;
 }
 
 .pp-icon-btn:active:not(:disabled) {
-  background: var(--pp-accent);
-  color: var(--pp-ink);
+  background: var(--pp-accent-soft);
+  --pp-knockout: var(--pp-accent-soft);
 }
 
 .pp-icon-btn:disabled {
@@ -137,7 +168,8 @@ textarea,
 
 .pp-icon-btn.is-active {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
+  --pp-knockout: var(--pp-accent);
 }
 
 /* A top-bar button with a word instead of an icon (the gallery's
@@ -172,7 +204,8 @@ textarea,
   gap: 8px;
   width: 76px;
   padding: 12px 8px;
-  background: var(--pp-ink);
+  background: var(--pp-surface);
+  border-right: 1px solid var(--pp-border);
   flex-shrink: 0;
 }
 
@@ -180,17 +213,23 @@ textarea,
   border: none;
   border-radius: 8px;
   padding: 12px 4px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: transparent;
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 13px;
   cursor: pointer;
 }
 
+.pp-tool-btn:active {
+  background: var(--pp-accent-soft);
+  --pp-knockout: var(--pp-accent-soft);
+}
+
 .pp-tool-btn.is-active {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   font-weight: 600;
+  --pp-knockout: var(--pp-accent);
 }
 
 .pp-tool-btn--secondary {
@@ -199,8 +238,7 @@ textarea,
 }
 
 /* Gear button at the bottom of the rail (js/ui/ui.js). The icon's
-   center hole is filled with --pp-ink-light, so keep this button's
-   background on that token. */
+   center hole is filled with --pp-knockout, the rail's color. */
 .pp-gear-btn {
   display: flex;
   align-items: center;
@@ -239,7 +277,7 @@ textarea,
 }
 
 .pp-symmetry-menu__item.is-current {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
   font-weight: 600;
 }
 
@@ -286,7 +324,7 @@ textarea,
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 12px;
   margin-top: 8px;
@@ -313,12 +351,12 @@ textarea,
   gap: 8px;
   width: 76px;
   padding: 12px 8px;
-  background: var(--pp-ink);
+  background: var(--pp-surface);
   flex-shrink: 0;
 }
 
 .pp-reference-bar__title {
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 13px;
   font-weight: 600;
@@ -348,7 +386,7 @@ textarea,
 
 .pp-reference-bar__delete {
   margin-top: auto;
-  color: #ff8a7a;
+  color: var(--pp-danger-text);
 }
 
 /* The whole drawing area takes touch input (canvas.js listens here,
@@ -373,7 +411,7 @@ textarea,
   flex: none;
   background: #ffffff;
   touch-action: none;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 12px rgba(40, 30, 60, 0.18);
   /* Hints the browser to optimize for the pan/zoom transform updates
      in canvas.js — scoped to just this, unlike the earlier
      willReadFrequently mistake which affected the whole canvas. */
@@ -424,7 +462,7 @@ textarea,
   width: 100%;
   aspect-ratio: 1;
   padding: 0;
-  border: 2px solid var(--pp-bg);
+  border: 2px solid var(--pp-border-strong);
   border-radius: 8px;
   cursor: pointer;
 }
@@ -437,11 +475,11 @@ textarea,
   gap: 10px;
   width: 276px; /* 252 content: 8 recents or 5 palette swatches across */
   padding: 12px;
-  background: var(--pp-ink);
+  background: var(--pp-panel);
   border-radius: 12px;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
 .pp-color-picker--hidden {
@@ -471,7 +509,7 @@ textarea,
   margin-top: -7px;
   border: 2px solid #ffffff;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 1px rgba(40, 30, 60, 0.18);
   pointer-events: none;
 }
 
@@ -494,7 +532,7 @@ textarea,
   height: 18px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid var(--pp-ink);
+  border: 2px solid var(--pp-text);
   cursor: pointer;
 }
 
@@ -503,7 +541,7 @@ textarea,
   height: 18px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid var(--pp-ink);
+  border: 2px solid var(--pp-text);
   cursor: pointer;
 }
 
@@ -511,7 +549,7 @@ textarea,
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
 }
@@ -522,8 +560,8 @@ textarea,
   padding: 6px 8px;
   border: none;
   border-radius: 6px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-field);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   /* 16px minimum: iOS zooms the whole page when a text field under
      16px gets focus, and that zoom can stick after the keyboard
@@ -553,8 +591,8 @@ textarea,
   height: 40px;
   border: none;
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   cursor: pointer;
 }
 
@@ -598,7 +636,7 @@ textarea,
 
 .pp-color-picker__recent--empty,
 .pp-color-picker__swatch--empty {
-  border: 2px dashed var(--pp-ink-light);
+  border: 2px dashed var(--pp-border-strong);
   cursor: default;
 }
 
@@ -606,9 +644,9 @@ textarea,
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px dashed var(--pp-bg);
+  border: 2px dashed var(--pp-text-muted);
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
 }
 
 /* Replace / Remove under a long-pressed swatch. */
@@ -620,8 +658,8 @@ textarea,
   min-width: 130px;
   padding: 6px;
   border-radius: 10px;
-  background: var(--pp-ink-light);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  background: var(--pp-panel-solid);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.18);
 }
 
 .pp-color-picker__menu-item {
@@ -629,7 +667,7 @@ textarea,
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 16px;
   text-align: left;
@@ -637,7 +675,7 @@ textarea,
 }
 
 .pp-color-picker__menu-item:active {
-  background: var(--pp-ink);
+  background: var(--pp-accent-soft);
 }
 
 /* Rail swatch while the eyedropper is armed: an eyedropper badge. */
@@ -656,7 +694,7 @@ textarea,
   height: 26px;
   border-radius: 50%;
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   pointer-events: none;
 }
 
@@ -674,12 +712,12 @@ textarea,
   gap: 8px;
   width: 256px;
   padding: 12px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
   /* The Developer section can outgrow the screen (setOpen caps the
      height to the space beside or below the gear): scroll inside. */
   overflow-y: auto;
@@ -719,8 +757,8 @@ textarea,
   border: none;
   border-radius: 8px;
   padding: 10px 12px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 14px;
   text-align: left;
@@ -743,7 +781,7 @@ textarea,
 .pp-settings__section {
   margin-top: 6px;
   padding-top: 10px;
-  border-top: 1px solid var(--pp-ink-light);
+  border-top: 1px solid var(--pp-border);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -771,11 +809,11 @@ textarea,
   max-width: calc(100vw - 32px);
   padding: 10px 14px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel-solid);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.14);
   z-index: 1000;
 }
 
@@ -790,7 +828,7 @@ textarea,
   border-radius: 8px;
   padding: 6px 12px;
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -814,12 +852,12 @@ textarea,
   width: 288px;
   max-height: calc(100% - 16px);
   padding: 10px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
 .pp-layers--hidden {
@@ -849,8 +887,8 @@ textarea,
   padding: 0;
   border: none;
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   cursor: pointer;
 }
 
@@ -886,11 +924,12 @@ textarea,
   min-height: 52px;
   padding: 4px 4px 4px 0;
   border-radius: 8px;
-  background: var(--pp-ink-light);
+  background: var(--pp-control);
   cursor: pointer;
 }
 
 .pp-layers__row.is-active {
+  background: var(--pp-accent-soft);
   box-shadow: inset 0 0 0 2px var(--pp-accent);
 }
 
@@ -902,7 +941,7 @@ textarea,
 .pp-layers__row.is-dragging {
   position: relative;
   z-index: 1;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 0 0 2px var(--pp-accent);
+  box-shadow: 0 4px 12px rgba(40, 30, 60, 0.18), inset 0 0 0 2px var(--pp-accent);
 }
 
 .pp-layers__handle {
@@ -958,8 +997,8 @@ textarea,
   padding: 4px 6px;
   border: 1px solid var(--pp-accent);
   border-radius: 6px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-field);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 16px; /* 16px+ so iPadOS doesn't zoom on focus */
 }
@@ -969,7 +1008,7 @@ textarea,
   flex-direction: column;
   gap: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--pp-ink-light);
+  border-top: 1px solid var(--pp-border);
 }
 
 .pp-layers__opacity {
@@ -990,7 +1029,7 @@ textarea,
 }
 
 /* Fading banner (js/ui/ui.js showBanner): brief info, no button, never
-   blocks touches. Same spot as the notice toast; dark, like the top. */
+   blocks touches. Same spot as the notice toast. */
 .pp-banner {
   position: fixed;
   left: 50%;
@@ -999,12 +1038,12 @@ textarea,
   max-width: calc(100vw - 32px);
   padding: 10px 16px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel-solid);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 14px;
   text-align: center;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.14);
   pointer-events: none;
   z-index: 1000;
   opacity: 1;
@@ -1034,8 +1073,8 @@ textarea,
   gap: 8px;
   flex-shrink: 0;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--pp-ink);
-  border-top: 1px solid var(--pp-ink-light);
+  background: var(--pp-surface);
+  border-top: 1px solid var(--pp-border);
   font-family: var(--pp-font);
 }
 
@@ -1070,15 +1109,15 @@ textarea,
   overflow: hidden;
   padding: 0;
   border: none;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 
 .pp-frame-strip__tile.is-current {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   font-weight: 600;
 }
 
@@ -1095,6 +1134,8 @@ textarea,
 
 .pp-frame-strip__tile.has-picture {
   background: #ffffff;
+  /* A hairline, so a white tile still reads on the light strip. */
+  box-shadow: 0 0 0 1px var(--pp-border);
 }
 
 .pp-frame-strip__tile.has-picture .pp-frame-strip__number {
@@ -1104,8 +1145,8 @@ textarea,
   min-width: 18px;
   padding: 1px 4px;
   border-radius: 6px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-size: 12px;
   line-height: 16px;
   font-weight: 600;
@@ -1113,7 +1154,7 @@ textarea,
 
 .pp-frame-strip__tile.has-picture.is-current .pp-frame-strip__number {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 .pp-frame-strip__tile.has-picture.is-current::after {
@@ -1138,7 +1179,7 @@ textarea,
   z-index: 1;
   transition: none;
   opacity: 0.85;
-  box-shadow: inset 0 0 0 3px var(--pp-bg);
+  box-shadow: inset 0 0 0 3px var(--pp-accent);
 }
 
 .pp-frame-strip.is-reordering .pp-frame-strip__list {
@@ -1154,9 +1195,9 @@ textarea,
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px dashed var(--pp-ink-light);
+  border: 2px dashed var(--pp-border-strong);
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
 }
 
 .pp-frame-strip__add:disabled {
@@ -1173,7 +1214,7 @@ textarea,
   gap: 4px;
   flex-shrink: 0;
   padding-right: 8px;
-  border-right: 1px solid var(--pp-ink-light);
+  border-right: 1px solid var(--pp-border);
 }
 
 .pp-transport__btn {
@@ -1186,7 +1227,7 @@ textarea,
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 15px;
   font-variant-numeric: tabular-nums;
@@ -1194,7 +1235,7 @@ textarea,
 }
 
 .pp-transport__btn:active:not(:disabled) {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
 }
 
 .pp-transport__btn.is-active {
@@ -1203,22 +1244,22 @@ textarea,
 
 /* Play stands out: it's the button she came for. */
 .pp-transport__play {
-  background: var(--pp-ink-light);
+  background: var(--pp-control);
 }
 
 .pp-transport__play.is-active {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 .pp-transport__fps {
   min-width: 64px;
-  border: 1px solid var(--pp-ink-light);
+  border: 1px solid var(--pp-border);
 }
 
 .pp-transport__fps.is-active {
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-accent-soft);
+  color: var(--pp-text);
 }
 
 .pp-transport__btn:disabled {
@@ -1237,9 +1278,9 @@ textarea,
   width: 220px;
   padding: 12px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
+  color: var(--pp-text);
 }
 
 .pp-fps-panel__title {
@@ -1267,8 +1308,8 @@ textarea,
   height: 44px;
   border: none;
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 16px;
   cursor: pointer;
@@ -1291,7 +1332,7 @@ textarea,
 
 .pp-fps-panel__preset.is-active {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   font-weight: 600;
 }
 
@@ -1307,8 +1348,8 @@ textarea,
   max-width: calc(100% - 32px);
   padding: 8px 14px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel-solid);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 15px;
   font-variant-numeric: tabular-nums;
@@ -1342,8 +1383,8 @@ textarea,
   gap: 2px;
   padding: 3px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: var(--pp-panel);
+  box-shadow: 0 2px 8px rgba(40, 30, 60, 0.16);
 }
 
 .pp-onion-badge__btn {
@@ -1356,21 +1397,21 @@ textarea,
   border: none;
   border-radius: 9px;
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   cursor: pointer;
 }
 
 .pp-onion-badge__btn:active {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
 }
 
 .pp-onion-badge__toggle.is-active {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 .pp-onion-badge__btn.is-active:not(.pp-onion-badge__toggle) {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
 }
 
 .pp-onion-panel {
@@ -1385,9 +1426,9 @@ textarea,
   max-width: calc(100vw - 32px);
   padding: 12px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
+  color: var(--pp-text);
   font-family: var(--pp-font);
 }
 
@@ -1425,8 +1466,8 @@ textarea,
   padding: 0;
   border: none;
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   cursor: pointer;
 }
 
@@ -1468,22 +1509,28 @@ textarea,
 }
 
 .pp-onion-panel__swatch.is-active {
-  border-color: var(--pp-bg);
+  border-color: #ffffff;
   box-shadow: 0 0 0 2px var(--pp-accent);
 }
 
-/* Gallery screen (js/ui/gallery.js). Same dark top bar as the editor
-   (it sits under the status bar); a warm, light backdrop below so
+/* Gallery screen (js/ui/gallery.js). Same top bar as the editor
+   (it sits under the status bar); a light gray backdrop below so
    the white thumbnails read as paper. The grid scrolls on its own —
    it's the scrolling element, so the page-level touch-action: none
    doesn't stop it. */
 .pp-gallery__title {
   margin: 0;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 22px;
   font-weight: 700;
 }
+
+.pp-gallery__letter:nth-child(5n + 1) { color: var(--pp-title-1); }
+.pp-gallery__letter:nth-child(5n + 2) { color: var(--pp-title-2); }
+.pp-gallery__letter:nth-child(5n + 3) { color: var(--pp-title-3); }
+.pp-gallery__letter:nth-child(5n + 4) { color: var(--pp-title-4); }
+.pp-gallery__letter:nth-child(5n + 5) { color: var(--pp-title-5); }
 
 .pp-gallery {
   flex: 1;
@@ -1493,7 +1540,7 @@ textarea,
   overscroll-behavior: contain;
   touch-action: pan-y;
   padding: 24px;
-  background: var(--pp-bg);
+  background: var(--pp-gallery-bg);
 }
 
 .pp-gallery-screen.is-busy .pp-gallery {
@@ -1509,7 +1556,7 @@ textarea,
 
 .pp-gallery__hint {
   margin: 20px 0 0;
-  color: var(--pp-ink-light);
+  color: var(--pp-text-muted);
   font-family: var(--pp-font);
   font-size: 16px;
 }
@@ -1525,7 +1572,7 @@ textarea,
   padding: 0;
   border: none;
   background: none;
-  color: var(--pp-ink);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 16px;
   font-weight: 600;
@@ -1546,10 +1593,10 @@ textarea,
   justify-content: center;
   gap: 8px;
   aspect-ratio: 16 / 9;
-  border: 3px dashed var(--pp-ink-light);
+  border: 3px dashed var(--pp-accent);
   border-radius: 12px;
-  background: transparent;
-  color: var(--pp-ink);
+  background: var(--pp-accent-soft);
+  color: var(--pp-accent-active);
   font-family: var(--pp-font);
   font-size: 16px;
   font-weight: 600;
@@ -1557,7 +1604,7 @@ textarea,
 }
 
 .pp-gallery-new:active {
-  background: rgba(242, 166, 90, 0.2);
+  background: rgba(122, 82, 199, 0.3);
   border-color: var(--pp-accent);
 }
 
@@ -1578,7 +1625,7 @@ textarea,
   border-radius: 12px;
   overflow: hidden;
   background: #ffffff;
-  box-shadow: 0 2px 10px rgba(58, 50, 38, 0.25);
+  box-shadow: 0 2px 10px rgba(40, 30, 60, 0.25);
   cursor: pointer;
 }
 
@@ -1612,7 +1659,7 @@ textarea,
   padding: 2px 0;
   border: none;
   background: none;
-  color: var(--pp-ink);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 16px;
   font-weight: 600;
@@ -1622,7 +1669,7 @@ textarea,
 }
 
 .pp-gallery-card__meta {
-  color: var(--pp-ink-light);
+  color: var(--pp-text-muted);
   font-family: var(--pp-font);
   font-size: 13px;
 }
@@ -1637,12 +1684,12 @@ textarea,
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--pp-ink);
+  color: var(--pp-text);
   cursor: pointer;
 }
 
 .pp-gallery-card__more:active {
-  background: rgba(58, 50, 38, 0.12);
+  background: rgba(40, 30, 60, 0.12);
 }
 
 .pp-gallery-menu {
@@ -1673,12 +1720,12 @@ textarea,
   height: 9px;
   border-radius: 50%;
   background: var(--pp-accent);
-  box-shadow: 0 0 0 2px var(--pp-ink-light);
+  box-shadow: 0 0 0 2px var(--pp-surface);
 }
 
 .pp-image-btn.is-active .pp-image-btn__dot,
 .pp-sound-btn.is-active .pp-sound-btn__dot {
-  background: var(--pp-ink);
+  background: var(--pp-on-accent);
   box-shadow: none;
 }
 
@@ -1697,8 +1744,8 @@ textarea,
   min-width: 180px;
   padding: 6px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  background: var(--pp-panel);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
 /* The frame strip's menu: above the current tile. */
@@ -1706,7 +1753,7 @@ textarea,
   bottom: calc(100% + 6px);
 }
 
-/* Shared look: dark rounded menu of text items. */
+/* Shared look: rounded menu of text items. */
 .pp-gallery-menu,
 .pp-frame-menu,
 .pp-layer-menu {
@@ -1717,8 +1764,8 @@ textarea,
   min-width: 160px;
   padding: 6px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  background: var(--pp-panel);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
 .pp-gallery-menu__item,
@@ -1728,7 +1775,7 @@ textarea,
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 16px;
   text-align: left;
@@ -1738,7 +1785,7 @@ textarea,
 .pp-gallery-menu__item:active,
 .pp-frame-menu__item:active,
 .pp-layer-menu__item:active {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
 }
 
 .pp-frame-menu__item:disabled,
@@ -1749,7 +1796,7 @@ textarea,
 .pp-gallery-menu__item--danger,
 .pp-frame-menu__item--danger,
 .pp-layer-menu__item--danger {
-  color: #ff8a7a;
+  color: var(--pp-danger-text);
 }
 
 /* Modal dialogs (js/ui/confirm-dialog.js): a dim backdrop that takes
@@ -1762,7 +1809,7 @@ textarea,
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(20, 16, 12, 0.55);
+  background: rgba(30, 24, 40, 0.3);
   touch-action: none;
 }
 
@@ -1773,10 +1820,10 @@ textarea,
   width: min(400px, 100%);
   padding: 20px;
   border-radius: 16px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel-solid);
+  color: var(--pp-text);
   font-family: var(--pp-font);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(40, 30, 60, 0.18);
 }
 
 .pp-dialog__title {
@@ -1794,10 +1841,10 @@ textarea,
 .pp-dialog__input {
   width: 100%;
   padding: 10px 12px;
-  border: 2px solid var(--pp-ink-light);
+  border: 2px solid var(--pp-border);
   border-radius: 8px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-field);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 16px; /* 16px+ so iPadOS doesn't zoom on focus */
 }
@@ -1893,8 +1940,8 @@ textarea,
   padding: 6px 10px 6px 6px;
   border: 2px solid transparent;
   border-radius: 10px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -1948,7 +1995,7 @@ textarea,
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 2px solid var(--pp-bg);
+  border: 2px solid var(--pp-text-muted);
   border-radius: 50%;
   opacity: 0.5;
 }
@@ -1960,7 +2007,7 @@ textarea,
 .pp-restore__item.is-on .pp-restore__tick {
   border-color: var(--pp-accent);
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
   opacity: 1;
 }
 
@@ -1985,8 +2032,8 @@ textarea,
   padding: 10px 18px;
   border: none;
   border-radius: 10px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 16px;
   font-weight: 600;
@@ -1995,7 +2042,7 @@ textarea,
 
 .pp-dialog__btn--primary {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 .pp-dialog__btn--primary:active {
@@ -2044,7 +2091,7 @@ textarea,
   padding: 0;
   border: none;
   border-radius: 16px;
-  background: rgba(250, 244, 235, 0.25); /* off: visible on the dialog's brown */
+  background: var(--pp-border-strong); /* off: visible on the dialog's brown */
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -2060,7 +2107,7 @@ textarea,
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--pp-bg);
+  background: #ffffff;
   transition: transform 0.15s;
 }
 
@@ -2072,7 +2119,7 @@ textarea,
   position: relative;
   height: 8px;
   border-radius: 4px;
-  background: var(--pp-ink-light);
+  background: var(--pp-control);
   overflow: hidden;
 }
 
@@ -2167,7 +2214,7 @@ textarea,
 }
 
 .pp-sound-panel {
-  --pp-sound-voice: #8cc4e8;   /* the Voice row's waveform */
+  --pp-sound-voice: #1f9e9a;   /* the Voice row's waveform */
   --pp-sound-record: #e0574b;  /* the mic and the recording bar */
   position: absolute;
   left: 0;
@@ -2178,11 +2225,11 @@ textarea,
   flex-direction: column;
   gap: 6px;
   padding: 6px 0;
-  background: var(--pp-ink);
-  border-top: 1px solid var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  border-top: 1px solid var(--pp-border);
+  color: var(--pp-text);
   font-family: var(--pp-font);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 -4px 16px rgba(40, 30, 60, 0.15);
 }
 
 .pp-sound-panel[hidden] {
@@ -2244,12 +2291,12 @@ textarea,
 }
 
 .pp-sound-panel__label:not(:disabled) {
-  background: rgba(250, 244, 235, 0.06);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .pp-sound-panel__label.is-open,
 .pp-sound-panel__label:not(:disabled):active {
-  background: var(--pp-ink-light);
+  background: var(--pp-accent-soft);
 }
 
 .pp-sound-panel__label-name {
@@ -2279,7 +2326,7 @@ textarea,
 
 .pp-sound-panel__listen.is-playing {
   background: var(--pp-accent);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 /* A row's volume slider (after 5c), above its button. */
@@ -2289,9 +2336,9 @@ textarea,
   width: 240px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  border: 1px solid var(--pp-ink-light);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  background: var(--pp-panel);
+  border: 1px solid var(--pp-border);
+  box-shadow: 0 6px 20px rgba(40, 30, 60, 0.16);
 }
 
 .pp-volume-pop[hidden] {
@@ -2325,8 +2372,8 @@ textarea,
   padding: 6px 12px;
   border: none;
   border-radius: 10px;
-  background: var(--pp-ink-light);
-  color: var(--pp-bg);
+  background: var(--pp-control);
+  color: var(--pp-text);
   font-family: inherit;
   font-size: 15px;
   text-align: left;
@@ -2335,7 +2382,7 @@ textarea,
 
 .pp-sound-panel__btn:active {
   background: var(--pp-accent-active);
-  color: var(--pp-ink);
+  color: var(--pp-on-accent);
 }
 
 .pp-sound-panel__btn:disabled {
@@ -2392,7 +2439,7 @@ textarea,
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  background: var(--pp-stage);
+  background: var(--pp-track);
 }
 
 .pp-sound-panel__overview {
@@ -2419,7 +2466,7 @@ textarea,
   bottom: 0;
   border: 2px solid var(--pp-accent);
   border-radius: 6px;
-  background: rgba(242, 166, 90, 0.18);
+  background: rgba(122, 82, 199, 0.18);
   pointer-events: none;
 }
 
@@ -2433,13 +2480,13 @@ textarea,
   bottom: 2px;
   border: 2px solid var(--pp-accent);
   border-radius: 8px;
-  background: rgba(242, 166, 90, 0.12);
+  background: rgba(122, 82, 199, 0.12);
   cursor: grab;
 }
 
 .pp-sound-panel__row--voice .pp-sound-panel__clip {
   border-color: var(--pp-sound-voice);
-  background: rgba(140, 196, 232, 0.12);
+  background: rgba(31, 158, 154, 0.12);
 }
 
 .pp-sound-panel__clip[hidden] {
@@ -2522,7 +2569,7 @@ textarea,
   bottom: 0;
   width: 2px;
   margin-left: -1px;
-  background: var(--pp-bg);
+  background: var(--pp-text);
   pointer-events: none;
 }
 
@@ -2537,7 +2584,7 @@ textarea,
   align-items: center;
   padding: 0 12px;
   font-size: 14px;
-  color: var(--pp-bg);
+  color: var(--pp-text);
   opacity: 0.75;
   pointer-events: none;
 }
@@ -2576,12 +2623,12 @@ textarea,
   width: 140px;
   height: 140px;
   border-radius: 50%;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel-solid);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 84px;
   font-weight: 700;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 24px rgba(40, 30, 60, 0.16);
 }
 
 .pp-countdown__number.is-pop {
@@ -2591,8 +2638,8 @@ textarea,
 .pp-countdown__hint {
   padding: 4px 12px;
   border-radius: 999px;
-  background: rgba(58, 50, 38, 0.85);
-  color: var(--pp-bg);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 15px;
 }
@@ -2628,7 +2675,7 @@ textarea,
 }
 
 .pp-tool-btn.is-open {
-  box-shadow: inset 0 0 0 2px var(--pp-bg);
+  box-shadow: inset 0 0 0 2px var(--pp-on-accent);
 }
 
 /* The brush panel (8b-ii, js/ui/brush-panel.js): right of the Draw or
@@ -2642,11 +2689,11 @@ textarea,
   width: 264px;
   padding: 12px;
   border-radius: 12px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
+  background: var(--pp-panel);
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
 }
 
 .pp-brush-panel[hidden] {
@@ -2671,8 +2718,8 @@ textarea,
   padding: 6px 4px;
   border: 2px solid transparent;
   border-radius: 8px;
-  background: var(--pp-bg);
-  color: var(--pp-ink);
+  background: #ffffff;
+  color: var(--pp-text);
   font-family: var(--pp-font);
   font-size: 12px;
   cursor: pointer;

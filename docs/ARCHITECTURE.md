@@ -1340,10 +1340,21 @@ registration, update checks/apply, version, fresh reload — no UI).
 - Safe-area padding needs `viewport-fit=cover`,
   `black-translucent`, and global `box-sizing: border-box` — keep all
   three.
-- **Anything at the top edge stays dark**, including `theme-color`,
-  the manifest's `theme_color`/`background_color`, and the `html, body`
-  background — iPadOS restyles the status bar from them.
+- **Everything at the top edge is one color, the top bar's**
+  (`--pp-surface`): `theme-color`, the manifest's
+  `theme_color`/`background_color`, the `html, body` and `#app`
+  backgrounds — iPadOS picks the status bar's text color from them.
+  Change one, change all.
   ([why](DESIGN_NOTES.md#pwa-layout-and-updates))
+- **Colors come from the named tokens in `style.css`'s `:root`**
+  (light theme, after 8b-ii), named by job: surface, panel, text,
+  control, border, stage, accent (purple), accent-soft (lavender),
+  on-accent. No new hex literals for UI chrome — a second theme
+  would only be a second set of values. Panels over the canvas use
+  `--pp-panel` (a little see-through); bars and dialogs stay solid.
+  Icons' knocked-out parts use `--pp-knockout`, which a button sets
+  to its own fill. The sound panel's waveform reads `--pp-accent`,
+  `--pp-sound-voice` and `--pp-border-strong` at draw time.
 - **`#app` is the one fixed box at the top edge, and it's never
   replaced** — screens inside it are absolute, not fixed, and swap
   with no empty moment (load the next screen's data first). No

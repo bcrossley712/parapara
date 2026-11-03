@@ -350,10 +350,10 @@ export function createSoundPanel(callbacks, { container, timeline, signal } = {}
   function colors() {
     const css = getComputedStyle(panel);
     return {
-      music: css.getPropertyValue('--pp-accent').trim() || '#f2a65a',
-      voice: css.getPropertyValue('--pp-sound-voice').trim() || '#8cc4e8',
-      faint: css.getPropertyValue('--pp-ink-light').trim() || '#55483a',
-      tick: 'rgba(250, 244, 235, 0.08)',
+      music: css.getPropertyValue('--pp-accent').trim() || '#7a52c7',
+      voice: css.getPropertyValue('--pp-sound-voice').trim() || '#1f9e9a',
+      faint: css.getPropertyValue('--pp-border-strong').trim() || '#b8b5bd',
+      tick: 'rgba(0, 0, 0, 0.06)',
     };
   }
 

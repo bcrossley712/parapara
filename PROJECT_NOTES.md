@@ -154,7 +154,25 @@ links):
    links, now that video sharing works.
 3. The rest of the requested extras under Open items.
 
+**Light theme — built, awaiting push and iPad checks** (her request,
+scoped 2026-11-02; decisions: [design
+notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates) → "Light theme"):
+pale lavender bars with flat buttons, purple accent with lavender
+highlights, panels over the canvas a little see-through, teal Voice
+waveform, a multicolored "Parapara!" in the gallery. One theme, no
+setting; colors are named tokens in `style.css` `:root`. **Next, once
+scoped:** an App color choice in Settings (his go-ahead in principle,
+2026-11-02).
+
 **Open iPad checks** (send the activity log with any of them):
+- **After the light theme push:** the status bar's time and battery
+  are dark over the light top bar, in the gallery and the editor and
+  after switching between them, with no blur at the top. If they stay
+  white, see the design note's fallbacks (re-add to the Home Screen
+  only after a restore from backup works). Ask her about the purple
+  and lavender shades and how see-through the panels should be, and
+  whether anything is hard to see (empty frame tiles, the gear, the
+  hidden-images icon).
 - **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
   already the tool opens the brush panel; a canvas tap closes it
   without drawing. Her old Pen size is unchanged. Each tip looks right

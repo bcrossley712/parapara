@@ -123,6 +123,6 @@ const IMAGE_HIDDEN_ICON = `
   <rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="2" opacity="0.6"/>
   <circle cx="8.5" cy="9.5" r="1.8" fill="currentColor" opacity="0.6"/>
   <path d="M4 18 9.5 12.5l3.5 3.5 2.5-2.5L20 18Z" fill="currentColor" opacity="0.6"/>
-  <path d="M3.5 3.5 20.5 20.5" stroke="var(--pp-ink-light)" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M3.5 3.5 20.5 20.5" stroke="var(--pp-knockout)" stroke-width="4.5" stroke-linecap="round"/>
   <path d="M3.5 3.5 20.5 20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
 </svg>`;

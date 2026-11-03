@@ -333,7 +333,16 @@ Sections: [Process lessons](#process-lessons) ·
   that way in the editor. The cause was the cream `theme-color`
   (`index.html`), the manifest's `theme_color`/`background_color`, and
   the cream `html, body` background (never visible, but iPadOS reads
-  it). All are now the top bar's dark brown. That the gallery's light
+  it). All were then made the top bar's dark brown. **Light theme
+  (after 8b-ii, her request — she likes Sketchbook's look):** all of
+  them are now the light top bar's color, on the reading that iPadOS
+  picks dark text for a light page — the same mechanism that caused
+  the bug. Unconfirmed until seen on the iPad. If the text stays
+  white, first try re-adding the app to the Home Screen (iOS may keep
+  install-time manifest colors; only after a restore from backup is
+  confirmed), then switch `apple-mobile-web-app-status-bar-style` to
+  `default` (iOS draws its own plain bar; the safe-area top inset
+  becomes 0, which the top bar's `env()` fallback already handles). That the gallery's light
   scrolling area is what set it off is a guess — nothing scrolled
   before 2d. Only the iPad can check this: desktop Chromium doesn't
   draw the status bar. iOS may keep manifest colors from when the app
@@ -398,6 +407,38 @@ Sections: [Process lessons](#process-lessons) ·
 - **Gear menu placement** matches Sketchbook/Procreate keeping
   app-level actions behind one gear/wrench. Its Developer section
   holds dev-only tools (Fresh reload, the memory stress test).
+- **Light theme (2026-11-02, after 8b-ii; her request, his calls).**
+  She prefers a light app, like Sketchbook. Decisions:
+  - **One theme, not a light/dark setting:** a setting doubles every
+    visual check, and switching at runtime is the riskiest part (the
+    status bar reads its colors at launch, and manifest colors may
+    stick from install). The colors were restructured into named
+    tokens anyway, so a dark option later is one more set of values
+    plus the status-bar question.
+  - **Accent: purple, not Sketchbook's blue (her pick).** A deep
+    purple (`#7a52c7`) for "on" (white text on it, ~5.4:1 contrast),
+    lavender (`#e6dcf8`) for selected rows and pressed buttons — pale
+    lavender alone is too close to the bars and too faint under white
+    text (~2:1). The Voice waveform moved from light blue to teal so it
+    doesn't blend with Music (which follows the accent).
+  - **Sketchbook's look:** flat bar buttons (only the active one is
+    filled), light gray around the canvas, panels over the canvas at
+    90% white so the drawing shows faintly through. No
+    `backdrop-filter` blur: costly over a canvas that repaints during
+    playback on a 9th-gen iPad.
+  - **A splash of color (she found the purple right, after hearing
+    about contrast, but wanted more color):** the bars are a pale
+    lavender instead of off-white; the gallery's "Parapara!" has one
+    color per letter (purple, pink, orange, teal, blue — each ≥ 3:1
+    on the bar, enough for large bold text); New animation is a
+    lavender tile. The canvas surround stays neutral gray on purpose —
+    a tinted backdrop changes how her drawing's colors look
+    (Sketchbook and Procreate keep it gray too).
+  - **Not done:** a see-through top bar (the iPadOS 26 top-edge fix
+    needs it solid); a see-through rail and strip — they sit beside
+    the canvas, not over it, so it would only show gray. Sketchbook's
+    full-screen canvas with bars floating on top is a layout change,
+    its own step if she asks.
 
 ## Testing and CI
 

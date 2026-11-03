@@ -44,7 +44,14 @@ export function createGallery(container, { callbacks, appActions = {} }) {
   topBar.className = 'pp-top-bar';
   const title = document.createElement('h1');
   title.className = 'pp-gallery__title';
-  title.textContent = 'Parapara!';
+  // One span per letter, each its own color (style.css); the heading's
+  // text is still "Parapara!".
+  for (const letter of 'Parapara!') {
+    const span = document.createElement('span');
+    span.className = 'pp-gallery__letter';
+    span.textContent = letter;
+    title.append(span);
+  }
   const spacer = document.createElement('div');
   spacer.className = 'pp-top-bar__spacer';
   const gearBtn = document.createElement('button');

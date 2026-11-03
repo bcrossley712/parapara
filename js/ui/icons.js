@@ -15,7 +15,7 @@ export const GEAR_ICON = `
     <rect x="10" y="1.5" width="4" height="21" rx="1" transform="rotate(135 12 12)"/>
     <circle cx="12" cy="12" r="7.5"/>
   </g>
-  <circle cx="12" cy="12" r="3" fill="var(--pp-ink-light)"/>
+  <circle cx="12" cy="12" r="3" fill="var(--pp-knockout)"/>
 </svg>`;
 
 // Gallery: a 2×2 grid of rounded tiles, like the gallery buttons in
