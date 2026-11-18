@@ -18,7 +18,7 @@
 
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { openApp, reloadApp, readDb, setVisibility } from './helpers.js';
+import { openApp, reloadApp, readDb, setVisibility, newAnimation } from './helpers.js';
 
 const tiles = (page) => page.locator('.pp-frame-strip__tile');
 const tile = (page, n) => page.getByRole('button', { name: `Frame ${n}`, exact: true });
@@ -414,6 +414,20 @@ test('Make video → Ready → Share gives an MP4 with every frame in order, at 
   await expect(sheet(page)).toHaveCount(0);
   await tile(page, 1).click();
   await expect(tile(page, 1)).toHaveClass(/is-current/);
+});
+
+test('a portrait animation makes a tall video (1080×1920)', async ({ page }) => {
+  await useStandInEncoder(page);
+  await page.goto('/index.html');
+  await newAnimation(page, 'Portrait');
+  await page.locator('.pp-canvas').waitFor();
+  await mark(page, 960);
+  await settled(page);
+  await makeVideo(page);
+  const { bytes } = await shareAndDownload(page);
+  const video = readVideo(bytes);
+  expect([video.width, video.height]).toEqual([1080, 1920]);
+  expect(video.samples).toHaveLength(1);
 });
 
 test('Cancel stops the video and closes the sheet; hiding the app stops it too', async ({ page }) => {

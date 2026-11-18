@@ -57,11 +57,18 @@ export async function pickTip(page, tool, tipLabel, { strength } = {}) {
 // Opens the app into the editor. A fresh install starts on the empty
 // gallery (2d), so this makes a new animation from there; an install
 // that was left in the editor reopens it.
+// New animation asks for the canvas shape first (after 8b-ii): taps
+// the tile, then the shape ('Landscape', 'Portrait' or 'Square').
+export async function newAnimation(page, shape = 'Landscape') {
+  await page.getByRole('button', { name: 'New animation' }).click();
+  await page.getByRole('menu', { name: 'Canvas shape' }).getByRole('menuitem', { name: shape }).click();
+}
+
 export async function openApp(page) {
   await page.goto('/index.html');
   await page.locator('.pp-canvas, .pp-gallery').first().waitFor();
   if (await page.locator('.pp-gallery').count()) {
-    await page.getByRole('button', { name: 'New animation' }).click();
+    await newAnimation(page);
   }
   await page.locator('.pp-canvas').waitFor();
 }

@@ -54,6 +54,7 @@ import {
   createLayer,
   createFrame,
   createProjectRecord,
+  sanitizeCanvasShape,
   ensureBitmapRefs,
   saveImageBlob,
   saveAudioBlob,
@@ -164,6 +165,8 @@ let toolSettings = null;
 // — remembered across launches. hideHeadphonesTip (5c): she chose
 // "Don't show again" on the headphones popup. appColor (after the
 // light theme): an id from ui/app-color.js, missing = 'purple'.
+// newShape: the canvas shape she last picked for a new animation
+// (highlighted in the gallery's menu), missing = 'landscape'.
 let uiState = { appColor: readStoredAppColor(globalThis.localStorage) };
 // The last colors she drew or filled with, newest first — app-wide
 // (colors.js), shown in every project's color picker.
@@ -712,6 +715,7 @@ async function launch() {
       screen: saved?.screen === 'gallery' ? 'gallery' : 'editor',
       hideHeadphonesTip: saved?.hideHeadphonesTip === true,
       appColor: sanitizeAppColor(saved?.appColor),
+      newShape: sanitizeCanvasShape(saved?.newShape),
     };
     setAppColor(uiState.appColor, { save: false });
   } catch (err) {
@@ -794,8 +798,12 @@ async function showGallery(preloaded = null) {
     appActions,
     callbacks: {
       onOpen: (id) => open(() => loadProject(id)),
-      onCreate: () => open(
-        () => createProject(nextProjectName(cards.map((c) => c.name))),
+      getNewShape: () => uiState.newShape,
+      onCreate: (shape) => open(
+        () => {
+          setUiState({ newShape: sanitizeCanvasShape(shape) });
+          return createProject(nextProjectName(cards.map((c) => c.name)), shape);
+        },
         "Couldn't make a new animation. The iPad may be out of space."
       ),
       onRename: async (id, name) => {
@@ -1049,6 +1057,7 @@ function mountEditor(session, { canSave }) {
   let thumbnailStale = false;
 
   const ui = initUI(appRoot, {
+    canvasSize: project.canvas,
     settings: toolSettings,
     onSettingsChange: () => {
       toolSettings = canvasApi.getSettings();

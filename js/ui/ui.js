@@ -36,6 +36,8 @@ import { createOnionBadge } from './onion-badge.js';
 import { createCountdown } from './countdown.js';
 import { createExportSheet } from './export-sheet.js';
 
+// options.canvasSize: { width, height } — the project's canvas
+//   (project.canvas; landscape, portrait or square). Omit for 1920×1080.
 // options.settings: saved tool settings to start from (raw is fine —
 //   canvas.applySettings cleans them). Omit for defaults.
 // options.onSettingsChange: called after the user changes tool, color,
@@ -255,7 +257,10 @@ export function initUI(container, options = {}) {
   }
   setHistoryState(false, false);
 
-  const canvasApi = initCanvas(canvasArea);
+  const canvasApi = initCanvas(canvasArea, {
+    width: options.canvasSize?.width,
+    height: options.canvasSize?.height,
+  });
   canvasApi.applySettings(settings);
   const startSettings = canvasApi.getSettings();
 

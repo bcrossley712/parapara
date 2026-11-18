@@ -6,7 +6,7 @@
 // and stylus feel with the copies trailing the stabilizer.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, closeLayersPanel } from './helpers.js';
+import { openApp, reloadApp, readDb, closeLayersPanel, newAnimation } from './helpers.js';
 
 const symmetryBtn = (page) => page.locator('.pp-symmetry-btn');
 const undoBtn = (page) => page.getByRole('button', { name: 'Undo' });
@@ -201,7 +201,7 @@ test('a new project starts with symmetry off', async ({ page }) => {
   await expect.poll(async () => (await readDb(page, 'projects'))[0]?.symmetry).toBe('both');
   await page.getByRole('button', { name: 'Gallery', exact: true }).click();
   await page.locator('.pp-gallery').waitFor();
-  await page.getByRole('button', { name: 'New animation' }).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   await expect(symmetryBtn(page)).toHaveAttribute('aria-label', 'Symmetry: Off');
   await expect(guide(page)).toBeHidden();

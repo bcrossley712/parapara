@@ -9,18 +9,22 @@
 // name to rename it, and the ⋯ button for Rename / Duplicate / Save as
 // file / Delete. Delete asks first because it can't be undone.
 // Import in the top bar opens a project file (7a), as in Procreate.
+// New animation asks for the canvas's shape first — Landscape, Portrait
+// or Square — as Sketchbook asks at creation; her last pick is
+// highlighted.
 
 import { attachSettingsMenu } from './settings-panel.js';
 import { showConfirm, showPrompt } from './confirm-dialog.js';
 import { GEAR_ICON } from './icons.js';
-import { MAX_PROJECT_NAME } from '../storage/storage.js';
+import { MAX_PROJECT_NAME, CANVAS_SHAPES, sanitizeCanvasShape } from '../storage/storage.js';
 
-// callbacks: { onOpen(id), onCreate(), onRename(id, name),
+// callbacks: { onOpen(id), onCreate(shape), onRename(id, name),
 //   onDuplicate(id), onSaveFile(id), onImport(file), onDelete(id),
 //   onRestore() }
 //   — onImport gets the File she picked; checking it is main.js's job.
 //   onRestore (7b push 2): the empty gallery's "Restore from backup",
-//   for a new iPad or a reinstall.
+//   for a new iPad or a reinstall. onCreate's shape is a CANVAS_SHAPES
+//   key; getNewShape() says which to highlight (her last pick).
 // appActions: for the gear menu (see settings-panel.js) — no editor
 //   actions here.
 //
@@ -31,6 +35,7 @@ export function createGallery(container, { callbacks, appActions = {} }) {
   const {
     onOpen, onCreate, onRename, onDuplicate, onDelete,
     onSaveFile = () => {}, onImport = () => {}, onRestore = () => {},
+    getNewShape = () => 'landscape',
   } = callbacks;
   container.innerHTML = '';
   const listeners = new AbortController();
@@ -166,6 +171,36 @@ export function createGallery(container, { callbacks, appActions = {} }) {
     menuAnchor = anchor;
   }
 
+  // New animation's shape menu: hangs below the tile, like the ⋯ menu.
+  const SHAPE_LABELS = { landscape: 'Landscape', portrait: 'Portrait', square: 'Square' };
+  function showShapeMenu(anchor) {
+    closeMenu();
+    const menu = document.createElement('div');
+    menu.className = 'pp-gallery-menu pp-gallery-shape-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Canvas shape');
+    const current = sanitizeCanvasShape(getNewShape());
+    for (const [shape, size] of Object.entries(CANVAS_SHAPES)) {
+      const btn = menuButton(SHAPE_LABELS[shape], () => { if (!busy) onCreate(shape); });
+      // A little picture of the shape, its sides in proportion.
+      const scale = 22 / Math.max(size.width, size.height);
+      const icon = document.createElement('span');
+      icon.className = 'pp-gallery-shape-menu__icon';
+      icon.setAttribute('aria-hidden', 'true');
+      const w = Math.round(size.width * scale);
+      icon.style.width = `${w}px`;
+      icon.style.height = `${Math.round(size.height * scale)}px`;
+      // Centered in a 24 px slot so the labels line up.
+      icon.style.marginInline = `${(24 - w) / 2}px`;
+      btn.prepend(icon);
+      if (shape === current) btn.classList.add('is-current');
+      menu.append(btn);
+    }
+    anchor.parentElement.appendChild(menu);
+    openMenu = menu;
+    menuAnchor = anchor;
+  }
+
   function menuButton(label, onClick) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -201,6 +236,8 @@ export function createGallery(container, { callbacks, appActions = {} }) {
   // --- cards ---
 
   function newTile() {
+    const wrap = document.createElement('div');
+    wrap.className = 'pp-gallery-new-wrap'; // anchors the shape menu
     const tile = document.createElement('button');
     tile.type = 'button';
     tile.className = 'pp-gallery-new';
@@ -210,10 +247,15 @@ export function createGallery(container, { callbacks, appActions = {} }) {
         <path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
       </svg>
       <span>New animation</span>`;
+    tile.setAttribute('aria-haspopup', 'menu');
     tile.addEventListener('click', () => {
-      if (!busy) onCreate();
+      if (busy) return;
+      // A second tap on the tile closes the menu, as ⋯ does.
+      if (openMenu && menuAnchor === tile) closeMenu();
+      else showShapeMenu(tile);
     });
-    return tile;
+    wrap.append(tile);
+    return wrap;
   }
 
   function card(project) {

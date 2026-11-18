@@ -9,7 +9,7 @@
 // a large frame.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, setVisibility, waitForToolSettings } from './helpers.js';
+import { openApp, reloadApp, readDb, setVisibility, waitForToolSettings, newAnimation } from './helpers.js';
 
 const galleryBtn = (page) => page.getByRole('button', { name: 'Gallery', exact: true });
 const newBtn = (page) => page.getByRole('button', { name: 'New animation' });
@@ -73,7 +73,7 @@ test('a fresh install opens on an empty gallery, and New animation opens the edi
   await expect(cards(page)).toHaveCount(0);
   await expect(page.locator('.pp-gallery__hint')).toBeVisible();
 
-  await newBtn(page).click();
+  await newAnimation(page);
   await expect(page.locator('.pp-canvas')).toBeVisible();
   await expect(page.locator('.pp-gallery')).toHaveCount(0);
 
@@ -115,7 +115,7 @@ test('a new animation gets the next number and opens blank; tool settings carry 
   await waitForToolSettings(page, { tool: 'erase' });
   await toGallery(page);
 
-  await newBtn(page).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   expect(await paintedPixels(page)).toBe(0);
   await expect(page.getByRole('button', { name: 'Erase', exact: true })).toHaveClass(/is-active/);
@@ -131,7 +131,7 @@ test('opening a card shows its drawing; undo history starts fresh', async ({ pag
   await openApp(page);
   await drawStroke(page);
   await toGallery(page);
-  await newBtn(page).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   await toGallery(page);
 
@@ -145,7 +145,7 @@ test('relaunch reopens where she left off: the editor on the last project, or th
   await openApp(page);
   await drawStroke(page);
   await toGallery(page);
-  await newBtn(page).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
 
   // Left in the editor on the blank Animation 2.
@@ -203,7 +203,7 @@ test('Delete asks first; Cancel keeps it, Delete removes it and all its data', a
   await openApp(page);
   await drawStroke(page);
   await toGallery(page);
-  await newBtn(page).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   await toGallery(page);
   const [keep, gone] = ['Animation 2', 'Animation 1'];

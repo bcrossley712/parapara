@@ -1665,15 +1665,20 @@ textarea,
   min-width: 0;
 }
 
+/* Cards keep one wide shape so the grid stays even; a portrait or
+   square animation sits centered on the canvas surround's gray, like
+   a page (its thumbnail is white paper). */
 .pp-gallery-card__thumb {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   aspect-ratio: 16 / 9;
   padding: 0;
   border: none;
   border-radius: 12px;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--pp-stage);
   box-shadow: 0 2px 10px rgba(40, 30, 60, 0.25);
   cursor: pointer;
 }
@@ -1684,9 +1689,8 @@ textarea,
 
 .pp-gallery-card__thumb img {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .pp-gallery-card__info {
@@ -1795,6 +1799,39 @@ textarea,
   border-radius: var(--pp-radius-panel);
   background: var(--pp-panel);
   box-shadow: 0 4px 16px rgba(40, 30, 60, 0.16);
+}
+
+/* New animation's shape menu (js/ui/gallery.js): hangs below the
+   tile's left edge. Each item has a little outline of its shape; her
+   last pick is tinted. */
+.pp-gallery-new-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.pp-gallery-shape-menu {
+  left: 0;
+  right: auto;
+}
+
+.pp-gallery-shape-menu .pp-gallery-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pp-gallery-shape-menu__icon {
+  flex: none;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.pp-gallery-shape-menu .pp-gallery-menu__item.is-current {
+  background: var(--pp-accent-soft);
+  color: var(--pp-accent-active);
+  font-weight: 600;
 }
 
 /* The frame strip's menu: above the current tile. */

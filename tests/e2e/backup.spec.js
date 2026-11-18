@@ -14,7 +14,7 @@
 // Run: npx playwright test backup
 
 import { test, expect } from '@playwright/test';
-import { readDb, savedDrawingBytes, waitForDrawingSave } from './helpers.js';
+import { readDb, savedDrawingBytes, waitForDrawingSave, newAnimation } from './helpers.js';
 
 const INVITE = 'e2e-invite-code';
 
@@ -34,7 +34,7 @@ async function openApp(page, baseURL) {
   });
   await page.goto(url.href);
   await page.locator('.pp-canvas, .pp-gallery').first().waitFor();
-  if (await page.locator('.pp-gallery').count()) await page.getByRole('button', { name: 'New animation' }).click();
+  if (await page.locator('.pp-gallery').count()) await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
 }
 

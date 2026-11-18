@@ -1137,7 +1137,22 @@ device-only.
   Flipaclip's export screen remembers wasn't checked.
 - **Default fps 12 ("on twos")** matches Flipaclip/Rough Animator.
   **Canvas 1920×1080 landscape**, stored per project so changing it is
-  config, not a rebuild.
+  config, not a rebuild (it paid off: see "Canvas shapes" below).
+- **Canvas shapes (2026-11-18, her request: "flip the canvas to
+  portrait").** New animation asks Landscape, Portrait or Square —
+  Sketchbook asks at creation the same way. Portrait is 1080×1920 (the
+  same pixels and memory as landscape); Square is 1080×1080. The menu
+  highlights her last pick (`uiState.newShape`). A project's shape is
+  fixed for life. **Not built:** rotating an existing animation
+  (Sketchbook does it from the gallery; it rewrites every layer of
+  every frame and moves reference images — risky for her drawings,
+  its own step with a backup first, only if she asks); changing the
+  shape without rotating (crops or pads — confusing, her apps don't).
+  Gallery cards stay wide so the grid is even; a tall or square
+  thumbnail sits centered on the canvas-surround gray, like a page.
+  Portrait frame tiles hit the strip's 36 px minimum width. Export
+  needs nothing new: 1080×1920 is 8160 macroblocks, within level 4.0
+  — whether her iPad's encoder takes it is an iPad check.
 
 ### After the main build (requested, deferred)
 

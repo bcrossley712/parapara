@@ -8,7 +8,7 @@
 // eyedropper's live preview under a finger.
 
 import { test, expect } from '@playwright/test';
-import { openApp, reloadApp, readDb, waitForToolSettings, closeLayersPanel } from './helpers.js';
+import { openApp, reloadApp, readDb, waitForToolSettings, closeLayersPanel, newAnimation } from './helpers.js';
 
 test.beforeEach(async ({ page }) => {
   page.on('dialog', (d) => {
@@ -182,7 +182,7 @@ test('recents list what she drew or filled with, newest first, across projects a
   // App-wide: a different project shows the same recents.
   await closePicker(page);
   await page.getByRole('button', { name: 'Gallery', exact: true }).click();
-  await page.getByRole('button', { name: 'New animation' }).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   await openPicker(page);
   expect(await colors(recents(page))).toEqual(['#aaaa00', '#00aa00', '#aa0000']);
@@ -265,7 +265,7 @@ test('the palette belongs to the project: kept on reload, empty in a new one, co
   await closePicker(page);
 
   await page.getByRole('button', { name: 'Gallery', exact: true }).click();
-  await page.getByRole('button', { name: 'New animation' }).click();
+  await newAnimation(page);
   await page.locator('.pp-canvas').waitFor();
   await openPicker(page);
   await expect(paletteSwatches(page)).toHaveCount(0);

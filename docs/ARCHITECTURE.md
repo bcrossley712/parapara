@@ -37,6 +37,13 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 
 ### How it works
 
+- **Canvas size is the project's** (`project.canvas`: landscape
+  1920×1080, portrait 1080×1920 or square 1080×1080 — `CANVAS_SHAPES`
+  in storage.js). `main.js` passes it to `initUI` → `initCanvas`
+  (`width`/`height`; omitted = 1920×1080). Everything else (frame
+  cache, thumbnails, tiles, export, reference placement, project
+  files) already reads `project.canvas`; new code must too — never
+  assume 1920×1080 or a landscape aspect.
 - **Stabilizer (8a)** ([why](DESIGN_NOTES.md#drawing-engine)): the
   line trails the stylus and catches up when she pauses. Draw and erase
   only, each with its own strength 0–10 (default 5; 0 = off, strokes
@@ -1224,7 +1231,9 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
 ## Editor UI, menus and screens
 
 **Files:** `js/ui/ui.js` (editor: top bar, tool rail, toasts/banners, menu
-dismissal, destroy), `ui/gallery.js`, `ui/confirm-dialog.js`
+dismissal, destroy), `ui/gallery.js` (New animation's shape menu:
+`CANVAS_SHAPES` in storage.js, last pick in `uiState.newShape`),
+`ui/confirm-dialog.js`
 (`showConfirm` / `showPrompt`), `ui/icons.js`,
 `ui/settings-panel.js` (gear menu; its Developer section is
 temporary), `ui/app-color.js` (the App color choices, pure; painted

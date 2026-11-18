@@ -154,15 +154,24 @@ links):
    links, now that video sharing works.
 3. The rest of the requested extras under Open items.
 
-**Light theme — built, awaiting push and iPad checks** (her request,
+**Light theme, App color and soft edges — pushed 2026-11-02, iPad
+checks not yet reported** (her request,
 scoped 2026-11-02; decisions: [design
 notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates) → "Light theme"):
 pale lavender bars with flat buttons, purple accent with lavender
 highlights, panels over the canvas a little see-through, teal Voice
 waveform, a multicolored "Parapara!" in the gallery. Colors are
-named tokens in `style.css` `:root`. **Then, built and not yet sent:**
-App color (six swatches in the gear menu, both screens) and softer
-edges (shadows instead of hairlines between areas, rounder corners).
+named tokens in `style.css` `:root`. App color (six swatches in the
+gear menu, both screens) and softer edges (shadows instead of
+hairlines between areas, rounder corners).
+
+**Canvas shapes — built, not yet sent** (her request, scoped
+2026-11-18; decisions: [design
+notes](docs/DESIGN_NOTES.md#planned-features) → "Canvas shapes"): New
+animation asks Landscape (1920×1080), Portrait (1080×1920) or Square
+(1080×1080), highlighting her last pick; fixed for the project's
+life. Rotating an existing animation is not built (its own step if
+she asks).
 
 **Open iPad checks** (send the activity log with any of them):
 - **After the light theme push:** the status bar's time and battery
@@ -178,6 +187,11 @@ edges (shadows instead of hairlines between areas, rounder corners).
   app, with no flash of purple first; the soft edges look right to
   her. Note the App color isn't in the backup (uiState isn't) — a
   restore starts purple.
+- **After the canvas shapes push:** make a Portrait and a Square
+  animation, draw a few frames, export with sound — the video plays
+  upright and the right shape in Photos and where she shares it.
+  Drawing, zooming and playback feel the same as landscape, with the
+  iPad held either way; the gallery shows tall ones as a page on gray.
 - **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
   already the tool opens the brush panel; a canvas tap closes it
   without drawing. Her old Pen size is unchanged. Each tip looks right
@@ -384,8 +398,9 @@ Applies to the whole app. How each area works is in
   is the glue.
 - **Schema:** the thing to get right. Extend additively (new optional
   fields), never restructure. See [Schema](#schema).
-- **Defaults:** canvas 1920×1080 landscape, 12 fps — both stored per
-  project, not hardcoded.
+- **Defaults:** canvas 1920×1080 landscape (portrait and square on
+  request, chosen at creation), 12 fps — both stored per project, not
+  hardcoded. Code reads `project.canvas`, never 1920×1080.
 - **Backup (7b)** runs on a Cloudflare Worker + R2 (`worker/`,
   deployed by its own workflow, not part of the published site);
   restore (push 2) reads it back. **Planned**
@@ -483,7 +498,7 @@ bitmap. Planned fields are marked. Extend additively.
 
     project = {
       id, name, createdAt, updatedAt,
-      canvas: { width: 1920, height: 1080 },
+      canvas: { width: 1920, height: 1080 },  // a CANVAS_SHAPES size, picked at creation (after 8b-ii); fixed for life
       fps: 12,                                // 1–30, picked in the transport (4b); sanitizeFps on open
       loop: true,                             // 4b; missing = true
       onionSkin: { on, before, after, opacity, tintBefore, tintAfter },

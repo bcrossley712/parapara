@@ -32,7 +32,21 @@ const META_TOOL_SETTINGS = 'toolSettings';
 const META_UI_STATE = 'uiState';
 const META_RECENT_COLORS = 'recentColors';
 
-const DEFAULT_CANVAS = { width: 1920, height: 1080 };
+// Canvas shapes she picks from when making an animation (after 8b-ii;
+// Sketchbook asks at creation too). Fixed for the project's life — the
+// size is stored on it (project.canvas). Portrait is landscape on its
+// side (same pixels, same memory); square matches its short side.
+export const CANVAS_SHAPES = {
+  landscape: { width: 1920, height: 1080 },
+  portrait: { width: 1080, height: 1920 },
+  square: { width: 1080, height: 1080 },
+};
+export const DEFAULT_CANVAS_SHAPE = 'landscape';
+
+// Any saved value → a known shape (missing or unknown = landscape).
+export function sanitizeCanvasShape(shape) {
+  return Object.hasOwn(CANVAS_SHAPES, shape) ? shape : DEFAULT_CANVAS_SHAPE;
+}
 const DEFAULT_PROJECT_NAME = 'Untitled';
 const PROJECT_NAME_PREFIX = 'Animation';
 const DEFAULT_LAYER_NAME = 'Layer 1';
@@ -122,7 +136,7 @@ export function ensureBitmapRefs(frame, layers) {
   return changed;
 }
 
-export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
+export function createProjectRecord(name = DEFAULT_PROJECT_NAME, shape = DEFAULT_CANVAS_SHAPE) {
   const now = Date.now();
   const layer = createLayer();
   return {
@@ -130,7 +144,7 @@ export function createProjectRecord(name = DEFAULT_PROJECT_NAME) {
     name,
     createdAt: now,
     updatedAt: now,
-    canvas: { ...DEFAULT_CANVAS },
+    canvas: { ...CANVAS_SHAPES[sanitizeCanvasShape(shape)] },
     fps: DEFAULT_FPS,              // 1–30, picked in the transport (4b)
     loop: true,                    // playback loops (4b); missing = true
     layers: [layer],               // index 0 = bottom
@@ -409,8 +423,9 @@ export function storageLogFields(estimate, persisted) {
 
 // Creates and saves a new project with one blank layer and one frame,
 // and marks it as the last-opened project.
-export async function createProject(name) {
-  const project = createProjectRecord(name);
+// shape: a CANVAS_SHAPES key (missing = landscape).
+export async function createProject(name, shape) {
+  const project = createProjectRecord(name, shape);
   const frame = createFrame(project.id, project.layers);
   project.frames.push(frame.id);
 
