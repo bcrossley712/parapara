@@ -185,8 +185,14 @@ export function initUI(container, options = {}) {
   const shareBtn = createIconButton('Share', SHARE_ICON, () => shareCallbacks.onOpen?.());
   shareBtn.classList.add('pp-share-btn');
   const exportSheet = createExportSheet(shareCallbacks, { signal });
+  // Undo and Redo sit on the right, after a divider (after 8b-ii): beside
+  // Gallery she kept leaving the project by mistake, and leaving clears
+  // undo. Gallery stays alone in the top-left corner.
+  const topBarDivider = document.createElement('div');
+  topBarDivider.className = 'pp-top-bar__divider';
+  topBarDivider.setAttribute('aria-hidden', 'true');
   if (onGallery) topBar.append(createIconButton('Gallery', GALLERY_ICON, onGallery));
-  topBar.append(undoBtn, redoBtn, topBarSpacer, imageMenu.button, layersBtn, shareBtn);
+  topBar.append(topBarSpacer, undoBtn, redoBtn, topBarDivider, imageMenu.button, layersBtn, shareBtn);
 
   const body = document.createElement('div');
   body.className = 'pp-app-body';

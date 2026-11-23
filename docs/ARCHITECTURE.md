@@ -320,8 +320,8 @@ The schema itself is in [PROJECT_NOTES.md → Schema](../PROJECT_NOTES.md#schema
 - **Launch `storage` log line (6d, dev only):** usage, quota, percent
   and whether `persist()` was granted (`initStorage` resolves
   `{ persisted }`, `storageEstimate()` the numbers). A reference point
-  only — **no storage warning is shown** (dropped; PROJECT_NOTES.md
-  Open items).
+  only — **no storage warning is shown** (dropped; DESIGN_NOTES.md →
+  "Parked until she asks").
 - **Project file (7a):** gallery ⋯ → Save as file packs a project into
   `<name>.parapara` — a zip with every entry *stored* (`zip.js`, our
   own): `project.json` (`{ format: 'parapara-project', version: 1,
@@ -622,7 +622,8 @@ panel, "Getting ready"), `onion.js` (onion rules), `dev-stress.js`
     after a wait. Hiding the app stops it.
 - **Onion skin (4c)** ([why](DESIGN_NOTES.md#onion-skin)):
   - **Ghosts** are neighbors' cached pictures (layers only — **never
-    the photo**, hidden layers out), tinted one color, on one canvas
+    the photo**, hidden layers out), tinted but keeping their light
+    and dark (lines the full tint, light fills pale), on one canvas
     over the photo and under every layer. Previous red, next green,
     further ones fainter. **No wrap-around**, even with loop. Rules
     pure in `timeline/onion.js`; drawing in `canvas/onion-view.js`.
@@ -1240,6 +1241,20 @@ temporary), `ui/app-color.js` (the App color choices, pure; painted
 and saved by `main.js` `setAppColor`), `ui/symmetry-menu.js` (8b-i: the rail's Symmetry button
 and menu), `ui/dev-log-view.js` (DEV ONLY); screen routing in
 `main.js`.
+
+
+**Planned UI layout** (from wireframes): tool rail down the left;
+transport (prev / play / next / loop / fps) at the **left end of the
+frame strip's row** (4b — the wireframe had it in its own row above
+the strip; moved to save the canvas ~48 px, Flipaclip-style);
+horizontally scrolling frame strip with a dashed "add frame" tile
+(the wireframe's image marker was dropped in 3b — step 4's thumbnails
+show the photo instead); onion-skin toggle as a
+badge in the canvas area's bottom-left corner (4c); Share as a
+first-class top-bar icon. Layers panel
+on the right, over the canvas (doesn't shrink it), opened from a
+top-bar button. Sound panel (step 5): slides up over the bottom of the
+canvas above the frame tiles, opened from a top-bar Sound button.
 
 ### How it works
 

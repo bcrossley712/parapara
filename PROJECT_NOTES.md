@@ -152,26 +152,39 @@ links):
 2. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
-3. The rest of the requested extras under Open items.
+3. The rest of the requested extras (Open items, and Parked in the
+   design notes).
 
-**Light theme, App color and soft edges — pushed 2026-11-02, iPad
-checks not yet reported** (her request,
-scoped 2026-11-02; decisions: [design
-notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates) → "Light theme"):
-pale lavender bars with flat buttons, purple accent with lavender
-highlights, panels over the canvas a little see-through, teal Voice
-waveform, a multicolored "Parapara!" in the gallery. Colors are
-named tokens in `style.css` `:root`. App color (six swatches in the
-gear menu, both screens) and softer edges (shadows instead of
-hairlines between areas, rounder corners).
+**Done since 8b-ii, awaiting her iPad checks** (her requests between
+8b pushes; each has an entry under Open iPad checks):
+- **Light theme, App color, soft edges** — pushed 2026-11-02
+  (commits "changing to light theme", "scheme color picker").
+  Decisions: [design notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates)
+  → "Light theme". Pale lavender bars, flat buttons, purple accent
+  with lavender highlights, see-through panels, a multicolored
+  "Parapara!"; six App colors in the gear menu (both screens);
+  shadows instead of hairlines, rounder corners. Colors are named
+  tokens in `style.css` `:root`.
+- **Canvas shapes** — pushed 2026-11-18 (commit "added portrait view
+  canvas"). Decisions: [design
+  notes](docs/DESIGN_NOTES.md#planned-features) → "Canvas shapes".
+  New animation asks Landscape (1920×1080), Portrait (1080×1920, the
+  phone/Reels/TikTok size) or Square (1080×1080), highlighting her
+  last pick; fixed for the project's life.
+- **Undo moved, onion fill fix** — **zip sent 2026-11-22, not on
+  GitHub as of 2026-11-23** (check `git log` for it at the start of
+  the next conversation). Undo and Redo moved to the right of the
+  top bar, away from Gallery (she kept leaving by mistake, which
+  clears undo); onion ghosts keep their light and dark, so a filled
+  frame's lines show over a pale fill. Decisions: design notes →
+  "Layers and undo" and "Onion skin".
 
-**Canvas shapes — built, not yet sent** (her request, scoped
-2026-11-18; decisions: [design
-notes](docs/DESIGN_NOTES.md#planned-features) → "Canvas shapes"): New
-animation asks Landscape (1920×1080), Portrait (1080×1920) or Square
-(1080×1080), highlighting her last pick; fixed for the project's
-life. Rotating an existing animation is not built (its own step if
-she asks).
+**Handoff (2026-11-23):** next conversation, first confirm the
+undo/onion push landed and ask how the open iPad checks went
+(especially the status bar over the light top bar, and a portrait
+export). Then the suggested next build is 8b-iii (smudge + stamps)
+with Flip drawing in the same push — not yet scoped in detail;
+confirm scope first.
 
 **Open iPad checks** (send the activity log with any of them):
 - **After the light theme push:** the status bar's time and battery
@@ -187,6 +200,11 @@ she asks).
   app, with no flash of purple first; the soft edges look right to
   her. Note the App color isn't in the backup (uiState isn't) — a
   restore starts purple.
+- **After the undo/onion push (2026-11-22):** Undo and Redo on the
+  right — does she still leave by mistake, and does she find them?
+  Onion ghosts of a filled frame show its lines (strong) over a pale
+  fill, in red and green as before; are the lines strong enough at
+  her strength setting?
 - **After the canvas shapes push:** make a Portrait and a Square
   animation, draw a few frames, export with sound — the video plays
   upright and the right shape in Photos and where she shares it.
@@ -259,10 +277,6 @@ if it shows:
   (confirmed 2026-10-31); watch.** If silence comes back, get the log;
   the fallback is an `<audio>` element playing the export's offline
   mix — a real project. Details: ARCHITECTURE → Sound.
-- **GIF and PNG sequence export — cut from step 6 on purpose; revisit
-  if she asks for either.** Start from the scoping in [design
-  notes](docs/DESIGN_NOTES.md#planned-features) → "GIF and PNG
-  sequence (6c, cut)".
 - **Lost canvas — open bug, not recurring lately** (little use since
   the last fixes). She saw "This frame's drawing stopped showing…" now
   and then. Ask which ending she sees: "…loaded again" alone is the
@@ -275,40 +289,6 @@ if it shows:
   behind, the frame cache's in-memory PNGs — `undo=`/`cache=`/`made=`
   show which grows. **Export (step 6) adds memory load — watch for it
   after.** Get logs and note what she did just before each.
-- **Voice volume range** — he found the balance workable after 6b
-  (lower Music to bring the voice forward); leveling left as is.
-  Revisit only if she finds the voice hard to bring up: at 100% it
-  sits near the ceiling (`MAX_LEVELED_PEAK`, take compressor, limiter),
-  so 200% is mostly squashed — a fix changes how takes sound.
-- **Listen** — tabled: should it play from the set start or the
-  track's start, and does it need its own slider?
-- **Parked from step 4, unless she asks:** frame holds (a drawing
-  lasting several beats, Rough Animator — later an optional
-  `frame.hold`, missing = 1, read only by `frameAtBeat`); showing the
-  cached frame instantly on a frame switch, a scrubber, ping-pong loop,
-  a play range, a clean fullscreen preview, a frame counter, zooming
-  while playing.
-- **Parked from step 5, unless she asks** (Flipaclip has them): more
-  than two sound rows, slicing, looping past the end, a sound library,
-  scrubbing sound while stepping frames, or while dragging the music
-  bar (offered after 5c, not chosen: Set start covers it). Ask her:
-  on Flipaclip's import screen, can she play the song while picking
-  the part?
-- **Onion skin default (40%)** — she's happy for now; if she keeps
-  adjusting it, revisit the default.
-- **Color picker layout** is a first try — adjust if she wants it
-  different.
-- **Save the frame cache to IndexedDB?** Not yet. **Trigger:** she
-  notices the wait when opening a project (every open rebuilds it —
-  ~6–10 s for 48 frames). Saving it would make opens instant but costs
-  storage on her near-full iPad (roughly 0.5–1 MB per frame for real
-  line art) and adds a derived blob kind that the sweep and duplicate
-  project must handle, like the thumbnail.
-- **Merge down** — deferred on purpose (needs opacity-aware
-  compositing and a two-layer undo entry). Revisit after step 4.
-- **Fill sample toggle** (current layer vs all visible, as Sketchbook
-  offers) — fill always samples all visible layers; add the toggle if
-  she asks.
 - **Smudge feel** is off; deferred until more brushes exist (she ties
   it to brushes that soften their own edges). Don't retune it alone.
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
@@ -323,56 +303,23 @@ if it shows:
   (`encodePNG`); a `toBlob` that never calls back (seen on the sandbox
   build) would keep "Getting ready" up forever. Same fix as
   `exportPNG`'s if the log ever shows it; not done yet.
-- **Small screens (phones) aren't workable** — seen on his Android
-  phone, 4b build. The layout is sized for the iPad and nothing
-  scrolls or reflows. **Landscape:** the rail runs out of height, so
-  the size slider and gear are cut off. **Portrait:** the strip's row
-  runs out of width, so the frame tiles and Add frame are cut off,
-  and the canvas is a thin band. The onion badge (4c) will add to it.
-  Not her device, so not blocking; if friends will use it on phones,
-  plan a compact layout (a rail that scrolls or collapses, a strip
-  that scrolls with the transport, smaller controls) as its own step.
-- **Color opacity** — not in the picker on purpose; revisit if she
-  asks. (8b's per-brush strength is a brush setting, as in Flipaclip's
-  brush Opacity — the picker stays without it.)
-- **Storage warning — dropped (6d scoping, 2026-10-29).** Without a
-  project backup her only remedy is deleting drawings (a video can't be
-  opened as a project again), and ~80% of Safari's quota likely never
-  fires on her iPad — eviction follows the iPad's free space, not the
-  app's quota. Instead each launch logs a `storage` line. **Her iPad
-  (2026-10-31): ~34 MB used of a ~35 GB quota (0.1%), `persisted=yes`**
-  — confirms the warning would never fire. **Revisit**
-  after step 7's backup, or if the log shows usage climbing or
-  `persisted=no`. ([why](docs/DESIGN_NOTES.md#planned-features))
-- **Onion skin extras — revisit in final touches**, once she knows
-  onion skins (she's too new to judge them now): wrap-around with
-  loop, ghosts of the active layer only.
-- **Rename from the editor** (tap the title, as Procreate does) —
-  gallery-only for now.
-- **How-to / tutorials** reachable from the settings (gear) menu —
-  later, once there's enough to explain (gestures, layers, frames).
+- **Small screens (phones) aren't workable** (his Android phone, 4b):
+  the layout is sized for the iPad and nothing scrolls — the rail
+  cuts off in landscape, the strip in portrait. Not her device; if
+  friends will use phones, a compact layout is its own step.
 - **Adjustable shortcut bar** (as in Clip Studio's command bar), after
   step 6, once she knows which actions she reaches for. It needs one
   registry of actions that every button calls. Shortcuts add a second
   way to reach an action; they don't move it out of its home. Core
   items stay fixed. Saved app-wide.
   ([details](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred))
-- **"Make into layer"** (bake the reference image into a new layer) —
-  only if she wants to draw/erase on the photo itself (see "Ask her").
-  This is additive, not a rewrite.
+- **Parked until she asks** — merge down, fill sample toggle, frame
+  holds and other playback/sound extras, GIF/PNG export, saving the
+  frame cache, color opacity, onion extras, rename from the editor,
+  tutorials, "Make into layer", and the 2026-11 offers (App color in
+  the backup, a portrait safe-area guide, panel fades, rotating an
+  animation's shape): [design notes](docs/DESIGN_NOTES.md#parked-until-she-asks).
 
-**Planned UI layout** (from wireframes): tool rail down the left;
-transport (prev / play / next / loop / fps) at the **left end of the
-frame strip's row** (4b — the wireframe had it in its own row above
-the strip; moved to save the canvas ~48 px, Flipaclip-style);
-horizontally scrolling frame strip with a dashed "add frame" tile
-(the wireframe's image marker was dropped in 3b — step 4's thumbnails
-show the photo instead); onion-skin toggle as a
-badge in the canvas area's bottom-left corner (4c); Share as a
-first-class top-bar icon. Layers panel
-on the right, over the canvas (doesn't shrink it), opened from a
-top-bar button. Sound panel (step 5): slides up over the bottom of the
-canvas above the frame tiles, opened from a top-bar Sound button.
 
 ## Architecture (core)
 
@@ -405,7 +352,7 @@ Applies to the whole app. How each area works is in
   deployed by its own workflow, not part of the published site);
   restore (push 2) reads it back. **Planned**
   ([details](docs/DESIGN_NOTES.md#planned-features)): share links and
-  Krita import on the same backend. The storage warning was dropped (Open items).
+  Krita import on the same backend. The storage warning was dropped (design notes → Parked).
 
 ## Global rules
 

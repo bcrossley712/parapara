@@ -190,6 +190,15 @@ Sections: [Process lessons](#process-lessons) ·
 
 ## Layers and undo
 
+- **Undo and Redo on the right of the top bar (2026-11-22).** They
+  sat beside Gallery in the top-left corner, and she kept leaving the
+  project by mistake — leaving clears undo (it lives in memory only).
+  Moved right, before a divider and the panel buttons, so the nearest
+  miss opens a panel instead. Considered and not chosen: only a wider
+  gap; Undo in the rail (Procreate's sidebar — the rail is full); a
+  "leave?" check on Gallery (a dialog every exit, her apps don't);
+  keeping undo across leaving (up to 150 MB held in the gallery, the
+  memory-pressure lead in the lost-canvas bug).
 - **Layers reversed an earlier single-bitmap decision**, because she's
   used to Sketchbook-style layers. Caught before storage/undo existed,
   so nothing was thrown away.
@@ -719,9 +728,17 @@ Sections: [Process lessons](#process-lessons) ·
 - **No photo in ghosts.** The original plan said ghosts include their
   frame's photo; a tinted photo under every ghost is busy, and the
   cache already leaves photos out, so it was dropped.
-- **Solid tint, not a faded copy.** `source-in` turns a ghost's lines
-  one color while keeping their soft edges; a plain faded copy is hard
-  to tell from her current drawing, which is the whole point.
+- **Tinted, not a faded copy** — a plain faded copy is hard to tell
+  from her current drawing, which is the whole point. **Changed
+  2026-11-22 (her report: a filled frame's ghost showed only the
+  fill):** the first tint was solid (`source-in`, every pixel one
+  color), so lines on a fill vanished into it. Ghosts now keep their
+  light and dark — drained of color, screened with the tint, then cut
+  back to their own shape — so dark lines are the full tint and light
+  fills a pale one (a white fill all but disappears). Considered: the
+  drawing's own colors, faded (harder to tell from hers; could be an
+  "original colors" choice if she asks); current-layer-only ghosts
+  (only helps if fills sit on their own layer).
 - **Opacity is CSS.** The whole ghost layer's opacity is the canvas's
   style, so dragging the slider costs nothing; per-ghost fading is
   baked in when drawn.
@@ -1262,3 +1279,79 @@ these forces a redo of what's built; each is additive.
   It waits until after step 6 for two reasons: she can't know what she
   reaches for until the app is complete, and the action list keeps
   growing until then. Doing the refactor later is mechanical, not risky.
+
+### Parked until she asks
+
+Moved from PROJECT_NOTES' Open items (2026-11-23) to keep that file
+short. Each was offered or noticed and deliberately not built; build
+one only when she asks (or its trigger shows up), after scoping.
+
+- **GIF and PNG sequence export — cut from step 6 on purpose; revisit
+  if she asks for either.** Start from the scoping in [design
+  notes](#planned-features) → "GIF and PNG
+  sequence (6c, cut)".
+- **Voice volume range** — he found the balance workable after 6b
+  (lower Music to bring the voice forward); leveling left as is.
+  Revisit only if she finds the voice hard to bring up: at 100% it
+  sits near the ceiling (`MAX_LEVELED_PEAK`, take compressor, limiter),
+  so 200% is mostly squashed — a fix changes how takes sound.
+- **Listen** — tabled: should it play from the set start or the
+  track's start, and does it need its own slider?
+- **Parked from step 4, unless she asks:** frame holds (a drawing
+  lasting several beats, Rough Animator — later an optional
+  `frame.hold`, missing = 1, read only by `frameAtBeat`); showing the
+  cached frame instantly on a frame switch, a scrubber, ping-pong loop,
+  a play range, a clean fullscreen preview, a frame counter, zooming
+  while playing.
+- **Parked from step 5, unless she asks** (Flipaclip has them): more
+  than two sound rows, slicing, looping past the end, a sound library,
+  scrubbing sound while stepping frames, or while dragging the music
+  bar (offered after 5c, not chosen: Set start covers it). Ask her:
+  on Flipaclip's import screen, can she play the song while picking
+  the part?
+- **Onion skin default (40%)** — she's happy for now; if she keeps
+  adjusting it, revisit the default.
+- **Color picker layout** is a first try — adjust if she wants it
+  different.
+- **Save the frame cache to IndexedDB?** Not yet. **Trigger:** she
+  notices the wait when opening a project (every open rebuilds it —
+  ~6–10 s for 48 frames). Saving it would make opens instant but costs
+  storage on her near-full iPad (roughly 0.5–1 MB per frame for real
+  line art) and adds a derived blob kind that the sweep and duplicate
+  project must handle, like the thumbnail.
+- **Merge down** — deferred on purpose (needs opacity-aware
+  compositing and a two-layer undo entry). Revisit after step 4.
+- **Fill sample toggle** (current layer vs all visible, as Sketchbook
+  offers) — fill always samples all visible layers; add the toggle if
+  she asks.
+- **Color opacity** — not in the picker on purpose; revisit if she
+  asks. (8b's per-brush strength is a brush setting, as in Flipaclip's
+  brush Opacity — the picker stays without it.)
+- **Storage warning — dropped (6d scoping, 2026-10-29).** Without a
+  project backup her only remedy is deleting drawings (a video can't be
+  opened as a project again), and ~80% of Safari's quota likely never
+  fires on her iPad — eviction follows the iPad's free space, not the
+  app's quota. Instead each launch logs a `storage` line. **Her iPad
+  (2026-10-31): ~34 MB used of a ~35 GB quota (0.1%), `persisted=yes`**
+  — confirms the warning would never fire. **Revisit**
+  after step 7's backup, or if the log shows usage climbing or
+  `persisted=no`. ([why](#planned-features))
+- **Onion skin extras — revisit in final touches**, once she knows
+  onion skins (she's too new to judge them now): wrap-around with
+  loop, ghosts of the active layer only.
+- **Rename from the editor** (tap the title, as Procreate does) —
+  gallery-only for now.
+- **How-to / tutorials** reachable from the settings (gear) menu —
+  later, once there's enough to explain (gestures, layers, frames).
+- **"Make into layer"** (bake the reference image into a new layer) —
+  only if she wants to draw/erase on the photo itself (see "Ask her").
+  This is additive, not a rewrite.
+- **Offered and not built (2026-11), only if she asks:** App color
+  in the backup (uiState isn't backed up, so a restore starts
+  purple); a faint "safe area" guide on portrait canvases for
+  posting (apps cover the edges); fades for panels and menus (they're
+  shown with `display`, so it's a real change — design notes → "Light
+  theme"); rotating an existing animation to another shape (design
+  notes → "Canvas shapes"); an "original colors" onion choice. Her
+  12 fps videos: if a posting app ever rejects one or plays it oddly,
+  frame rate is the first suspect.

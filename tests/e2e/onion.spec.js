@@ -220,3 +220,46 @@ test('the settings are saved with the project', async ({ page }) => {
   await expect(page.getByRole('radio', { name: 'Before color: Blue' })).toHaveAttribute('aria-checked', 'true');
   await expect(panel).toContainText('Opacity 60%');
 });
+
+// After 8b-ii: a one-color tint made a filled frame one blob, its lines
+// lost in the fill. Ghosts keep their light and dark: dark lines the
+// full tint, a light fill a pale one. Drives the onion view directly
+// with a made-up ghost: a light-blue fill crossed by a black line.
+test('a ghost keeps its lines visible over its fill: lines the full tint, the fill pale', async ({ page }) => {
+  await openApp(page);
+  const [line, fill, empty] = await page.evaluate(async () => {
+    const { createOnionView } = await import('/js/canvas/onion-view.js');
+    const src = document.createElement('canvas');
+    src.width = 100; src.height = 100;
+    const s = src.getContext('2d');
+    s.fillStyle = '#9fd3ff';
+    s.fillRect(0, 0, 100, 60);
+    s.fillStyle = '#222222';
+    s.fillRect(0, 25, 100, 10);
+    const blob = await new Promise((resolve) => src.toBlob(resolve));
+
+    const target = document.createElement('canvas');
+    target.width = 100; target.height = 100;
+    const ctx = target.getContext('2d');
+    const view = createOnionView({ getContext: () => ctx, hide: () => {} });
+    view.show([{ id: 'g', blob, tint: '#e0574b', alpha: 1 }]);
+    for (let i = 0; i < 50 && ctx.getImageData(50, 30, 1, 1).data[3] === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const at = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+    const result = [at(50, 30), at(50, 10), at(50, 80)];
+    view.destroy?.();
+    return result;
+  });
+
+  // The line (near-black): close to the tint itself, solid.
+  expect(line[3]).toBe(255);
+  expect(Math.abs(line[0] - 0xe0)).toBeLessThan(30);
+  expect(Math.abs(line[1] - 0x57)).toBeLessThan(30);
+  // The fill: still reddish, but much lighter than the line.
+  expect(fill[3]).toBe(255);
+  expect(fill[0]).toBeGreaterThan(fill[1] + 10);
+  expect(fill[1]).toBeGreaterThan(line[1] + 80);
+  // Outside the drawing: nothing.
+  expect(empty[3]).toBe(0);
+});

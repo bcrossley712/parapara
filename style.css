@@ -200,6 +200,15 @@ textarea,
   flex: 1;
 }
 
+/* Between Redo and the panel buttons (Sound, Image, Layers, Share). */
+.pp-top-bar__divider {
+  flex: none;
+  width: 1px;
+  height: 28px;
+  margin: 0 8px;
+  background: var(--pp-border);
+}
+
 /* Rail + canvas area, below the top bar. min-height: 0 lets the
    canvas area shrink instead of overflowing the shell. */
 .pp-app-body {

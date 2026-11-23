@@ -116,9 +116,14 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, width, height);
-    // Tinting needs its own canvas: the ghost's lines turned to one
-    // color (source-in keeps their shape and softness), then laid on
-    // the onion canvas at that ghost's strength.
+    // Tinting needs its own canvas. The ghost becomes its tint but
+    // keeps its light and dark (after 8b-ii — a one-color tint made a
+    // filled frame one blob, its lines lost in the fill): drained of
+    // color (saturation with gray keeps each pixel's lightness), then
+    // screened with the tint, so dark lines become the full tint and
+    // light fills a pale one; destination-in puts back the ghost's own
+    // shape and soft edges (both fills painted the empty parts too).
+    // Then it's laid on the onion canvas at that ghost's strength.
     const scratch = makeCanvas(width, height);
     const sctx = scratch.getContext('2d');
     if (!sctx) {
@@ -131,9 +136,14 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
         sctx.globalCompositeOperation = 'source-over';
         sctx.clearRect(0, 0, width, height);
         sctx.drawImage(bitmaps[i], 0, 0, width, height);
-        sctx.globalCompositeOperation = 'source-in';
+        sctx.globalCompositeOperation = 'saturation';
+        sctx.fillStyle = '#808080';
+        sctx.fillRect(0, 0, width, height);
+        sctx.globalCompositeOperation = 'screen';
         sctx.fillStyle = ghost.tint;
         sctx.fillRect(0, 0, width, height);
+        sctx.globalCompositeOperation = 'destination-in';
+        sctx.drawImage(bitmaps[i], 0, 0, width, height);
         ctx.globalAlpha = ghost.alpha;
         ctx.drawImage(scratch, 0, 0);
       });

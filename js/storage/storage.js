@@ -396,7 +396,7 @@ export async function initStorage() {
 
 // How much the app stores and what the browser allows it (6d: logged
 // at launch, a reference point for whether a storage warning is ever
-// worth building — see PROJECT_NOTES.md Open items). Resolves
+// worth building — see DESIGN_NOTES.md, Parked until she asks). Resolves
 // { usage, quota } in bytes, or null when the browser can't say.
 export async function storageEstimate() {
   if (!globalThis.navigator?.storage?.estimate) return null;
