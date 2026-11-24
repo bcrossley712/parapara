@@ -67,7 +67,7 @@ import {
   THREE_FINGER_JOIN_MS,
   THREE_FINGER_JOIN_MAX_MOVEMENT_PX,
 } from './gestures.js';
-import { rectAroundPoint, unionRect, clampRect, inkBounds } from './region.js';
+import { rectAroundPoint, unionRect, clampRect, inkBounds, flipSpan } from './region.js';
 import { createReferenceView } from './reference.js';
 import { dragPlacement, pinchPlacement } from './transform.js';
 import {
@@ -140,7 +140,7 @@ const DEFAULT_BRUSH_SIZE = 6;
 
 // Tools that pick a brush tip (8b-ii), each remembering its last tip
 // and, per tip, its own size and strength (Draw-Pencil and
-// Erase-Pencil are separate). Smudge keeps a plain size until 8b-iii.
+// Erase-Pencil are separate). Smudge keeps a plain size until 8e (was 8b-iii).
 const TIPPED_TOOLS = ['draw', 'erase'];
 
 const isSize = (v) => Number.isInteger(v) && v >= 1 && v <= MAX_BRUSH_SIZE;
@@ -1396,6 +1396,46 @@ export function initCanvas(container, options = {}) {
   // A mirrored stroke (8b-i) instead has before: null and
   // parts: [{ rect, before }] (non-overlapping); rect then surrounds
   // them all.
+  // What a flip of `canvas` changes: its drawing and the drawing's
+  // mirror (flipSpan), or null if it's blank.
+  function flipRect(canvas, axis) {
+    const c = canvas.getContext('2d');
+    const ink = inkBounds(c.getImageData(0, 0, width, height).data, width, height);
+    return ink ? clampRect(flipSpan(ink, axis, width, height), width, height) : null;
+  }
+
+  // Mirrors `rect` of `source` onto each of `targets` (contexts holding
+  // the same pixels there) about the rect's own center — the canvas's
+  // center line, since flipSpan's rects are symmetric about it. The
+  // copy goes canvas to canvas (never through ImageData), so the
+  // pixels are exact and flipping twice gives back the same ones.
+  // The mode is set inside save()/restore(): a layer's context may
+  // still hold an erase's 'destination-out' (as for paste).
+  function mirrorInPlace(targets, source, rect, axis) {
+    const scratch = document.createElement('canvas');
+    scratch.width = rect.w;
+    scratch.height = rect.h;
+    scratch.getContext('2d').drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+    for (const target of targets) {
+      target.save();
+      target.setTransform(1, 0, 0, 1, 0, 0);
+      target.clearRect(rect.x, rect.y, rect.w, rect.h);
+      target.globalCompositeOperation = 'source-over';
+      target.globalAlpha = 1;
+      if (axis === 'vertical') {
+        target.translate(rect.x, rect.y + rect.h);
+        target.scale(1, -1);
+      } else {
+        target.translate(rect.x + rect.w, rect.y);
+        target.scale(-1, 1);
+      }
+      target.drawImage(scratch, 0, 0);
+      target.restore();
+    }
+    scratch.width = 0;
+    scratch.height = 0;
+  }
+
   function notifyChange(change) {
     if (change.parts) {
       for (const part of change.parts) noteEdit(change.layerId, part.rect);
@@ -2032,6 +2072,51 @@ export function initCanvas(container, options = {}) {
       ctx.clearRect(0, 0, width, height);
       committedCtx.clearRect(0, 0, width, height);
       notifyChange({ rect: { x: 0, y: 0, w: width, h: height }, before, layerId: activeLayerId, tool: 'clear' });
+    },
+
+    // Flip (8c): mirrors the active layer's drawing on this frame
+    // across the canvas's center — 'horizontal' (left ↔ right) or
+    // 'vertical' (top ↔ bottom). Undoable like Clear, but the entry
+    // holds only the drawing and its mirror image (flipSpan), not the
+    // whole canvas. Refused like Clear; a blank layer does nothing (no
+    // empty undo step). Returns true if it flipped.
+    flip(axis) {
+      if (isBusy() || !ctx) return false;
+      const reason = paintBlockReason();
+      if (reason) {
+        for (const listener of blockedListeners) listener(reason);
+        return false;
+      }
+      const rect = flipRect(committedCanvas, axis);
+      if (!rect) return false;
+      const before = committedCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+      mirrorInPlace([ctx, committedCtx], committedCanvas, rect, axis);
+      notifyChange({ rect, before, layerId: activeLayerId, tool: 'flip' });
+      return true;
+    },
+
+    // Flip frame (8c): mirrors every loaded layer of this frame —
+    // hidden ones too, so showing one later still lines up. No onChange
+    // and no patches: main.js keeps one 'frame-flip' entry, and undo is
+    // the same flip again (canvas-to-canvas copies, so mirroring twice
+    // gives back the same pixels). Locked layers are main.js's to
+    // refuse first. Returns the ids of layers that had a drawing (the
+    // ones changed), or null if it can't flip now (mid-stroke, or a
+    // layer is broken — flipping only some would split the frame).
+    flipFrame(axis) {
+      if (isBusy()) return null;
+      for (const surface of surfaces.values()) if (surface.broken) return null;
+      const flipped = [];
+      for (const [layerId, surface] of surfaces) {
+        const isActive = layerId === activeLayerId;
+        const source = isActive ? committedCanvas : surface.canvas;
+        const rect = flipRect(source, axis);
+        if (!rect) continue;
+        mirrorInPlace(isActive ? [surface.ctx, committedCtx] : [surface.ctx], source, rect, axis);
+        noteEdit(layerId, rect);
+        flipped.push(layerId);
+      }
+      return flipped;
     },
 
     // --- copy / paste drawing (4d) ---

@@ -735,7 +735,18 @@ Sections: [Process lessons](#process-lessons) ·
   color), so lines on a fill vanished into it. Ghosts now keep their
   light and dark — drained of color, screened with the tint, then cut
   back to their own shape — so dark lines are the full tint and light
-  fills a pale one (a white fill all but disappears). Considered: the
+  fills a pale one (a white fill all but disappears). **Changed again
+  2026-11-23 (8c; her report: lines readable now but still hard to
+  make out):** a mid-tone fill tinted only a little paler than the
+  lines. Fills now also fade by lightness (a light fill to ~25% of a
+  line's strength, dark ink untouched), so the ghost is strong lines
+  over a faint wash, as on a light table. Raising the onion strength
+  couldn't do this — it lifts fills too. The coloring moved from blend
+  modes to one JS pass per ghost: `saturation`/`screen` over a
+  see-through pixel mix in the fill's own gray, which made faded fills
+  darker instead of paler. The pass runs every draw rather than being
+  cached, because a frame's tint changes as she steps past it and
+  colored copies would double ghost memory. Considered: the
   drawing's own colors, faded (harder to tell from hers; could be an
   "original colors" choice if she asks); current-layer-only ghosts
   (only helps if fills sit on their own layer).
@@ -1248,7 +1259,10 @@ these forces a redo of what's built; each is additive.
     Flipaclip's hold-and-drag.
   - **Three pushes**, so symmetry reaches her while brush choices are
     tuned: engine + symmetry + curved size; panel + tips; smudge +
-    stamps. The stamp seam is reworked once, in the first.
+    stamps. The stamp seam is reworked once, in the first. **The third
+    became 8e (2026-11-23):** she asked for flip and shapes first, and
+    steps stay in numerical order, so 8b closed at 8b-ii — flip is 8c,
+    shapes 8d, smudge + stamps 8e.
   - **8b-ii decisions (2026-11-02, his calls on the proposal):** the
     old round tip stays as **Pen**, the default, so nothing she drew
     or set changes and the new tips are opt-in. Size and strength
@@ -1262,6 +1276,64 @@ these forces a redo of what's built; each is additive.
     three-finger swipe down for brushes was left out: she uses the
     buttons. Shaped tips are pre-drawn sprites rather than per-stamp
     gradients, for her 9th-gen iPad at size 200.
+- **8c (2026-11-23) — Flip drawing plus clearer onion ghosts.** Her
+  first ask after 8b-ii's checks, built as scoped above (layer menu,
+  active layer, this frame). Labels are Procreate's ("Flip horizontal",
+  "Flip vertical"), placed before Clear so the menu reads copy-type
+  actions, then changes, then removal. The undo entry holds only the
+  drawing and its mirror (`flipSpan`), not the canvas — the union of a
+  box and its mirror is symmetric about the center line, so flipping
+  that box about its own center is the canvas flip. The onion change
+  rode along (small, her report the same day; see Onion skin).
+  - **Flip frame joined 8c (her request the same day)** — the whole
+    picture on this frame, from the frame menu (Procreate's flip
+    canvas, for one frame). His calls on the proposal: this frame only
+    (every frame at once would be a separate build, if she asks);
+    hidden layers flip too, or showing one later leaves it facing the
+    wrong way; a locked layer refuses the whole flip rather than being
+    skipped (lock protects pixels, and skipping leaves the frame
+    half-mirrored); the photo's placement flips with it so drawing and
+    photo stay lined up; one undo step for all of it.
+  - **Its undo holds no pixels.** Flipping is its own inverse, and the
+    copies go canvas to canvas (exact — the e2e test compares every
+    pixel after undo), so undo is the same flip again. Patches for up
+    to eight full layers would have taken a big share of undo's
+    ~150 MB. If Safari's mirrored drawImage ever turned out inexact,
+    the cost would be soft edges a channel value off after an undo,
+    not lost drawing — then switch to patches.
+- **8d scoping (2026-11-23) — shape tools.** Her request ("a straight
+  line, circle, square… like Paint" was his framing; she knows
+  Sketchbook's Draw Styles). Agreed:
+  - **Shapes:** Line, Rectangle, Oval, Triangle, each with a perfect
+    variety. **Outline only** (her call; no Filled option). Other
+    shapes (star, heart, web…) are stamps, in 8e.
+  - **Drawing one:** press, drag to see it live, lift to place it.
+    Line start → end; Rectangle corner to corner; **Oval from its
+    center** (Sketchbook's way); Triangle corner to corner like the
+    rectangle, **always point up** (his call over "point toward where
+    she started"). No adjusting after the lift (that needs handles on
+    the canvas, which she dislikes) — undo and redraw.
+  - **Perfect toggle** in the shape panel (no Shift key on an iPad;
+    chosen over separate Circle/Square buttons): square, circle,
+    equilateral triangle; the line snaps to 45° steps.
+  - **Look:** Draw's current tip, size, strength and color, as
+    Sketchbook's shapes use the brush; symmetry mirrors them; the
+    stabilizer doesn't apply. The size slider on Shape *is* Draw's
+    (changing it changes freehand too).
+  - **Rail:** a Shape button after Smudge naming the current shape (as
+    Draw names its tip); tapping it again opens a small panel — the
+    four shapes and Perfect. Shape and the toggle are remembered
+    across launches (additive `toolSettings` fields, sanitized).
+  - **Engine:** a shape is a stroke whose buffer is cleared and
+    redrawn on each move (at most once per animation frame), composed
+    over the union of the old and new boxes so a shrinking shape
+    leaves nothing behind; the undo box is the final shape's. So undo,
+    symmetry, the ink map, lock/hide and the second-finger cancel come
+    from the stroke path.
+  - **Coupled, flagged:** shapes line up with the canvas, not the
+    screen (a rotated view shows a tilted rectangle; start and end
+    stay under the stylus). Whether a big Chalk or Soft oval keeps up
+    while dragging is an iPad check.
 - **Adjustable shortcut bar (deferred to after step 6).** The idea is to
   let her put the actions she uses most in a bar, like Clip Studio's
   command bar. It takes:

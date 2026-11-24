@@ -14,12 +14,60 @@
 //
 // Ghost frames' decoded pictures are kept while they're ghosts — up to
 // six full-size bitmaps — so a tint or count change doesn't re-decode
-// the rest; anything no longer a ghost is closed.
+// the rest; anything no longer a ghost is closed. The coloring
+// (tintGhost) is redone each draw: a frame's tint changes as she steps
+// past it, and keeping colored copies too would double the memory.
 //
 // Knows nothing about the project: main.js passes the list (from
 // timeline/onion.js ghostFrames plus each frame's cache blob).
 
 import { makeCanvas, freeCanvas } from './render-frame.js';
+
+// How a ghost is colored — one pass per ghost per draw, in tintGhost.
+// The ghost becomes its tint but keeps its light and dark (after
+// 8b-ii: a one-color tint made a filled frame one blob, its lines lost
+// in the fill): each pixel's lightness L, screened with the tint, so
+// dark lines become the full tint and light fills a pale one. Then
+// fills fade while lines stay (8c — her report: on a colored-in frame
+// the lines were still hard to make out over the fill): a pixel keeps
+// its alpha while it's dark (L up to FADE_FROM) and loses up to
+// GHOST_FILL_FADE of it as it gets lighter (all of that by FADE_TO).
+// So a light fill becomes a faint wash and a dark one (black hair,
+// navy) stays near a line's strength. GHOST_FILL_FADE is the one to
+// tune on the iPad.
+//
+// Done in JS rather than with blend modes: 'saturation' and 'screen'
+// over a see-through pixel mix in the fill's own color, so a faded
+// fill would come out darker, not paler.
+export const GHOST_FILL_FADE = 0.75;
+const FADE_FROM = 0.15;
+const FADE_TO = 0.6;
+
+// '#rrggbb' → [r, g, b].
+export function hexToRgb(hex) {
+  const n = parseInt(String(hex).slice(1, 7), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Pure: colors RGBA `data` (unpremultiplied, as getImageData gives it)
+// in place as above. `tint` is [r, g, b].
+export function tintGhost(data, tint, fade = GHOST_FILL_FADE) {
+  const [tr, tg, tb] = tint;
+  const span = FADE_TO - FADE_FROM;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a === 0) continue;
+    // Lightness as canvas's 'saturation' with gray keeps it (luma).
+    const light = (0.3 * data[i] + 0.59 * data[i + 1] + 0.11 * data[i + 2]) / 255;
+    // screen(L, T) = 1 - (1 - L)(1 - T) = T + L(255 - T)/255
+    data[i] = tr + light * (255 - tr);
+    data[i + 1] = tg + light * (255 - tg);
+    data[i + 2] = tb + light * (255 - tb);
+    const t = Math.min(1, Math.max(0, (light - FADE_FROM) / span));
+    data[i + 3] = Math.round(a * (1 - fade * t));
+  }
+  return data;
+}
 
 // getContext(): the onion canvas's 2D context, created if needed.
 // hide(): removes the onion canvas and frees it.
@@ -116,14 +164,8 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, width, height);
-    // Tinting needs its own canvas. The ghost becomes its tint but
-    // keeps its light and dark (after 8b-ii — a one-color tint made a
-    // filled frame one blob, its lines lost in the fill): drained of
-    // color (saturation with gray keeps each pixel's lightness), then
-    // screened with the tint, so dark lines become the full tint and
-    // light fills a pale one; destination-in puts back the ghost's own
-    // shape and soft edges (both fills painted the empty parts too).
-    // Then it's laid on the onion canvas at that ghost's strength.
+    // Coloring needs its own canvas (tintGhost, above); then it's laid
+    // on the onion canvas at that ghost's strength.
     const scratch = makeCanvas(width, height);
     const sctx = scratch.getContext('2d');
     if (!sctx) {
@@ -133,17 +175,11 @@ export function createOnionView({ getContext, hide, canDraw = () => true, retryM
     }
     try {
       ghosts.forEach((ghost, i) => {
-        sctx.globalCompositeOperation = 'source-over';
         sctx.clearRect(0, 0, width, height);
         sctx.drawImage(bitmaps[i], 0, 0, width, height);
-        sctx.globalCompositeOperation = 'saturation';
-        sctx.fillStyle = '#808080';
-        sctx.fillRect(0, 0, width, height);
-        sctx.globalCompositeOperation = 'screen';
-        sctx.fillStyle = ghost.tint;
-        sctx.fillRect(0, 0, width, height);
-        sctx.globalCompositeOperation = 'destination-in';
-        sctx.drawImage(bitmaps[i], 0, 0, width, height);
+        const image = sctx.getImageData(0, 0, width, height);
+        tintGhost(image.data, hexToRgb(ghost.tint));
+        sctx.putImageData(image, 0, 0);
         ctx.globalAlpha = ghost.alpha;
         ctx.drawImage(scratch, 0, 0);
       });

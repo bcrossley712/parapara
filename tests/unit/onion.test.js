@@ -10,6 +10,7 @@ import {
   sanitizeOnion, ghostFrames, DEFAULT_ONION, MAX_ONION_FRAMES,
   MIN_ONION_OPACITY, MAX_ONION_OPACITY, ONION_TINTS,
 } from '../../js/timeline/onion.js';
+import { tintGhost, hexToRgb, GHOST_FILL_FADE } from '../../js/canvas/onion-view.js';
 
 const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
 const on = (changes = {}) => ({ ...DEFAULT_ONION, on: true, ...changes });
@@ -90,4 +91,42 @@ test('zero on a side shows nothing on that side', () => {
 
 test('a frame that is not in the timeline has no ghosts', () => {
   assert.deepEqual(ghostFrames(ids, 'zzz', on()), []);
+});
+
+// --- ghost coloring (8b-ii tint, 8c fill fade; canvas/onion-view.js) ---
+
+const RED = hexToRgb('#e5484d');
+const px = (r, g, b, a) => Array.from(tintGhost(new Uint8ClampedArray([r, g, b, a]), RED));
+
+test('hexToRgb reads a tint', () => {
+  assert.deepEqual(hexToRgb('#e5484d'), [0xe5, 0x48, 0x4d]);
+});
+
+test('a ghost\'s dark lines are the full tint, at full strength', () => {
+  assert.deepEqual(px(0, 0, 0, 255), [...RED, 255]);
+  const ink = px(34, 34, 34, 255); // near-black ink
+  assert.equal(ink[3], 255);
+  assert.ok(Math.abs(ink[1] - RED[1]) < 30);
+  assert.equal(px(0, 0, 0, 120)[3], 120); // a line's soft edge keeps its own alpha
+});
+
+test('a ghost\'s light fill is a pale tint, faded to a faint wash', () => {
+  const white = px(255, 255, 255, 255);
+  assert.deepEqual(white, [255, 255, 255, Math.round(255 * (1 - GHOST_FILL_FADE))]);
+  const skin = px(0xf5, 0xd0, 0xb5, 255); // a pale skin tone
+  assert.equal(skin[3], white[3]);
+  assert.ok(skin[0] > skin[1] + 10, 'still reddish');
+  assert.ok(skin[1] > RED[1] + 80, 'much paler than a line');
+});
+
+test('mid-tone fills fade part way, darker ones less', () => {
+  const mid = px(0x4a, 0x7b, 0xd0, 255)[3];  // mid blue
+  const dark = px(0x30, 0x30, 0x60, 255)[3]; // navy
+  const light = px(255, 255, 255, 255)[3];
+  assert.ok(mid < 255 && mid > light, `mid ${mid}`);
+  assert.ok(dark > mid, `dark ${dark} vs mid ${mid}`);
+});
+
+test('empty pixels stay empty', () => {
+  assert.equal(px(255, 255, 255, 0)[3], 0);
 });

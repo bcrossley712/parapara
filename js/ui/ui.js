@@ -17,7 +17,7 @@
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 
-// Tools with a brush panel (8b-ii); smudge gets one with 8b-iii.
+// Tools with a brush panel (8b-ii); smudge gets one with 8e (was 8b-iii).
 const BRUSH_PANEL_TOOLS = ['draw', 'erase'];
 import { TIP_LABELS } from '../canvas/brush.js';
 import { createBrushPanel } from './brush-panel.js';

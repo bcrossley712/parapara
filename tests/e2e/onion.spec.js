@@ -225,7 +225,7 @@ test('the settings are saved with the project', async ({ page }) => {
 // lost in the fill. Ghosts keep their light and dark: dark lines the
 // full tint, a light fill a pale one. Drives the onion view directly
 // with a made-up ghost: a light-blue fill crossed by a black line.
-test('a ghost keeps its lines visible over its fill: lines the full tint, the fill pale', async ({ page }) => {
+test('a ghost keeps its lines visible over its fill: lines the full tint, the fill a pale, faint wash', async ({ page }) => {
   await openApp(page);
   const [line, fill, empty] = await page.evaluate(async () => {
     const { createOnionView } = await import('/js/canvas/onion-view.js');
@@ -256,8 +256,10 @@ test('a ghost keeps its lines visible over its fill: lines the full tint, the fi
   expect(line[3]).toBe(255);
   expect(Math.abs(line[0] - 0xe0)).toBeLessThan(30);
   expect(Math.abs(line[1] - 0x57)).toBeLessThan(30);
-  // The fill: still reddish, but much lighter than the line.
-  expect(fill[3]).toBe(255);
+  // The fill: still reddish, much lighter than the line, and faded to
+  // a wash (8c) — at most about a third of the line's strength.
+  expect(fill[3]).toBeLessThan(100);
+  expect(fill[3]).toBeGreaterThan(20);
   expect(fill[0]).toBeGreaterThan(fill[1] + 10);
   expect(fill[1]).toBeGreaterThan(line[1] + 80);
   // Outside the drawing: nothing.

@@ -10,10 +10,11 @@
 // tap a row to make it the active layer. Tapping the active layer's
 // row opens its layer menu (Procreate's popover, Sketchbook's and
 // Flipaclip's layer menu; the frame strip's current tile works the
-// same way): Copy, Paste (4d), Rename, Duplicate, Clear, Delete. Flip
-// and merge down join it later. Below the list, only the active
-// layer's opacity — a slider doesn't belong in a menu. Clear, Paste
-// and Delete stay tappable on a locked layer — main.js refuses with a
+// same way): Copy, Paste (4d), Rename, Duplicate, Flip horizontal,
+// Flip vertical (8c), Clear, Delete. Merge down joins it later. Below
+// the list, only the active layer's opacity — a slider doesn't belong
+// in a menu. Flip, Clear, Paste and Delete stay tappable on a locked
+// layer — main.js refuses with a
 // banner that says why, as a stroke on a locked layer does.
 //
 // Pure UI: knows nothing about storage (beyond the shared name-length
@@ -27,6 +28,7 @@ import { MAX_LAYER_NAME } from '../storage/layers.js';
 // callbacks:
 //   onSelect(id), onAdd(), onDelete(id), onRename(id, name),
 //   onDuplicate(id), onClear(id),
+//   onFlip(id, axis)               axis 'horizontal' | 'vertical' (8c)
 //   onCopy(id), onPaste(id)        copy / paste drawing (4d)
 //   onToggleVisible(id), onToggleLock(id),
 //   onMove(id, toIndex)            toIndex: 0 = bottom
@@ -103,6 +105,8 @@ export function createLayersPanel(callbacks, { signal } = {}) {
       menuItem('Paste', busy || !state.canPaste, () => callbacks.onPaste(id)),
       menuItem('Rename', busy, () => startRename(id)),
       menuItem('Duplicate', busy || many >= state.maxLayers, () => callbacks.onDuplicate(id)),
+      menuItem('Flip horizontal', busy, () => callbacks.onFlip(id, 'horizontal')),
+      menuItem('Flip vertical', busy, () => callbacks.onFlip(id, 'vertical')),
       menuItem('Clear', busy, () => callbacks.onClear(id)),
       menuItem('Delete', busy || many <= 1, () => callbacks.onDelete(id), 'pp-layer-menu__item--danger'),
     );

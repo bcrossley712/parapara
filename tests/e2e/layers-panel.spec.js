@@ -441,6 +441,105 @@ test('a hidden layer can\'t be cleared', async ({ page }) => {
   expect(await painted(page, id)).toBe(before);
 });
 
+// --- Flip (8c) ---
+
+// Whether a layer has paint in a small box around canvas pixel (x, y).
+function inkNear(page, layerId, x, y) {
+  return page.evaluate(([id, px, py]) => {
+    const c = document.querySelector(`.pp-layer[data-layer-id="${id}"]`);
+    const d = c.getContext('2d').getImageData(px - 4, py - 4, 9, 9).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return true;
+    return false;
+  }, [layerId, x, y]);
+}
+
+test('Flip mirrors the active layer on this frame across the center, and undoes in one step', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const l1 = await activeId(page);
+  await stroke(page, 1500, 900, 1700, 900); // Layer 1, bottom right
+  await addLayer(page);
+  const l2 = await activeId(page);
+  await stroke(page, 200, 200, 500, 200); // Layer 2, top left
+  const l2Painted = await painted(page, l2);
+
+  await layerMenu(page, 'Flip horizontal');
+  expect(await inkNear(page, l2, 350, 200)).toBe(false);
+  expect(await inkNear(page, l2, 1920 - 350, 200)).toBe(true);
+  expect(await painted(page, l2)).toBe(l2Painted);
+  // The other layer stays where it was.
+  expect(await inkNear(page, l1, 1600, 900)).toBe(true);
+  expect(await inkNear(page, l1, 320, 900)).toBe(false);
+
+  await layerMenu(page, 'Flip vertical');
+  expect(await inkNear(page, l2, 1920 - 350, 200)).toBe(false);
+  expect(await inkNear(page, l2, 1920 - 350, 1080 - 200)).toBe(true);
+
+  await undo(page);
+  expect(await inkNear(page, l2, 1920 - 350, 200)).toBe(true);
+  expect(await inkNear(page, l2, 1920 - 350, 1080 - 200)).toBe(false);
+  await undo(page);
+  expect(await inkNear(page, l2, 350, 200)).toBe(true);
+  expect(await inkNear(page, l2, 1920 - 350, 200)).toBe(false);
+  await redo(page);
+  expect(await inkNear(page, l2, 1920 - 350, 200)).toBe(true);
+});
+
+// A fingerprint of every saved layer bitmap's bytes (not just their
+// sizes — a flipped line can compress to the same size).
+function savedPixelsPrint(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const r = db.transaction('blobs').objectStore('blobs').getAll();
+      r.onsuccess = () => {
+        db.close();
+        let h = 0;
+        for (const rec of r.result) {
+          if (rec.id.startsWith('thumb-')) continue;
+          const bytes = new Uint8Array(rec.buffer);
+          for (let i = 0; i < bytes.length; i++) h = (Math.imul(h, 31) + bytes[i]) | 0;
+        }
+        resolve(h);
+      };
+      r.onerror = () => { db.close(); reject(r.error); };
+    };
+  }));
+}
+
+test('a flip is saved and is still there after a reload', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const id = await activeId(page);
+  await stroke(page, 200, 200, 500, 260);
+  await waitForDrawingSave(page, null);
+  const before = await savedPixelsPrint(page);
+  await layerMenu(page, 'Flip vertical');
+  await expect.poll(() => savedPixelsPrint(page)).not.toBe(before);
+  await reloadApp(page);
+  expect(await inkNear(page, id, 200, 1080 - 200)).toBe(true);
+  expect(await inkNear(page, id, 200, 200)).toBe(false);
+});
+
+test('a locked or hidden layer can\'t be flipped; the banner says why', async ({ page }) => {
+  await openApp(page);
+  await openPanel(page);
+  const id = await activeId(page);
+  await stroke(page, 200, 200, 500, 200);
+  await page.getByRole('button', { name: 'Lock Layer 1' }).click();
+  await layerMenu(page, 'Flip horizontal');
+  await expect(page.locator('#pp-banner')).toContainText('Unlock it in Layers to flip it');
+  expect(await inkNear(page, id, 350, 200)).toBe(true);
+
+  await page.getByRole('button', { name: 'Unlock Layer 1' }).click();
+  await page.getByRole('button', { name: 'Hide Layer 1' }).click();
+  await layerMenu(page, 'Flip vertical');
+  await expect(page.locator('#pp-banner')).toContainText('Show it in Layers to flip it');
+  expect(await inkNear(page, id, 350, 200)).toBe(true);
+});
+
 // --- the layer menu (4d) ---
 
 test('tapping the active layer opens its menu; tapping another layer just selects it; the footer keeps only opacity', async ({ page }) => {
@@ -459,7 +558,7 @@ test('tapping the active layer opens its menu; tapping another layer just select
   // The active row: opens the menu, in order; again: closes it.
   await page.locator('.pp-layers__row.is-active .pp-layers__name').click();
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Copy', 'Paste', 'Rename', 'Duplicate', 'Clear', 'Delete']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Copy', 'Paste', 'Rename', 'Duplicate', 'Flip horizontal', 'Flip vertical', 'Clear', 'Delete']);
   await expect(layerMenuItem(page, 'Paste')).toBeDisabled(); // nothing copied
   await page.locator('.pp-layers__row.is-active .pp-layers__name').click();
   await expect(menu).toHaveCount(0);

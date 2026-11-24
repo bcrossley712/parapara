@@ -122,103 +122,65 @@ icon, manifest `name`/`short_name`, and repo copy.
   Cloudflare and restore (both verified 2026-11-02; decisions in
   [design notes](docs/DESIGN_NOTES.md#planned-features) → "Backup (7b
   scoping)"); **8a** stabilizer
-  (as she expects, 2026-11-02); **8b-i** symmetry, stroke buffer and
-  curved size (verified 2026-11-02). How each works is
+  (as she expects, 2026-11-02); **8b** symmetry, stroke buffer and
+  curved size (8b-i, 2026-11-02), brush panel and tips (8b-ii); her
+  requests between pushes — light theme and App color (status bar
+  dark over the light top bar), canvas shapes (portrait/square),
+  Undo/Redo moved right, onion fill fix (all confirmed 2026-11-23). How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
 
-**Next** (his order, 2026-11-01: her requested extras before share
-links):
+**Next** (her order, 2026-11-23: flip, then shapes, then smudge and
+stamps; share links after her requested extras). 8b closed at 8b-ii;
+its planned third push is now 8e, so steps stay in numerical order:
 
-1. **8b — symmetry + brush variety**, three pushes (scoped
-   2026-11-02, [why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)),
-   then flip drawing:
-   - **8b-i — done**, with its QOL (layers panel stays open on frame
-     taps, no long-press selection; verified 2026-11-02).
-   - **8b-ii — pushed, awaiting iPad checks** (below): the brush
-     panel (tap the selected Draw/Erase button) with Pen (today's tip,
-     still the default), Pencil, Chalk/charcoal, Chisel, Paintbrush
-     and Soft; Erase takes any tip with its own strength; the
-     Stabilizer moved into the panel. Decisions: [design
-     notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
-     → "8b-ii decisions"; how it works: ARCHITECTURE → Canvas and
-     drawing.
-   - **8b-iii:** smudge rebuilt for blending (she uses it to blend —
-     any way that achieves it is fine) on the soft tip, with its own
-     strength; stamps (a tap places one shape, a drag leaves a spaced
-     trail; a few shapes drawn by us, e.g. a web, star, heart — her
-     list, not a library).
-2. **Share links and Krita reference import** on the backup's
+1. **8c — Flip drawing + clearer onion ghosts — built, awaiting a
+   push** (checks below). Flip horizontal / Flip vertical in the layer
+   ⋯ menu (active layer, this frame, one undo step, refused on a
+   locked or hidden layer) and in the frame menu (the whole frame:
+   every layer, hidden too, and the photo; any locked layer refuses
+   it). Onion ghosts: fills fade to a faint wash,
+   lines stay the full tint (her report: lines still hard to make out
+   over a colored-in frame). Decisions: [design
+   notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
+   → "8c" and [Onion skin](docs/DESIGN_NOTES.md#onion-skin).
+2. **8d — Shape tools** (scoped 2026-11-23, Sketchbook's Draw Styles;
+   [design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
+   → "8d scoping"): Line, Rectangle, Oval, Triangle, outline only, in
+   Draw's tip, size, strength and color; a Perfect toggle; a Shape
+   button on the rail with a small panel.
+3. **8e — smudge + stamps** (was 8b-iii): smudge rebuilt for blending
+   (she uses it to blend — any way that achieves it is fine) on the
+   soft tip, with its own strength; stamps (a tap places one shape, a
+   drag leaves a spaced trail; a few shapes drawn by us, e.g. a web,
+   star, heart — her list, not a library; other shapes she wants go
+   here, not in 8d).
+4. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
-3. The rest of the requested extras (Open items, and Parked in the
+5. The rest of the requested extras (Open items, and Parked in the
    design notes).
 
-**Done since 8b-ii, awaiting her iPad checks** (her requests between
-8b pushes; each has an entry under Open iPad checks):
-- **Light theme, App color, soft edges** — pushed 2026-11-02
-  (commits "changing to light theme", "scheme color picker").
-  Decisions: [design notes](docs/DESIGN_NOTES.md#pwa-layout-and-updates)
-  → "Light theme". Pale lavender bars, flat buttons, purple accent
-  with lavender highlights, see-through panels, a multicolored
-  "Parapara!"; six App colors in the gear menu (both screens);
-  shadows instead of hairlines, rounder corners. Colors are named
-  tokens in `style.css` `:root`.
-- **Canvas shapes** — pushed 2026-11-18 (commit "added portrait view
-  canvas"). Decisions: [design
-  notes](docs/DESIGN_NOTES.md#planned-features) → "Canvas shapes".
-  New animation asks Landscape (1920×1080), Portrait (1080×1920, the
-  phone/Reels/TikTok size) or Square (1080×1080), highlighting her
-  last pick; fixed for the project's life.
-- **Undo moved, onion fill fix** — **zip sent 2026-11-22, not on
-  GitHub as of 2026-11-23** (check `git log` for it at the start of
-  the next conversation). Undo and Redo moved to the right of the
-  top bar, away from Gallery (she kept leaving by mistake, which
-  clears undo); onion ghosts keep their light and dark, so a filled
-  frame's lines show over a pale fill. Decisions: design notes →
-  "Layers and undo" and "Onion skin".
-
-**Handoff (2026-11-23):** next conversation, first confirm the
-undo/onion push landed and ask how the open iPad checks went
-(especially the status bar over the light top bar, and a portrait
-export). Then the suggested next build is 8b-iii (smudge + stamps)
-with Flip drawing in the same push — not yet scoped in detail;
-confirm scope first.
+**Handoff (2026-11-23):** 8c is built and tier-2 tested in the clone,
+not yet sent. Next conversation: ask how the 8c checks went, then
+build 8d from its scoping (confirm nothing changed first).
 
 **Open iPad checks** (send the activity log with any of them):
-- **After the light theme push:** the status bar's time and battery
-  are dark over the light top bar, in the gallery and the editor and
-  after switching between them, with no blur at the top. If they stay
-  white, see the design note's fallbacks (re-add to the Home Screen
-  only after a restore from backup works). Ask her about the purple
-  and lavender shades and how see-through the panels should be, and
-  whether anything is hard to see (empty frame tiles, the gear, the
-  hidden-images icon).
-- **After the App color push:** each of the six colors keeps the
-  status bar's text dark; her choice comes back after closing the
-  app, with no flash of purple first; the soft edges look right to
-  her. Note the App color isn't in the backup (uiState isn't) — a
-  restore starts purple.
-- **After the undo/onion push (2026-11-22):** Undo and Redo on the
-  right — does she still leave by mistake, and does she find them?
-  Onion ghosts of a filled frame show its lines (strong) over a pale
-  fill, in red and green as before; are the lines strong enough at
-  her strength setting?
-- **After the canvas shapes push:** make a Portrait and a Square
-  animation, draw a few frames, export with sound — the video plays
-  upright and the right shape in Photos and where she shares it.
-  Drawing, zooming and playback feel the same as landscape, with the
-  iPad held either way; the gallery shows tall ones as a page on gray.
-- **After 8b-ii, once pushed:** tapping Draw (or Erase) when it's
-  already the tool opens the brush panel; a canvas tap closes it
-  without drawing. Her old Pen size is unchanged. Each tip looks right
-  to her — Pencil and Chalk's grain stays put on the paper; Chisel
-  leans the other way across a symmetry axis; Paintbrush streaks; Soft
-  fades. Erase at ~50% fades instead of clearing. Big (100+) Soft,
-  Paintbrush and Chalk strokes keep up with her stylus. Tip, size and
-  strength come back after closing the app. Expect a tuning round on
-  default sizes and strengths.
+- **After the 8c push:** in the layer ⋯ menu, Flip horizontal and
+  Flip vertical mirror only the active layer on this frame, and one
+  Undo puts it back; on a locked or hidden layer the banner says why.
+  The menu (now eight items) fits on screen with the iPad either way
+  round. In the frame menu, the two Flips mirror every layer of this
+  frame (a hidden one too — show it after) and a photo with it, as one
+  Undo; with a layer locked, the banner names it. After a frame flip,
+  Undo leaves soft edges exactly as they were (if they look slightly
+  off, say so — see design notes → "8c"). Onion skin on a colored-in frame: are the lines easy to make
+  out now, and is the fill still visible enough to place things?
+  (`GHOST_FILL_FADE` in `onion-view.js` is the one number to tune —
+  higher fades fills more.) Ghosts showing up after a frame switch
+  should feel no slower than before (each ghost is now colored pixel
+  by pixel, ~30 ms each on the sandbox).
 - **Onion ghosts not showing (seen 2026-11-02, 8-layer project; cause
   unknown):** after the push, turn onion skin on in that project, step
   between a few frames (including one whose top layers are empty),
@@ -294,9 +256,7 @@ if it shows:
   ([why](docs/DESIGN_NOTES.md#drawing-engine))
 - **After the main build — requested, deferred so step 4 comes sooner**
   ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
-  - **Flip drawing** (was 3c; the layer menu it goes in was built in
-    4d): Flip H/V items in the layer menu. Flip = active layer, this
-    frame, one `'pixels'` undo entry; lock/hide refuse it.
+  - **Flip drawing** (was 3c): built in 8c (Current state).
   - Symmetry, brush variety, the stabilizer and erasers: built in 8
     (Current state).
 - **Frame-cache encode timeout?** The cache flattens with `toBlob`

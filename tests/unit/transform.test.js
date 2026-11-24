@@ -15,6 +15,7 @@ import {
   pinchPlacement,
   placementMatrix,
   flipPlacement,
+  mirrorPlacement,
   samePlacement,
   sanitizePlacement,
   DEFAULT_IMAGE_OPACITY,
@@ -215,3 +216,24 @@ function invert([a, b, c, d, e, f]) {
   const det = a * d - b * c;
   return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
 }
+
+// --- flip frame (8c): the photo goes with the drawing ---
+
+test('a horizontal frame flip mirrors the photo across the center and flips it', () => {
+  const image = { blobRef: 'b', x: 400, y: 300, scale: 0.5, rotation: 0.3, opacity: 0.5, flipX: false, flipY: false };
+  const next = mirrorPlacement(image, 'horizontal', 1920, 1080);
+  assert.deepEqual(next, { ...image, x: 1520, rotation: -0.3, flipX: true });
+  assert.deepEqual(mirrorPlacement(next, 'horizontal', 1920, 1080), image); // twice gives it back
+});
+
+test('a vertical frame flip mirrors the photo top to bottom', () => {
+  const image = { x: 400, y: 300, rotation: 0, flipX: true, flipY: false };
+  assert.deepEqual(mirrorPlacement(image, 'vertical', 1080, 1920), { x: 400, y: 1620, rotation: 0, flipX: true, flipY: true });
+});
+
+test('a stored photo with no position or turn keeps them missing (centered mirrors to centered)', () => {
+  const next = mirrorPlacement({ blobRef: 'b' }, 'horizontal', 1920, 1080);
+  assert.equal(next.x, undefined);
+  assert.equal(next.rotation, undefined);
+  assert.equal(next.flipX, true);
+});

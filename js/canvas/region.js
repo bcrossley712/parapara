@@ -46,6 +46,18 @@ export function clampRect(rect, width, height) {
   return { x, y, w: right - x, h: bottom - y };
 }
 
+// What a flip (8c) changes: `rect` and its mirror image across the
+// canvas's center line — vertical line for 'horizontal', horizontal
+// line for 'vertical'. The result is symmetric about that line, so
+// flipping its contents about their own center is the same as
+// flipping the whole canvas.
+export function flipSpan(rect, axis, width, height) {
+  const mirror = axis === 'vertical'
+    ? { x: rect.x, y: height - rect.y - rect.h, w: rect.w, h: rect.h }
+    : { x: width - rect.x - rect.w, y: rect.y, w: rect.w, h: rect.h };
+  return unionRect(rect, mirror);
+}
+
 // The smallest rect holding every pixel with any alpha in RGBA `data`
 // (`width` × `height`), or null if it's all transparent. Copy drawing
 // (4d) keeps only this much, so the clipboard and paste's undo entry

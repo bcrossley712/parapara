@@ -5,7 +5,8 @@
 // frame" tile (the wireframe's layout). Tap a tile to go to that frame;
 // the add tile inserts a blank frame after the current one. Tapping
 // the frame she's already on opens a small menu above it (Flipaclip's
-// frame menu): Duplicate, and Delete (4d; not on the last frame).
+// frame menu): Duplicate, Flip horizontal, Flip vertical (8c), and
+// Delete (4d; not on the last frame).
 // (Copy / paste of a layer's drawing is in the layer menu.) (The reference
 // image's controls live in the top bar's Image menu.)
 //
@@ -47,7 +48,7 @@ const LONG_PRESS_SLOP = 8;
 const SCROLL_EDGE = 48;
 const MAX_SCROLL_STEP = 14; // px per animation frame
 
-// callbacks: onSelect(frameId), onAdd(), onDuplicate(), onDelete(),
+// callbacks: onSelect(frameId), onAdd(), onDuplicate(), onFlip(axis) (8c), onDelete(),
 // onMove(frameId, toIndex)
 // options.signal: aborts the document listener (the menu's tap-outside
 // close) when the editor is torn down.
@@ -88,7 +89,12 @@ export function createFrameStrip(callbacks, { signal } = {}) {
     menu = document.createElement('div');
     menu.className = 'pp-frame-menu';
     menu.setAttribute('role', 'menu');
-    menu.append(menuItem('Duplicate', () => callbacks.onDuplicate()));
+    menu.append(
+      menuItem('Duplicate', () => callbacks.onDuplicate()),
+      // Flip frame (8c): the whole picture on this frame.
+      menuItem('Flip horizontal', () => callbacks.onFlip?.('horizontal')),
+      menuItem('Flip vertical', () => callbacks.onFlip?.('vertical')),
+    );
     // The last frame can't be deleted, so it isn't offered.
     if ((lastState?.frameIds.length ?? 0) > 1) {
       const del = menuItem('Delete', () => callbacks.onDelete());

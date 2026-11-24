@@ -695,3 +695,26 @@ test('a new frame inherits a photo every frame shares, but not one from a rotosc
   await expect(refImage(page)).toHaveCount(0);
   expect((await savedRefs(page))[2]).toBeNull();
 });
+
+// --- Flip frame (8c): the photo goes with the drawing ---
+
+test('Flip frame flips the photo with the drawing, as one undo step', async ({ page }) => {
+  await openApp(page);
+  await addImage(page);
+  // Move it right of center, so the mirror shows in its position too.
+  await drag(page, { x: 960, y: 540 }, { x: 1160, y: 540 });
+  await done(page);
+  await waitForSavedImage(page, (img) => Math.abs(img?.x - 1160) < 3);
+  const x = (await savedFrame(page)).image.x;
+
+  await openFrameMenu(page);
+  await page.getByRole('menuitem', { name: 'Flip horizontal', exact: true }).click();
+  await waitForSavedImage(page, (img) => img?.flipX === true && img.x === 1920 - x);
+
+  await settled(page);
+  await undoBtn(page).click();
+  await waitForSavedImage(page, (img) => img?.flipX === false && img.x === x);
+  await settled(page);
+  await redoBtn(page).click();
+  await waitForSavedImage(page, (img) => img?.flipX === true && img.x === 1920 - x);
+});

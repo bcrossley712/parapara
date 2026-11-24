@@ -26,7 +26,8 @@ panel samples), `stabilizer.js` (8a, pure: the trailing
 line), `symmetry.js` (8b-i, pure: mirror points, `mergeOverlapping`),
 `size-curve.js` (8b-i, pure: the size slider's curve),
 `gestures.js` (pure pan/zoom/rotate math,
-tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`),
+tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`,
+`flipSpan`),
 `ink-map.js` (lost-canvas rule).
 
 **Constants:** `MAX_BRUSH_SIZE` (200 since 8b-i) and `DEFAULT_COLOR` are exported
@@ -228,10 +229,19 @@ and the glue in `main.js`.
     (later) must respect lock too.
   - **Layer menu (4d)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
     tapping the **active** layer's row opens it (another row just
-    selects). Items: Copy, Paste, Rename, Duplicate, Clear, Delete;
-    Flip H/V and merge down join later. The footer keeps only opacity.
+    selects). Items: Copy, Paste, Rename, Duplicate, Flip horizontal,
+    Flip vertical (8c), Clear, Delete; merge down joins later. The
+    footer keeps only opacity.
   - **Clear** (layer menu; 2e): the active layer on this frame only,
     undoable. Replaced the gear menu's dev "Clear drawing".
+  - **Flip** (layer menu; 8c) ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
+    mirrors the active layer on this frame across the canvas's center
+    (horizontal: left ↔ right; vertical: top ↔ bottom) — not the
+    whole frame (Procreate's "flip canvas" does every layer). One
+    `'pixels'` entry holding only the drawing and its mirror image
+    (`flipSpan`), through `notifyChange` like Clear and Paste, so the
+    ink map, save and frame cache follow. Refused like Clear (locked,
+    hidden); a blank layer does nothing.
   - **Frames:** add frame inserts a blank frame *after* the current
     one, with a slot for every layer, and moves onto it. Tapping the
     current frame's tile opens the frame menu (Duplicate, Delete —
@@ -268,7 +278,8 @@ and the glue in `main.js`.
     frame, `'frame-delete'` and `'frame-move'` (4d), `'image'` (3a),
     and `'image-all'` (3b, Use on all frames:
     keeps each changed frame's old image; undo jumps to the frame it
-    was applied from). **Visibility, lock and Hide images are
+    was applied from), and `'frame-flip'` (8c: `{ frameId, axis }`, no
+    pixels — undo and redo are the same flip again). **Visibility, lock and Hide images are
     not undoable** (view state, as in Photoshop). Rename isn't either. An entry for another frame moves
     to that frame first. Undoing an add frame takes the frame out (its
     record is deleted, its pixels stay in storage for redo).
@@ -623,7 +634,9 @@ panel, "Getting ready"), `onion.js` (onion rules), `dev-stress.js`
 - **Onion skin (4c)** ([why](DESIGN_NOTES.md#onion-skin)):
   - **Ghosts** are neighbors' cached pictures (layers only — **never
     the photo**, hidden layers out), tinted but keeping their light
-    and dark (lines the full tint, light fills pale), on one canvas
+    and dark (lines the full tint, light fills pale), with fills faded
+    to a faint wash by lightness (8c, `tintGhost`, one JS pass per
+    ghost per draw; `GHOST_FILL_FADE` is the tuning number), on one canvas
     over the photo and under every layer. Previous red, next green,
     further ones fainter. **No wrap-around**, even with loop. Rules
     pure in `timeline/onion.js`; drawing in `canvas/onion-view.js`.
@@ -644,6 +657,17 @@ panel, "Getting ready"), `onion.js` (onion rules), `dev-stress.js`
     in storage under the frame's refs for undo.
   - **Reorder:** long-press a tile and drag; she stays on her frame.
     Only `project.frames` changes; `'frame-move'` keeps `from`/`to`.
+  - **Flip frame (8c)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
+    frame menu → Flip horizontal / Flip vertical. This frame's whole
+    picture mirrored across the canvas's center: every layer, **hidden
+    ones too** (so showing one later lines up), and the photo's
+    placement (`mirrorPlacement`: flipped and its center mirrored; the
+    photo file and other frames untouched). **Any locked layer refuses
+    it all**, the banner naming the layer. `canvasApi.flipFrame` copies
+    canvas to canvas (`mirrorInPlace`, never through ImageData), so
+    flipping twice gives back the exact pixels — that's why its undo
+    entry holds none. It fires no onChange: main.js marks each changed
+    layer unsaved itself.
   - **Copy / Paste:** Copy takes the active layer's drawing on this
     frame (after `checkLayer` — a lost canvas would copy blank). Paste
     goes **on top** in **whichever layer is active** — her choice,
@@ -1194,7 +1218,7 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
   tool opens it (as the current frame tile opens its menu) — unless
   the eyedropper is armed: then that tap only cancels it; a tap
   anywhere else closes it, and a canvas tap then only closes it.
-  Smudge and Fill have none until 8b-iii. The Draw/Erase buttons show
+  Smudge and Fill have none until 8e (was 8b-iii). The Draw/Erase buttons show
   the tip's name under the label (accessible name stays
   "Draw"/"Erase"). The rail keeps Size; the panel has Size too (same
   curve, number shown), Strength 1–100% and Stabilizer.

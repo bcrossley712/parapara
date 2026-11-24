@@ -58,6 +58,21 @@ export function flipPlacement(placement, direction) {
   };
 }
 
+// Flip frame (8c): the photo goes with the drawing — flipped as above
+// and its center mirrored across the canvas's center line. Works on a
+// stored frame.image as is (a missing x or y means centered, which
+// mirrors to itself, so it stays missing). Twice gives it back.
+export function mirrorPlacement(image, direction, canvasW, canvasH) {
+  const next = flipPlacement(image, direction);
+  if (!Number.isFinite(image.rotation)) next.rotation = image.rotation; // missing stays missing
+  if (direction === 'vertical') {
+    if (Number.isFinite(image.y)) next.y = canvasH - image.y;
+  } else if (Number.isFinite(image.x)) {
+    next.x = canvasW - image.x;
+  }
+  return next;
+}
+
 export function clampImageScale(scale, { imageW, imageH, canvasW, canvasH }) {
   const side = Math.max(imageW, imageH);
   const min = MIN_IMAGE_SIDE / side;

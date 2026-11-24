@@ -244,7 +244,7 @@ test('the frame menu has no copy or paste (they are layer actions)', async ({ pa
   await openApp(page);
   await addFrame(page);
   await openMenu(page);
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Duplicate', 'Delete']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Duplicate', 'Flip horizontal', 'Flip vertical', 'Delete']);
 });
 
 test('Paste puts a layer\'s drawing into another layer on the same frame, on top; undoable', async ({ page }) => {
@@ -334,4 +334,127 @@ test('a paste right after erasing still paints (the eraser\'s mode does not carr
   await stroke(page, 900);
   await layerMenu(page, 'Paste');
   expect(await paintedAt(page, 900, 300)).toBe(true);
+});
+
+// --- Flip frame (8c) ---
+
+// A fingerprint of every pixel of one layer canvas.
+function layerPrint(page, layerId) {
+  return page.evaluate((id) => {
+    const c = document.querySelector(`.pp-layer[data-layer-id="${id}"]`);
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i++) h = (Math.imul(h, 31) + d[i]) | 0;
+    return h;
+  }, layerId);
+}
+
+async function frameMenu(page, item) {
+  await openMenu(page);
+  await menuItem(page, item).click();
+  await expect(menu(page)).toHaveCount(0);
+  await settled(page);
+}
+
+// Frame 1: Layer 1 marked at y 200, Layer 2 (then hidden) at y 400.
+// Frame 2: Layer 1 marked at y 700. Ends on frame 1.
+async function twoLayerFrames(page) {
+  await openApp(page);
+  await stroke(page, 200);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Add layer' }).click();
+  await layersSettled(page);
+  await stroke(page, 400);
+  const [l2, l1] = await layerIdsTopFirst(page);
+  await addFrame(page);
+  await selectLayer(page, l1);
+  await stroke(page, 700);
+  await goToFrame(page, 1);
+  return { l1, l2 };
+}
+
+test('Flip vertical flips every layer of this frame, hidden ones too, and only this frame', async ({ page }) => {
+  const { l1, l2 } = await twoLayerFrames(page);
+  await page.getByRole('button', { name: 'Hide Layer 2' }).click();
+  await frameMenu(page, 'Flip vertical');
+  expect(await paintedOn(page, l1, 900, 200)).toBe(false);
+  expect(await paintedOn(page, l1, 900, 1080 - 200)).toBe(true);
+  expect(await paintedOn(page, l2, 900, 400)).toBe(false);
+  expect(await paintedOn(page, l2, 900, 1080 - 400)).toBe(true); // the hidden layer too
+
+  await goToFrame(page, 2);
+  expect(await paintedOn(page, l1, 900, 700)).toBe(true); // frame 2 untouched
+  expect(await paintedOn(page, l1, 900, 1080 - 700)).toBe(false);
+});
+
+test('undoing a frame flip gives back exactly the same pixels, from another frame too; redo flips again', async ({ page }) => {
+  const { l1, l2 } = await twoLayerFrames(page);
+  const before = [await layerPrint(page, l1), await layerPrint(page, l2)];
+  await frameMenu(page, 'Flip horizontal');
+  const flipped = [await layerPrint(page, l1), await layerPrint(page, l2)];
+  expect(flipped[0]).not.toBe(before[0]);
+  expect(flipped[1]).not.toBe(before[1]);
+
+  // Undo from frame 2 jumps back to frame 1 and unflips it, as one step.
+  await goToFrame(page, 2);
+  await undo(page);
+  await expect(tile(page, 1)).toHaveClass(/is-current/);
+  await settled(page);
+  expect([await layerPrint(page, l1), await layerPrint(page, l2)]).toEqual(before);
+
+  await redo(page);
+  await settled(page);
+  expect([await layerPrint(page, l1), await layerPrint(page, l2)]).toEqual(flipped);
+});
+
+test('a locked layer refuses the frame flip, and the banner names it', async ({ page }) => {
+  const { l1, l2 } = await twoLayerFrames(page);
+  await page.getByRole('button', { name: 'Lock Layer 2' }).click();
+  await frameMenu(page, 'Flip vertical');
+  await expect(banner(page)).toContainText('Layer 2 is locked');
+  expect(await paintedOn(page, l1, 900, 200)).toBe(true);
+  expect(await paintedOn(page, l2, 900, 400)).toBe(true);
+});
+
+// A fingerprint of every saved layer bitmap's bytes.
+function savedPixelsPrint(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('parapara');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const r = db.transaction('blobs').objectStore('blobs').getAll();
+      r.onsuccess = () => {
+        db.close();
+        let h = 0;
+        for (const rec of r.result) {
+          if (rec.id.startsWith('thumb-')) continue;
+          const bytes = new Uint8Array(rec.buffer);
+          for (let i = 0; i < bytes.length; i++) h = (Math.imul(h, 31) + bytes[i]) | 0;
+        }
+        resolve(h);
+      };
+      r.onerror = () => { db.close(); reject(r.error); };
+    };
+  }));
+}
+
+test('a frame flip is saved and still there after a reload, hidden layers included', async ({ page }) => {
+  const { l1, l2 } = await twoLayerFrames(page);
+  await page.getByRole('button', { name: 'Hide Layer 2' }).click();
+  // Let frame 1's own saves land first, so the next change is the flip.
+  let last = null;
+  await expect.poll(async () => {
+    const now = await savedPixelsPrint(page);
+    const same = now === last;
+    last = now;
+    return same;
+  }, { intervals: [500] }).toBe(true);
+  await frameMenu(page, 'Flip vertical');
+  await expect.poll(() => savedPixelsPrint(page)).not.toBe(last);
+  await reloadApp(page);
+  await settled(page);
+  expect(await paintedOn(page, l1, 900, 1080 - 200)).toBe(true);
+  expect(await paintedOn(page, l2, 900, 1080 - 400)).toBe(true);
+  expect(await paintedOn(page, l1, 900, 200)).toBe(false);
 });

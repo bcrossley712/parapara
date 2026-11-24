@@ -141,7 +141,7 @@ import { createRecorder, micError, micSettings } from './audio/recorder.js';
 import { computePeaks } from './audio/peaks.js';
 import { prepareImport } from './canvas/reference.js';
 import { sanitizeSymmetry } from './canvas/symmetry.js';
-import { sanitizePlacement, samePlacement, flipPlacement } from './canvas/transform.js';
+import { sanitizePlacement, samePlacement, flipPlacement, mirrorPlacement } from './canvas/transform.js';
 import { initUpdater, formatVersion } from './updater.js';
 import {
   applyAppColor, sanitizeAppColor, readStoredAppColor, writeStoredAppColor,
@@ -1083,6 +1083,7 @@ function mountEditor(session, { canSave }) {
       onCopy: afterPlayback(() => copyDrawing()),
       onPaste: afterPlayback(() => pasteDrawing()),
       onClear: afterPlayback((id) => clearLayer(id)),
+      onFlip: afterPlayback((id, axis) => flipLayer(id, axis)),
       onRename: afterPlayback((id, name) => renameLayer(id, name)),
       onToggleVisible: afterPlayback((id) => toggleLayerProp(id, 'visible')),
       onToggleLock: afterPlayback((id) => toggleLayerProp(id, 'locked')),
@@ -1103,6 +1104,7 @@ function mountEditor(session, { canSave }) {
       onAdd: afterPlayback(() => addFrame()),
       onDuplicate: afterPlayback(() => duplicateFrame()),
       onDelete: afterPlayback(() => deleteFrame()),
+      onFlip: afterPlayback((axis) => flipFrame(axis)),
       onMove: afterPlayback((id, to) => moveFrame(id, to)),
     },
     transport: {
@@ -2336,6 +2338,17 @@ function mountEditor(session, { canSave }) {
       case 'image':
         exclusive(() => setFrameImage(entry.frameId, undoing ? entry.before : entry.after));
         return entry;
+      case 'frame-flip':
+        // Its own undo: the same flip again, on its frame.
+        exclusive(async () => {
+          await showFrame(entry.frameId);
+          let imageDone = null;
+          if (flipOpenFrame(entry.axis, (task) => { imageDone = task(); }) === null) {
+            showBanner("This frame can't be flipped right now. Close Parapara! and open it again.");
+          }
+          await imageDone;
+        });
+        return entry;
       case 'image-all':
         exclusive(() => applyImageAll(entry, undoing));
         return entry;
@@ -2432,6 +2445,52 @@ function mountEditor(session, { canSave }) {
       await insertFrame(record);
       history.push({ type: 'frame-add', record, bytes: 0 });
     });
+  }
+
+  // Flip frame (8c): this frame's whole picture mirrored across the
+  // canvas's center — every layer (hidden ones too) and the photo's
+  // placement. Procreate's flip canvas, for one frame. A locked layer
+  // refuses it all (lock protects its pixels; skipping it would leave
+  // the frame half-mirrored). One undo step that holds no pixels: undo
+  // and redo are the same flip again (flipOpenFrame).
+  function flipFrame(axis) {
+    if (!canAct() || adjust) return;
+    const locked = project.layers.find((l) => l.locked);
+    if (locked) {
+      showBanner(`${locked.name} is locked. Unlock it in Layers to flip this frame.`);
+      return;
+    }
+    const frame = session.frame;
+    const before = frame.image ?? null;
+    const changed = flipOpenFrame(axis);
+    if (changed === null) {
+      showBanner("This frame can't be flipped right now. Close Parapara! and open it again.");
+      return;
+    }
+    if (changed.length === 0 && !before) return; // nothing on the frame
+    devLog.add('flip-frame', { frame: tag(frame.id), axis, layers: changed.length, image: before ? 1 : 0 });
+    history.push({ type: 'frame-flip', frameId: frame.id, axis, bytes: 0 });
+  }
+
+  // Mirrors the open frame: its layers now, its photo's placement
+  // through `runImage` (exclusive() by default; a caller already inside
+  // exclusive() passes a function that runs it directly, since
+  // exclusive() skips a task while another is running). Returns the
+  // ids of layers it changed, or null if the canvas refused (see
+  // flipFrame).
+  function flipOpenFrame(axis, runImage = exclusive) {
+    const frame = session.frame;
+    const changed = canvasApi.flipFrame(axis);
+    if (changed === null) return null;
+    for (const id of changed) {
+      markUnsaved(id);
+      panel.refreshThumbnail(id);
+    }
+    if (frame.image) {
+      const image = mirrorPlacement(frame.image, axis, project.canvas.width, project.canvas.height);
+      runImage(() => setFrameImage(frame.id, image));
+    }
+    return changed;
   }
 
   // Copy frame: every layer's drawing on this frame, as a new frame
@@ -3611,6 +3670,25 @@ function mountEditor(session, { canSave }) {
     }
     devLog.add('clear', { frame: tag(session.frame.id), layer: short(id) });
     canvasApi.clear();
+  }
+
+  // Flip (8c): the active layer's drawing on this frame, mirrored
+  // across the canvas's center (axis 'horizontal' | 'vertical').
+  // Undoable like a stroke; refused like Clear, with wording for
+  // flipping.
+  function flipLayer(id, axis) {
+    if (!canAct() || id !== project.activeLayerId) return;
+    const layer = project.layers.find((l) => l.id === id);
+    if (layer?.locked) {
+      showBanner('This layer is locked. Unlock it in Layers to flip it.');
+      return;
+    }
+    if (layer && !layer.visible) {
+      showBanner('This layer is hidden. Show it in Layers to flip it.');
+      return;
+    }
+    devLog.add('flip', { frame: tag(session.frame.id), layer: short(id), axis });
+    canvasApi.flip(axis);
   }
 
   // A locked layer can't be deleted (lock protects it, not just its
