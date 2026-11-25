@@ -1419,6 +1419,13 @@ registration, update checks/apply, version, fresh reload — no UI).
 
 ### Don't break
 
+- **The tool rail is full on short screens.** At 560 px tall (the
+  `updates` project's settings-panel test) it had ~0 px to spare after
+  8d's Shape button, and CI's taller fonts pushed the gear — and the
+  panel anchored to it — off screen. `@media (max-height: 640px)`
+  tightens its spacing. Adding a rail button: run the `updates`
+  project too (`--project=app` skips it), and measure the rail at 560
+  px. Her iPad has room (744 px is the shortest landscape iPad).
 - `#app` is `position: fixed; inset: 0`; each screen's shell inside it
   is `position: absolute; inset: 0` — never `vh`/`dvh` units for
   full-screen layout without testing on the iPad.

@@ -229,6 +229,17 @@ textarea,
   flex-shrink: 0;
 }
 
+/* Short screens: tighter spacing so the gear stays on screen. On her
+   iPad the rail has room to spare (744 px is the shortest landscape
+   iPad); a short window — a laptop, CI's 560 px test — had none once
+   8d added Shape (its fonts run taller than the sandbox's). */
+@media (max-height: 640px) {
+  .pp-tool-rail {
+    gap: 4px;
+    padding: 8px 8px;
+  }
+}
+
 .pp-tool-btn {
   border: none;
   border-radius: var(--pp-radius-control);
