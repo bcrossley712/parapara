@@ -23,6 +23,7 @@ import { TIP_LABELS } from '../canvas/brush.js';
 import { createBrushPanel } from './brush-panel.js';
 import { sliderToSize, sizeToSlider, SIZE_SLIDER_STEPS } from '../canvas/size-curve.js';
 import { createSymmetryMenu } from './symmetry-menu.js';
+import { createShapePanel } from './shape-panel.js';
 import { createColorPicker, EYEDROPPER_ICON } from './color-picker.js';
 import { attachSettingsMenu } from './settings-panel.js';
 import { GEAR_ICON, GALLERY_ICON } from './icons.js';
@@ -165,6 +166,7 @@ export function initUI(container, options = {}) {
       || onionBadge.isMenuOpen
       || symmetryMenu.isMenuOpen
       || brushPanel.isOpen
+      || shapePanel.isOpen
       || transport.isMenuOpen;
   }
 
@@ -257,11 +259,14 @@ export function initUI(container, options = {}) {
   shell.append(topBar, body);
   container.appendChild(shell);
 
+  // Undo also takes away a triangle's waiting base (8d), so it stays
+  // usable while one waits even with nothing to undo.
+  let historyCanUndo = false;
   function setHistoryState(canUndo, canRedo) {
-    undoBtn.disabled = !canUndo;
+    historyCanUndo = canUndo;
+    undoBtn.disabled = !(canUndo || canvasApi.hasShapeBase());
     redoBtn.disabled = !canRedo;
   }
-  setHistoryState(false, false);
 
   const canvasApi = initCanvas(canvasArea, {
     width: options.canvasSize?.width,
@@ -269,6 +274,23 @@ export function initUI(container, options = {}) {
   });
   canvasApi.applySettings(settings);
   const startSettings = canvasApi.getSettings();
+  setHistoryState(false, false);
+  canvasApi.onShapeBase(() => {
+    undoBtn.disabled = !(historyCanUndo || canvasApi.hasShapeBase());
+  });
+
+  // A triangle's waiting base (8d) is dropped by any touch outside the
+  // drawing — the rail, top bar, frame strip, panels, the onion badge —
+  // except Undo, which takes it away itself (main.js). Fingers on the
+  // canvas keep it: the next press places the corner, two fingers zoom.
+  document.addEventListener('pointerdown', (event) => {
+    if (!canvasApi.hasShapeBase()) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (undoBtn.contains(target)) return;
+    if (target === canvasArea || canvasApi.canvasElement.contains(target)) return;
+    canvasApi.dropShapeBase();
+  }, { signal, capture: true });
 
   // Tapping the tool that's already chosen opens its brush panel
   // (draw and erase, 8b-ii) — as the current frame tile opens its menu.
@@ -280,11 +302,21 @@ export function initUI(container, options = {}) {
     setEyedropperArmed(false); // picking a tool cancels the eyedropper
     if (canvasApi.getSettings().tool === tool && BRUSH_PANEL_TOOLS.includes(tool)) {
       if (wasPicking) return;
+      shapePanel.close();
       if (brushPanel.isOpen) brushPanel.close();
       else brushPanel.open(toolButtons[tool], brushState());
       return;
     }
+    // Shape (8d) opens its own small panel the same way.
+    if (canvasApi.getSettings().tool === tool && tool === 'shape') {
+      if (wasPicking) return;
+      brushPanel.close();
+      if (shapePanel.isOpen) shapePanel.close();
+      else shapePanel.open();
+      return;
+    }
     brushPanel.close();
+    shapePanel.close();
     setActiveTool(tool);
     onSettingsChange();
   };
@@ -292,8 +324,27 @@ export function initUI(container, options = {}) {
   const eraseBtn = createToolButton('Erase', () => pickTool('erase'));
   const fillBtn = createToolButton('Fill', () => pickTool('fill'));
   const smudgeBtn = createToolButton('Smudge', () => pickTool('smudge'));
+  // Shape (8d): after Smudge, naming the current shape as Draw names
+  // its tip; its panel has the four shapes and Perfect.
+  const shapePanel = createShapePanel({
+    container: shell,
+    signal,
+    onShape: (name) => {
+      canvasApi.setShape(name);
+      syncBrushControls();
+      onSettingsChange();
+    },
+    onPerfect: (on) => {
+      canvasApi.setShapePerfect(on);
+      syncBrushControls();
+      onSettingsChange();
+    },
+  });
+  const shapeBtn = shapePanel.button;
+  shapeBtn.addEventListener('click', () => pickTool('shape'));
   toolButtons.draw = drawBtn;
   toolButtons.erase = eraseBtn;
+  toolButtons.shape = shapeBtn;
   // Draw and Erase show their tip's name under the label, so she can
   // tell which tip she'll get without drawing (the accessible name
   // stays "Draw"/"Erase").
@@ -355,6 +406,7 @@ export function initUI(container, options = {}) {
     for (const tool of BRUSH_PANEL_TOOLS) {
       tipNames[tool].textContent = TIP_LABELS[settings.tips[tool]];
     }
+    shapePanel.render({ shape: settings.shape, perfect: settings.shapePerfect });
     const size = canvasApi.getBrushSize();
     sizeInput.disabled = size === null;
     sizeControl.classList.toggle('pp-brush-size--disabled', size === null);
@@ -369,6 +421,7 @@ export function initUI(container, options = {}) {
   rail.appendChild(eraseBtn);
   rail.appendChild(fillBtn);
   rail.appendChild(smudgeBtn);
+  rail.appendChild(shapeBtn);
 
   // Color swatch — opens the custom picker (canvas/brush.js-style
   // split into its own file, see color-picker.js) as a floating panel
@@ -528,6 +581,7 @@ export function initUI(container, options = {}) {
     eraseBtn.classList.toggle('is-active', tool === 'erase');
     fillBtn.classList.toggle('is-active', tool === 'fill');
     smudgeBtn.classList.toggle('is-active', tool === 'smudge');
+    shapeBtn.classList.toggle('is-active', tool === 'shape');
 
     // Each tool (and, for draw/erase, each tip) remembers its own size
     // (see canvas.js) — sync the slider to whatever the newly active

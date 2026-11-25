@@ -1301,39 +1301,64 @@ these forces a redo of what's built; each is additive.
     ~150 MB. If Safari's mirrored drawImage ever turned out inexact,
     the cost would be soft edges a channel value off after an undo,
     not lost drawing — then switch to patches.
-- **8d scoping (2026-11-23) — shape tools.** Her request ("a straight
-  line, circle, square… like Paint" was his framing; she knows
-  Sketchbook's Draw Styles). Agreed:
+- **8d scoping (2026-11-23, triangle revised 2026-11-24) — shape
+  tools.** Her request ("a straight line, circle, square… like Paint"
+  was his framing; she knows Sketchbook's Draw Styles). Agreed:
   - **Shapes:** Line, Rectangle, Oval, Triangle, each with a perfect
     variety. **Outline only** (her call; no Filled option). Other
     shapes (star, heart, web…) are stamps, in 8e.
   - **Drawing one:** press, drag to see it live, lift to place it.
     Line start → end; Rectangle corner to corner; **Oval from its
-    center** (Sketchbook's way); Triangle corner to corner like the
-    rectangle, **always point up** (his call over "point toward where
-    she started"). No adjusting after the lift (that needs handles on
-    the canvas, which she dislikes) — undo and redraw.
+    center** (Sketchbook's way). No adjusting after the lift (that
+    needs handles on the canvas, which she dislikes) — undo and
+    redraw. **A tap with no drag places nothing** (no undo step).
+  - **Triangle is two steps** (his call, 2026-11-24, replacing
+    "corner to corner, always point up", which could only make one
+    kind of triangle): drag the base like a Line; lift and it stays;
+    the next press anywhere drags the third corner (both base ends
+    follow it), and lifting places the triangle as **one undo step**.
+    A tap places the corner where she tapped. A deliberate departure —
+    none of her apps has this exact triangle; closest is Clip Studio
+    building a shape point by point. **While the base waits:** two
+    fingers pan/zoom/rotate and keep it (to zoom in for the corner);
+    Undo removes only the base, not the edit before it; anything else
+    (another tool, frame or layer, Play, a menu, leaving the app,
+    closing the project) drops it unsaved — nothing is saved until the
+    triangle is placed. No hint on screen after the base (his call:
+    tutorials will cover it — Parked → "How-to / tutorials").
   - **Perfect toggle** in the shape panel (no Shift key on an iPad;
-    chosen over separate Circle/Square buttons): square, circle,
-    equilateral triangle; the line snaps to 45° steps.
+    chosen over separate Circle/Square buttons): square, circle; the
+    line, and the triangle's base, snap to 45° steps; the triangle is
+    equilateral on its base, and the second step only picks which side
+    it points to (a tap on a side, or a drag that flips as it crosses
+    the base).
   - **Look:** Draw's current tip, size, strength and color, as
     Sketchbook's shapes use the brush; symmetry mirrors them; the
     stabilizer doesn't apply. The size slider on Shape *is* Draw's
-    (changing it changes freehand too).
+    (changing it changes freehand too). To change tip or strength she
+    goes back to Draw (offered a tip row in the Shape panel instead —
+    kept as scoped). Each outline is one continuous path, spacing
+    carried round the corners, so Soft and Chalk corners don't get a
+    darker double stamp.
   - **Rail:** a Shape button after Smudge naming the current shape (as
     Draw names its tip); tapping it again opens a small panel — the
     four shapes and Perfect. Shape and the toggle are remembered
-    across launches (additive `toolSettings` fields, sanitized).
+    across launches (additive `toolSettings` fields, sanitized). If
+    the rail runs short in landscape, tighten its spacing rather than
+    move anything (his OK).
   - **Engine:** a shape is a stroke whose buffer is cleared and
     redrawn on each move (at most once per animation frame), composed
     over the union of the old and new boxes so a shrinking shape
     leaves nothing behind; the undo box is the final shape's. So undo,
     symmetry, the ink map, lock/hide and the second-finger cancel come
     from the stroke path.
+  - **Also agreed:** a shape counts as using its color (recent
+    colors, like Draw and Fill); the robot test draws shapes too.
   - **Coupled, flagged:** shapes line up with the canvas, not the
     screen (a rotated view shows a tilted rectangle; start and end
     stay under the stylus). Whether a big Chalk or Soft oval keeps up
-    while dragging is an iPad check.
+    while dragging is an iPad check; the fallback, if it lags, is a
+    thin preview while dragging and the brush on lift.
 - **Adjustable shortcut bar (deferred to after step 6).** The idea is to
   let her put the actions she uses most in a bar, like Clip Studio's
   command bar. It takes:
@@ -1415,6 +1440,10 @@ one only when she asks (or its trigger shows up), after scoping.
   gallery-only for now.
 - **How-to / tutorials** reachable from the settings (gear) menu —
   later, once there's enough to explain (gestures, layers, frames).
+  He wants this as a real future step (2026-11-24). Include 8d's
+  two-step triangle: after the base, nothing on screen says "now
+  place the third corner" (his call — no banner; the tutorial
+  covers it).
 - **"Make into layer"** (bake the reference image into a new layer) —
   only if she wants to draw/erase on the photo itself (see "Ask her").
   This is additive, not a rewrite.

@@ -30,6 +30,8 @@ const DEFAULTS = {
   stabilizer: { draw: DEFAULT_STABILIZER, erase: DEFAULT_STABILIZER },
   tips: { draw: 'pen', erase: 'pen' },
   tipSettings: tipSettingsWith(),
+  shape: 'line',
+  shapePerfect: false,
 };
 
 beforeEach(() => {
@@ -60,6 +62,8 @@ test('valid settings pass through unchanged (color lowercased)', () => {
     stabilizer: { draw: 0, erase: MAX_STABILIZER },
     tips: { draw: 'pen', erase: 'pen' },
     tipSettings: tipSettingsWith(1, 33),
+    shape: 'line',
+    shapePerfect: false,
   });
 });
 
@@ -81,6 +85,8 @@ test('each bad field falls back on its own, keeping the good ones', () => {
     stabilizer: { draw: 3, erase: DEFAULT_STABILIZER },
     tips: { draw: 'pen', erase: 'pen' },
     tipSettings: tipSettingsWith(12, 6),
+    shape: 'line',
+    shapePerfect: false,
   });
 });
 
@@ -102,9 +108,23 @@ test('extra or unexpected fields are dropped', () => {
     stabilizer: { draw: 1, erase: 2, smudge: 3, fill: 4 },
     zoom: 3,
   });
-  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'stabilizer', 'tipSettings', 'tips', 'tool']);
+  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'shape', 'shapePerfect', 'stabilizer', 'tipSettings', 'tips', 'tool']);
   assert.deepEqual(Object.keys(result.brushSizes).sort(), ['draw', 'erase', 'smudge']);
   assert.deepEqual(Object.keys(result.stabilizer).sort(), ['draw', 'erase']);
+});
+
+test('shape (8d): the tool, its shape and Perfect are kept; bad ones fall back', () => {
+  const good = sanitizeToolSettings({ tool: 'shape', shape: 'triangle', shapePerfect: true });
+  assert.equal(good.tool, 'shape');
+  assert.equal(good.shape, 'triangle');
+  assert.equal(good.shapePerfect, true);
+  const bad = sanitizeToolSettings({ tool: 'shape', shape: 'star', shapePerfect: 'yes' });
+  assert.equal(bad.shape, 'line');
+  assert.equal(bad.shapePerfect, false);
+  // Settings saved before 8d have neither.
+  const old = sanitizeToolSettings({ tool: 'draw', color: '#000000' });
+  assert.equal(old.shape, 'line');
+  assert.equal(old.shapePerfect, false);
 });
 
 test('stabilizer: settings saved before 8a get the midway default', () => {

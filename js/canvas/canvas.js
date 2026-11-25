@@ -51,6 +51,7 @@ import {
 } from './brush.js';
 import { mirrorPoints, mergeOverlapping, sanitizeSymmetry } from './symmetry.js';
 import { createStabilizer, MAX_STABILIZER, DEFAULT_STABILIZER } from './stabilizer.js';
+import { sanitizeShape, lineEnd, shapeOutline, triangleOutline, stampPoints } from './shapes.js';
 import {
   distance,
   midpoint,
@@ -128,8 +129,9 @@ export const EXPORT_TIMEOUT_MS = 15000;
 // --- tool settings (remembered across launches; see main.js) ---
 //
 // Tools, and which of them have a size. Fill has no size (a flood
-// fill has no radius).
-const TOOLS = ['draw', 'erase', 'fill', 'smudge'];
+// fill has no radius). Shape (8d) draws with Draw's tip, size and
+// strength, so it has no size of its own either (SHAPE_TIP_TOOL).
+const TOOLS = ['draw', 'erase', 'fill', 'smudge', 'shape'];
 const SIZED_TOOLS = ['draw', 'erase', 'smudge'];
 // Tools the stabilizer (8a) applies to, each with its own strength
 // (Flipaclip has one per brush). Not fill (no line), not smudge (its
@@ -142,6 +144,12 @@ const DEFAULT_BRUSH_SIZE = 6;
 // and, per tip, its own size and strength (Draw-Pencil and
 // Erase-Pencil are separate). Smudge keeps a plain size until 8e (was 8b-iii).
 const TIPPED_TOOLS = ['draw', 'erase'];
+// Whose tip, size and strength a shape is drawn with (8d: as
+// Sketchbook's shapes use the current brush).
+const SHAPE_TIP_TOOL = 'draw';
+// A shape press that moves less than this on screen (CSS px) is a tap:
+// it places nothing (8d). Measured on screen so zoom doesn't change it.
+const SHAPE_TAP_PX = 6;
 
 const isSize = (v) => Number.isInteger(v) && v >= 1 && v <= MAX_BRUSH_SIZE;
 const isStrength = (v) => Number.isInteger(v) && v >= MIN_STRENGTH && v <= MAX_STRENGTH;
@@ -154,7 +162,10 @@ const isStrength = (v) => Number.isInteger(v) && v >= MIN_STRENGTH && v <= MAX_S
 //
 // Shape: { tool, color, brushSizes: { draw, erase, smudge },
 // stabilizer: { draw, erase }, tips: { draw, erase },
-// tipSettings: { draw: { [tip]: { size, strength } }, erase: … } }.
+// tipSettings: { draw: { [tip]: { size, strength } }, erase: … },
+// shape, shapePerfect }. shape/shapePerfect (8d): the Shape tool's
+// shape (shapes.js SHAPES; missing = 'line') and its Perfect toggle
+// (missing = false).
 // brushSizes.draw/erase are the current tip's size (kept so the saved
 // shape still reads as before); tipSettings is the source of truth.
 // Settings saved before 8b-ii have no tipSettings: their draw/erase
@@ -216,7 +227,11 @@ export function sanitizeToolSettings(raw) {
       : (isSize(savedSizes[name]) ? savedSizes[name] : DEFAULT_BRUSH_SIZE);
   }
 
-  return { tool, color, brushSizes, stabilizer, tips, tipSettings };
+  // 8d.
+  const shape = sanitizeShape(input.shape);
+  const shapePerfect = input.shapePerfect === true;
+
+  return { tool, color, brushSizes, stabilizer, tips, tipSettings, shape, shapePerfect };
 }
 
 // Fill: per-channel color-distance tolerance for what counts as "the
@@ -756,7 +771,7 @@ export function initCanvas(container, options = {}) {
     notifyChange({ rect, before: null, parts, layerId: activeLayerId, tool });
   }
 
-  let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge'
+  let tool = DEFAULT_TOOL; // one of TOOLS: 'draw' | 'erase' | 'fill' | 'smudge' | 'shape'
   let color = DEFAULT_COLOR;  // draw/fill color; unused for erase/smudge
   // Symmetry (8b-i): the project's mode (main.js sets it per project),
   // and the mode the stroke in progress started with.
@@ -771,8 +786,17 @@ export function initCanvas(container, options = {}) {
   const brushSizes = defaults.brushSizes;
   const tips = defaults.tips;
   const tipSettings = defaults.tipSettings;
+  // Shape (8d): which shape, and whether Perfect is on.
+  let shapeKind = defaults.shape;
+  let shapePerfect = defaults.shapePerfect;
+  // The tool whose tip the active tool draws with: itself, or Draw's
+  // for Shape; null for fill and smudge.
+  const tipToolFor = (name) => (name === 'shape' ? SHAPE_TIP_TOOL : (TIPPED_TOOLS.includes(name) ? name : null));
   // The tip setting the active tool uses, or null (fill, smudge).
-  const currentTipSetting = () => (TIPPED_TOOLS.includes(tool) ? tipSettings[tool][tips[tool]] : null);
+  const currentTipSetting = () => {
+    const owner = tipToolFor(tool);
+    return owner ? tipSettings[owner][tips[owner]] : null;
+  };
   // The active tool's size, or null for fill.
   function currentSize() {
     if (tool === 'fill') return null;
@@ -1308,9 +1332,10 @@ export function initCanvas(container, options = {}) {
     // color (erase's color doesn't matter, only its coverage);
     // composeStroke applies them to the layer as paint or erasing.
     // The tip, size and strength are fixed for the stroke (8b-ii).
+    // A shape (8d) uses Draw's.
     strokeErase = tool === 'erase';
     const setting = currentTipSetting();
-    strokeTip = getTip(tips[tool]);
+    strokeTip = getTip(tips[tipToolFor(tool)]);
     strokeSize = setting.size;
     strokeStrength = setting.strength / MAX_STRENGTH;
     const stampColor = strokeErase ? '#000000' : color;
@@ -1321,6 +1346,10 @@ export function initCanvas(container, options = {}) {
 
     // Stamp once immediately so a tap with no movement still leaves a
     // mark instead of rendering nothing.
+    if (tool === 'shape') {
+      beginShape(point);
+      return; // no first stamp (a tap places nothing), no stabilizer
+    }
     stamp(point, strokeSize);
     composeStroke();
     startStabilizer(point, time);
@@ -1336,6 +1365,12 @@ export function initCanvas(container, options = {}) {
     if (tool === 'smudge') {
       smudgeAlongLine(p1, p2);
       p0 = p1;
+      p1 = p2;
+      return;
+    }
+
+    if (shapeDrag) {
+      moveShape(p2);
       p1 = p2;
       return;
     }
@@ -1382,8 +1417,156 @@ export function initCanvas(container, options = {}) {
     // Every committed edit ends here — draw/erase/smudge strokes, and
     // fills too (a fill's pointerup also routes through endStroke). A
     // touch that turned into a gesture never reaches this: its mark
-    // was already reverted, so it doesn't count as a change.
+    // was already reverted, so it doesn't count as a change. A shape
+    // (8d) decides for itself: a tap places nothing, a triangle's base
+    // waits for its corner.
+    if (shapeDrag) {
+      finishShape();
+      return;
+    }
     commit();
+  }
+
+  // --- shapes (8d): Line, Rectangle, Oval, Triangle ---
+  //
+  // A shape is a stroke whose buffer is cleared and redrawn as she
+  // drags (at most once per animation frame): the old shape's boxes are
+  // emptied in the buffer and rebuilt on the layer with the new one, so
+  // a shrinking shape leaves nothing behind, and the dirty rect is only
+  // ever the shape now showing — the undo box is the final shape's.
+  // Stamps still go through stamp(), so symmetry, the ink map, undo and
+  // the second-finger cancel work as for any stroke. Geometry is in
+  // shapes.js.
+  //
+  // Triangle is two steps. The base is drawn like a Line and, on lift,
+  // stays uncommitted (shapeBase): on the layer, in the buffer and in
+  // the dirty rect, but not in the committed copy, undo or storage
+  // (layerSource hands savers the committed copy meanwhile). Her next
+  // press drags the third corner; lifting commits the triangle as one
+  // edit. Two fingers keep the base (a gesture puts it back); anything
+  // else drops it (dropShapeBase — every API call that changes the
+  // tool, layer, frame or pixels, plus ui.js/main.js for taps outside
+  // the canvas, Undo and leaving the app).
+  let shapeDrag = null; // { start, end, moved, tapLimit } during a press
+  let shapeBase = null; // { a, b }: a triangle's waiting base
+  let shapeFrame = 0;
+  const shapeBaseListeners = new Set();
+
+  // ui.js keeps Undo usable while a base waits, even with no history.
+  function setShapeBase(next) {
+    const changed = (shapeBase === null) !== (next === null);
+    shapeBase = next;
+    if (changed) emitShapeBase(next !== null);
+  }
+
+  function emitShapeBase(waiting) {
+    for (const listener of shapeBaseListeners) listener(waiting);
+  }
+
+  function beginShape(point) {
+    // How far a press may move and still be a tap, in canvas px.
+    const screenPerCanvas = (natWidth / width) * viewportScale;
+    const tapLimit = SHAPE_TAP_PX / (screenPerCanvas || 1);
+    shapeDrag = { start: point, end: point, moved: 0, tapLimit };
+    // The triangle's corner step shows the triangle right away — a tap
+    // places it there.
+    if (shapeBase) redrawShape();
+  }
+
+  function moveShape(point) {
+    shapeDrag.end = point;
+    shapeDrag.moved = Math.max(shapeDrag.moved, Math.hypot(point.x - shapeDrag.start.x, point.y - shapeDrag.start.y));
+    if (!shapeFrame) shapeFrame = requestAnimationFrame(shapeTick);
+  }
+
+  function shapeTick() {
+    shapeFrame = 0;
+    if (shapeDrag) redrawShape();
+  }
+
+  function stopShapeFrame() {
+    if (shapeFrame) cancelAnimationFrame(shapeFrame);
+    shapeFrame = 0;
+  }
+
+  // The outline showing now: the triangle (base + the press's point),
+  // or the shape from the press's start to where it is.
+  function currentOutline() {
+    if (shapeBase) {
+      const corner = shapeDrag ? shapeDrag.end : null;
+      if (!corner) return shapeOutline('line', shapeBase.a, shapeBase.b, false);
+      return triangleOutline(shapeBase.a, shapeBase.b, corner, shapePerfect);
+    }
+    const kind = shapeKind === 'triangle' ? 'line' : shapeKind;
+    return shapeOutline(kind, shapeDrag.start, shapeDrag.end, shapePerfect);
+  }
+
+  // Replaces the shape on the layer with `outline` (default: the one
+  // showing now).
+  function redrawShape(outline = currentOutline()) {
+    const old = dirtyParts.slice();
+    for (const part of old) {
+      const r = clampRect(part, width, height);
+      if (r) strokeCtx.clearRect(r.x, r.y, r.w, r.h);
+    }
+    clearDirty();
+    const spacing = Math.max(1, strokeSize * strokeTip.spacingRatio);
+    for (const p of stampPoints(outline.points, outline.closed, spacing)) stamp(p, strokeSize);
+    // The old boxes are rebuilt too: committed pixels where the shape
+    // no longer is.
+    old.forEach((part, i) => { if (part) markPending(part, i); });
+    composeStroke();
+  }
+
+  function finishShape() {
+    stopShapeFrame();
+    const drag = shapeDrag;
+    shapeDrag = null;
+    if (!shapeBase && drag.moved <= drag.tapLimit) {
+      // A tap with no drag places nothing (no undo step).
+      revertUncommitted();
+      return;
+    }
+    shapeDrag = drag;
+    redrawShape(); // the lift's own point
+    shapeDrag = null;
+    if (shapeKind === 'triangle' && !shapeBase) {
+      setShapeBase({ a: drag.start, b: lineEnd(drag.start, drag.end, shapePerfect) });
+      return;
+    }
+    // Committed first, so the undo stack has it before Undo's state
+    // changes back.
+    const wasBase = shapeBase !== null;
+    shapeBase = null;
+    commit();
+    if (wasBase) emitShapeBase(false);
+  }
+
+  // A press on the triangle's corner step became a two-finger gesture:
+  // the base stays, as it was.
+  function restoreShapeBase() {
+    stopShapeFrame();
+    shapeDrag = null;
+    redrawShape();
+  }
+
+  // Drops a waiting triangle base without saving it — the layer goes
+  // back to its committed pixels. Nothing to do mid-press (the press
+  // finishes or reverts on its own) or with no base.
+  function dropShapeBase() {
+    if (!shapeBase || activePointerId !== null) return;
+    revertUncommitted();
+    setShapeBase(null);
+  }
+
+  // What savers and readers of a layer's pixels see: the layer, or for
+  // the active layer while a base waits, the committed copy — the base
+  // isn't an edit yet and mustn't reach storage, the frame cache or a
+  // thumbnail.
+  function layerSource(id) {
+    const surface = surfaces.get(id);
+    if (!surface) return null;
+    return shapeBase && id === activeLayerId ? committedCanvas : surface.canvas;
   }
 
   // --- change notification (main.js: undo history + autosave) ---
@@ -1611,8 +1794,14 @@ export function initCanvas(container, options = {}) {
         if (elapsed <= GESTURE_WINDOW_MS && moved <= GESTURE_MOVEMENT_THRESHOLD_PX) {
           // Confirmed: this is a two-finger gesture, not a palm.
           // Revert whatever the first finger had started drawing (or
-          // filling) from the committed copy.
-          revertUncommitted();
+          // filling) from the committed copy — but a triangle's base
+          // (8d) stays: zooming in to place the corner is the point.
+          if (shapeBase) restoreShapeBase();
+          else {
+            stopShapeFrame();
+            shapeDrag = null;
+            revertUncommitted();
+          }
           if (container.hasPointerCapture?.(pendingTouch.pointerId)) {
             container.releasePointerCapture(pendingTouch.pointerId);
           }
@@ -1945,7 +2134,34 @@ export function initCanvas(container, options = {}) {
     // The wrapper element (what's on screen as "the canvas").
     canvasElement: stack,
     setTool(next) {
+      if (next !== tool) dropShapeBase();
       tool = next;
+    },
+    // Shape (8d): which shape the Shape tool draws (shapes.js SHAPES)
+    // and Perfect. Changing either drops a waiting triangle base.
+    setShape(name) {
+      dropShapeBase();
+      shapeKind = sanitizeShape(name);
+    },
+    setShapePerfect(on) {
+      dropShapeBase();
+      shapePerfect = on === true;
+    },
+    // A triangle's base is waiting for its third corner (8d) — main.js
+    // makes Undo remove just the base then.
+    hasShapeBase() {
+      return shapeBase !== null;
+    },
+    // Drops a waiting triangle base unsaved (see dropShapeBase): taps
+    // outside the canvas, Undo, leaving the app. No-op without one.
+    dropShapeBase() {
+      dropShapeBase();
+    },
+    // listener(waiting): a triangle's base started or stopped waiting.
+    // Returns an unsubscribe function.
+    onShapeBase(listener) {
+      shapeBaseListeners.add(listener);
+      return () => shapeBaseListeners.delete(listener);
     },
     // Brush tip (8b-ii) for the active tool: one of brush.js's TIPS.
     // Draw and erase only — a no-op (and null) for fill and smudge.
@@ -1970,7 +2186,8 @@ export function initCanvas(container, options = {}) {
       if (tool === 'fill') return;
       const setting = currentTipSetting();
       if (setting) setting.size = px;
-      brushSizes[tool] = px;
+      // Shape's size is Draw's (8d).
+      brushSizes[tipToolFor(tool) ?? tool] = px;
     },
     // Lets ui.js sync the size slider to the newly active tool's
     // remembered size when the tool changes. Returns null for fill,
@@ -2005,6 +2222,7 @@ export function initCanvas(container, options = {}) {
     // (anything else is off). Per project — main.js sets it on open.
     // Takes effect from the next stroke; shows or hides the guide.
     setSymmetry(mode) {
+      dropShapeBase();
       symmetry = sanitizeSymmetry(mode);
       renderSymmetryGuide();
     },
@@ -2017,6 +2235,7 @@ export function initCanvas(container, options = {}) {
     // finger), 'preview-end' (lifted without picking, or became a
     // gesture — still armed), 'pick' (done; disarmed).
     setEyedropper(armed) {
+      if (armed === true) dropShapeBase();
       eyedropperArmed = armed === true;
     },
     isEyedropperArmed() {
@@ -2043,12 +2262,15 @@ export function initCanvas(container, options = {}) {
         stabilizer: { ...stabilizerStrengths },
         tips: { ...tips },
         tipSettings: tipCopy,
+        shape: shapeKind,
+        shapePerfect,
       };
     },
 
     // Applies saved settings, cleaning them first (see
     // sanitizeToolSettings), so callers can pass raw stored data.
     applySettings(raw) {
+      dropShapeBase();
       const clean = sanitizeToolSettings(raw);
       tool = clean.tool;
       color = clean.color;
@@ -2056,11 +2278,14 @@ export function initCanvas(container, options = {}) {
       Object.assign(stabilizerStrengths, clean.stabilizer);
       Object.assign(tips, clean.tips);
       Object.assign(tipSettings, clean.tipSettings);
+      shapeKind = clean.shape;
+      shapePerfect = clean.shapePerfect;
     },
 
     // Undoable like any edit. Clearing an already-blank layer is a
     // no-op, so it doesn't add an undo step that does nothing.
     clear() {
+      dropShapeBase();
       if (isBusy() || !ctx) return;
       const reason = paintBlockReason();
       if (reason) {
@@ -2081,6 +2306,7 @@ export function initCanvas(container, options = {}) {
     // whole canvas. Refused like Clear; a blank layer does nothing (no
     // empty undo step). Returns true if it flipped.
     flip(axis) {
+      dropShapeBase();
       if (isBusy() || !ctx) return false;
       const reason = paintBlockReason();
       if (reason) {
@@ -2104,6 +2330,7 @@ export function initCanvas(container, options = {}) {
     // ones changed), or null if it can't flip now (mid-stroke, or a
     // layer is broken — flipping only some would split the frame).
     flipFrame(axis) {
+      dropShapeBase();
       if (isBusy()) return null;
       for (const surface of surfaces.values()) if (surface.broken) return null;
       const flipped = [];
@@ -2140,6 +2367,7 @@ export function initCanvas(container, options = {}) {
     // Refused like Clear for a locked/hidden/broken layer. Returns
     // true if it pasted.
     pasteDrawing({ rect: from, patch }) {
+      dropShapeBase();
       if (isBusy() || !ctx) return false;
       const reason = paintBlockReason();
       if (reason) {
@@ -2184,6 +2412,7 @@ export function initCanvas(container, options = {}) {
     // null if that layer isn't loaded. Doesn't fire onChange — main.js
     // schedules the save itself.
     swapRegion(rect, patch, layerId = activeLayerId) {
+      dropShapeBase();
       const surface = surfaces.get(layerId);
       if (!surface) return null;
       const isActive = layerId === activeLayerId;
@@ -2224,15 +2453,15 @@ export function initCanvas(container, options = {}) {
     // the pixels when it's called, so the export still matches the
     // moment it was asked for (autosave relies on that).
     exportPNG(layerId = activeLayerId) {
-      const surface = surfaces.get(layerId);
-      if (!surface) return Promise.reject(new Error(`Layer ${layerId} is not loaded`));
+      const source = layerSource(layerId);
+      if (!source) return Promise.reject(new Error(`Layer ${layerId} is not loaded`));
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           const err = new Error('Canvas PNG export timed out');
           err.name = 'TimeoutError';
           reject(err);
         }, EXPORT_TIMEOUT_MS);
-        surface.canvas.toBlob((blob) => {
+        source.toBlob((blob) => {
           clearTimeout(timer);
           if (blob) resolve(blob);
           else reject(new Error('Canvas PNG export failed'));
@@ -2256,6 +2485,7 @@ export function initCanvas(container, options = {}) {
     // its pixels and was swapped for a fresh one, and of those whose
     // fresh one didn't hold them either (painting refused).
     loadFrame({ layers, activeLayerId: nextActive, images = new Map() }) {
+      dropShapeBase();
       applyLayers(layers);
       const result = { renewed: [], broken: [] };
       for (const id of order) {
@@ -2270,6 +2500,7 @@ export function initCanvas(container, options = {}) {
     // Swaps these layers' canvases for fresh, blank ones (a check found
     // them emptied). main.js then loads the frame again from storage.
     renewLayers(ids) {
+      dropShapeBase();
       for (const id of ids) {
         const surface = surfaces.get(id);
         if (surface) renewSurface(surface);
@@ -2308,6 +2539,7 @@ export function initCanvas(container, options = {}) {
     // canvases, missing ids are released, order and visible/opacity/
     // locked are applied. For add/delete/reorder/property changes.
     syncLayers(layers) {
+      dropShapeBase();
       applyLayers(layers);
     },
 
@@ -2317,6 +2549,7 @@ export function initCanvas(container, options = {}) {
     // Returns 'ok', 'renewed' or 'broken', like each layer in
     // loadFrame.
     setLayerImage(id, image) {
+      dropShapeBase();
       const surface = surfaces.get(id);
       if (!surface) return 'ok';
       const status = fillSurface(surface, image);
@@ -2330,6 +2563,7 @@ export function initCanvas(container, options = {}) {
     // Switches which layer the tools paint on. Refused (returns false)
     // mid-stroke or mid-gesture, or for an unknown layer.
     setActiveLayer(id) {
+      dropShapeBase();
       if (isBusy()) return false;
       return activate(id);
     },
@@ -2341,6 +2575,7 @@ export function initCanvas(container, options = {}) {
     // Updates one layer's display/lock: { visible?, opacity? (0-1),
     // locked? }.
     setLayerProps(id, props) {
+      dropShapeBase();
       const surface = surfaces.get(id);
       if (!surface) return;
       if (typeof props.visible === 'boolean') surface.visible = props.visible;
@@ -2358,7 +2593,7 @@ export function initCanvas(container, options = {}) {
       const surface = surfaces.get(id);
       const tctx = target.getContext('2d');
       tctx.clearRect(0, 0, target.width, target.height);
-      if (surface) tctx.drawImage(surface.canvas, 0, 0, target.width, target.height);
+      if (surface) tctx.drawImage(layerSource(id), 0, 0, target.width, target.height);
     },
 
     // A layer's live pixels as something to drawImage from (its canvas),
@@ -2366,7 +2601,7 @@ export function initCanvas(container, options = {}) {
     // the frame cache (4a-ii), unsaved strokes included. Read-only:
     // draw from it, never into it, or the edit skips undo and saving.
     getLayerImage(id) {
-      return surfaces.get(id)?.canvas ?? null;
+      return layerSource(id);
     },
 
     // Tears the canvas down when the editor closes (back to the
@@ -2377,6 +2612,9 @@ export function initCanvas(container, options = {}) {
     destroy() {
       areaObserver.disconnect();
       stopStabilizer();
+      stopShapeFrame();
+      shapeDrag = null;
+      shapeBase = null;
       inputBlocked = true;
       for (const surface of surfaces.values()) {
         surface.canvas.width = 0;
@@ -2407,6 +2645,7 @@ export function initCanvas(container, options = {}) {
     // While true, a touch on the canvas area stops playback (onPlaybackTap)
     // instead of drawing; see `swallow` above.
     setPlaybackInput(on) {
+      if (on === true) dropShapeBase();
       playbackInput = on === true;
     },
 
@@ -2526,6 +2765,7 @@ export function initCanvas(container, options = {}) {
     // (false) while a stroke or gesture is in progress.
     setAdjusting(next) {
       const on = next === true;
+      if (on) dropShapeBase();
       if (on === adjusting) return true;
       if (on && isBusy()) return false;
       endAdjustTouches();
@@ -2542,6 +2782,7 @@ export function initCanvas(container, options = {}) {
     // `color` as one undoable edit, through the same onChange path as
     // a stroke. Ignores lock/visibility on purpose.
     devFillLayer(id, color) {
+      dropShapeBase();
       const surface = surfaces.get(id);
       if (!surface || isBusy()) return;
       const isActive = id === activeLayerId;

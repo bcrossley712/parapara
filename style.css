@@ -301,6 +301,37 @@ textarea,
   font-weight: 600;
 }
 
+/* The Shape panel (8d, js/ui/shape-panel.js): the four shapes, each
+   with its outline, then the Perfect switch. */
+.pp-shape-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pp-shape-panel__icon {
+  display: flex;
+  opacity: 0.85;
+}
+
+.pp-shape-panel__item.is-current {
+  background: var(--pp-accent-soft);
+  font-weight: 600;
+}
+
+.pp-shape-panel__perfect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 10px 8px 6px 14px;
+  border-top: 1px solid var(--pp-border);
+  color: var(--pp-text);
+  font-family: var(--pp-font);
+  font-size: 16px;
+}
+
 /* The symmetry guide (canvas.js): faint lines on the axes, inside the
    wrapper so they follow the view. Same on-screen thickness at any
    zoom (--pp-view-scale is the view's zoom); gone during playback. */
@@ -1796,9 +1827,11 @@ textarea,
   display: none;
 }
 
-/* The Image menu, and the rail's Symmetry menu (8b-i) styled the same. */
+/* The Image menu, and the rail's Symmetry menu (8b-i) and Shape panel
+   (8d) styled the same. */
 .pp-image-menu,
-.pp-symmetry-menu {
+.pp-symmetry-menu,
+.pp-shape-panel {
   position: absolute;
   z-index: 20;
   display: flex;

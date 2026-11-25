@@ -2363,6 +2363,12 @@ function mountEditor(session, { canSave }) {
   // An undo/redo changes the saved drawing like any edit.
   function undo() {
     if (!canAct() || adjust) return;
+    // A triangle's base waiting for its corner (8d) isn't an edit yet:
+    // Undo takes just the base away, not the edit before it.
+    if (canvasApi.hasShapeBase()) {
+      canvasApi.dropShapeBase();
+      return;
+    }
     if (history.undo((e) => applyEntry(e, 'undo'))) autosaver?.schedule();
   }
 
@@ -2376,7 +2382,7 @@ function mountEditor(session, { canSave }) {
       tool, frame: tag(session.frame.id), layer: short(layerId), rect: `${rect.w}x${rect.h}`,
       ...(parts ? { parts: parts.length } : {}),
     });
-    if (tool === 'draw' || tool === 'fill') noteColorUsed(canvasApi.getSettings().color);
+    if (tool === 'draw' || tool === 'fill' || tool === 'shape') noteColorUsed(canvasApi.getSettings().color);
     // A mirrored stroke (8b-i) keeps one patch per copy, in one entry.
     history.push(parts
       ? {
@@ -3877,6 +3883,7 @@ function mountEditor(session, { canSave }) {
   checkEditor = checkCanvases;
   // Hiding the app ends a recording (and keeps the take).
   hideEditor = () => {
+    canvasApi.dropShapeBase(); // 8d: leaving the app drops a triangle's waiting base
     stopExport('hidden');
     interruptTake();
     finishListen('hidden');

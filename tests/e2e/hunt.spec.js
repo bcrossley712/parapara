@@ -4,7 +4,9 @@
 // deletes and drags frames (4d), copies a layer's drawing and pastes
 // it into whichever layer is active, on any frame (4d),
 // switches layers, draws with symmetry on (8b-i: a mark and its
-// mirrored copy, one undo step), plays and stops, hides the app, has saves fail
+// mirrored copy, one undo step), draws marks with the Shape tool (8d:
+// a Line, or a two-step Triangle whose waiting base is sometimes taken
+// back with Undo instead — never a mark, never saved), plays and stops, hides the app, has saves fail
 // (out of space), and has a layer canvas lose its pixels (what iOS did
 // on her iPad, after 4c). A model follows along. Every mark is a short
 // line at its own spot, so at the end each one can be checked — on
@@ -93,6 +95,24 @@ async function setSymmetry(page, label) {
 
 async function pickTool(page, name) {
   await page.getByRole('button', { name, exact: true }).click();
+}
+
+// The Shape tool (8d) with `shape` ('Line', 'Triangle'; Perfect stays
+// off).
+async function useShape(page, shape) {
+  const btn = page.locator('.pp-shape-btn');
+  await btn.click();
+  await expect(btn).toHaveClass(/is-active/);
+  if (!(await btn.textContent()).includes(shape)) {
+    await btn.click();
+    await page.locator('.pp-shape-panel').getByRole('menuitemradio', { name: shape, exact: true }).click();
+    await expect(btn).toContainText(shape);
+  }
+}
+
+async function tapAt(page, x, y) {
+  const box = await page.locator('.pp-canvas').boundingBox();
+  await page.mouse.click(box.x + (x / 1920) * box.width, box.y + (y / 1080) * box.height);
 }
 
 async function currentIndex(page) {
@@ -263,9 +283,39 @@ for (const seed of SEEDS) {
       return true;
     }
 
+    // A mark drawn with the Shape tool (8d): a Line, or a Triangle —
+    // base along the spot, corner tapped just above it, one undo entry.
+    // A third of the triangles have their waiting base taken back with
+    // Undo instead: nothing painted, nothing in the history.
+    async function shapeMark() {
+      if (!(await closeMenuByTap())) return false;
+      const spot = model.spots.pop();
+      if (!spot) return false;
+      const frame = model.timeline[await currentIndex(page)];
+      const layer = await activeLayer(page);
+      const kind = pick(['Line', 'Triangle']);
+      await useShape(page, kind);
+      await line(page, spot.x, spot.y, spot.x + 24);
+      if (kind === 'Triangle' && random() < 1 / 3) {
+        await idle(page);
+        await undoBtn(page).click();
+        await expect.poll(() => paintedOn(page, layer, spot.x + 12, spot.y)).toBe(false);
+        model.marks.push({ frame, layer, spot, present: false });
+        steps.push('(base taken back)');
+      } else {
+        if (kind === 'Triangle') await tapAt(page, spot.x + 12, spot.y - 20);
+        const mark = { frame, layer, spot, present: true };
+        model.marks.push(mark);
+        push({ type: 'mark', mark });
+      }
+      await pickTool(page, 'Draw');
+      return true;
+    }
+
     const actions = [
       [30, 'mark', markStroke],
       [4, 'mirrored mark', mirroredMark],
+      [5, 'shape mark', shapeMark],
       [6, 'scribble', async () => {
         const tool = pick(['Erase', 'Smudge']);
         await pickTool(page, tool);

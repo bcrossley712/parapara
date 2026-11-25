@@ -126,7 +126,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   curved size (8b-i, 2026-11-02), brush panel and tips (8b-ii); her
   requests between pushes — light theme and App color (status bar
   dark over the light top bar), canvas shapes (portrait/square),
-  Undo/Redo moved right, onion fill fix (all confirmed 2026-11-23). How each works is
+  Undo/Redo moved right, onion fill fix (all confirmed 2026-11-23);
+  **8c** flip drawing (layer and frame) and clearer onion ghosts
+  (confirmed 2026-11-24; a few checks still open below). How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
@@ -135,52 +137,48 @@ icon, manifest `name`/`short_name`, and repo copy.
 stamps; share links after her requested extras). 8b closed at 8b-ii;
 its planned third push is now 8e, so steps stay in numerical order:
 
-1. **8c — Flip drawing + clearer onion ghosts — built, awaiting a
-   push** (checks below). Flip horizontal / Flip vertical in the layer
-   ⋯ menu (active layer, this frame, one undo step, refused on a
-   locked or hidden layer) and in the frame menu (the whole frame:
-   every layer, hidden too, and the photo; any locked layer refuses
-   it). Onion ghosts: fills fade to a faint wash,
-   lines stay the full tint (her report: lines still hard to make out
-   over a colored-in frame). Decisions: [design
-   notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
-   → "8c" and [Onion skin](docs/DESIGN_NOTES.md#onion-skin).
-2. **8d — Shape tools** (scoped 2026-11-23, Sketchbook's Draw Styles;
+1. **8d — Shape tools — built, awaiting a push** (checks below;
    [design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
-   → "8d scoping"): Line, Rectangle, Oval, Triangle, outline only, in
-   Draw's tip, size, strength and color; a Perfect toggle; a Shape
-   button on the rail with a small panel.
-3. **8e — smudge + stamps** (was 8b-iii): smudge rebuilt for blending
+   → "8d scoping"): a Shape button after Smudge with a small panel —
+   Line, Rectangle, Oval (from its center), Triangle, and Perfect;
+   outline only, in Draw's tip, size, strength and color. Triangle is
+   two steps (his call, 2026-11-24): a base, then the next press drags
+   the third corner; one undo step. Perfect: square, circle, 45° lines
+   and base, an even-sided triangle whose second touch picks a side.
+2. **8e — smudge + stamps** (was 8b-iii): smudge rebuilt for blending
    (she uses it to blend — any way that achieves it is fine) on the
    soft tip, with its own strength; stamps (a tap places one shape, a
    drag leaves a spaced trail; a few shapes drawn by us, e.g. a web,
    star, heart — her list, not a library; other shapes she wants go
    here, not in 8d).
-4. **Share links and Krita reference import** on the backup's
+3. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
-5. The rest of the requested extras (Open items, and Parked in the
+4. The rest of the requested extras (Open items, and Parked in the
    design notes).
 
-**Handoff (2026-11-23):** 8c is built and tier-2 tested in the clone,
-not yet sent. Next conversation: ask how the 8c checks went, then
-build 8d from its scoping (confirm nothing changed first).
+**Handoff (2026-11-24):** 8d is built and tier-2 tested in the clone,
+not yet sent. Next conversation: ask how the 8d checks went, then
+build 8e from its line above (scope it first — smudge and stamps).
 
 **Open iPad checks** (send the activity log with any of them):
-- **After the 8c push:** in the layer ⋯ menu, Flip horizontal and
-  Flip vertical mirror only the active layer on this frame, and one
-  Undo puts it back; on a locked or hidden layer the banner says why.
-  The menu (now eight items) fits on screen with the iPad either way
-  round. In the frame menu, the two Flips mirror every layer of this
-  frame (a hidden one too — show it after) and a photo with it, as one
-  Undo; with a layer locked, the banner names it. After a frame flip,
-  Undo leaves soft edges exactly as they were (if they look slightly
-  off, say so — see design notes → "8c"). Onion skin on a colored-in frame: are the lines easy to make
-  out now, and is the fill still visible enough to place things?
-  (`GHOST_FILL_FADE` in `onion-view.js` is the one number to tune —
-  higher fades fills more.) Ghosts showing up after a frame switch
-  should feel no slower than before (each ghost is now colored pixel
-  by pixel, ~30 ms each on the sandbox).
+- **After the 8d push:** the Shape button sits after Smudge and the
+  rail still fits with the iPad either way round (measured ~250 px
+  spare in landscape). Each shape follows her stylus and lands where
+  she lifts; a tap places nothing; one Undo takes a shape away. Does a
+  big Chalk or Soft oval keep up while dragging (the outline restamps
+  every frame; if it lags, say so — the fallback is a thin preview
+  while dragging)? Triangle: the base stays after the lift, the next
+  press drags the corner; two fingers zoom without losing the base;
+  Undo takes just the base; tapping anything else drops it. With
+  Perfect on, a tap on either side of the base gives an even-sided
+  triangle pointing that way. Does she want a tip row in the Shape
+  panel after all (now: back to Draw to change tip)?
+- **Still open from 8c:** after a frame flip, Undo leaves soft edges
+  exactly as they were (if slightly off, see design notes → "8c");
+  ghosts after a frame switch feel no slower than before (~30 ms each
+  on the sandbox); the onion fill still visible enough to place
+  things (`GHOST_FILL_FADE` in `onion-view.js` tunes it).
 - **Onion ghosts not showing (seen 2026-11-02, 8-layer project; cause
   unknown):** after the push, turn onion skin on in that project, step
   between a few frames (including one whose top layers are empty),
@@ -445,10 +443,13 @@ type, buffer }` — layer bitmaps, reference images, the sound file
 `thumb-<projectId>`), `meta` (`lastProjectId`,
 `toolSettings` = `{ tool, color, brushSizes: { draw, erase, smudge },
 stabilizer: { draw, erase }, tips: { draw, erase },
-tipSettings: { draw: { [tip]: { size, strength } }, erase: … } }`
+tipSettings: { draw: { [tip]: { size, strength } }, erase: … },
+shape, shapePerfect }`
 (8a: stabilizer 0–10, missing = 5; 8b-ii: tips from brush.js `TIPS`,
 missing = 'pen'; strength 1–100; missing tipSettings = defaults with
-the old draw/erase sizes on Pen; `sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
+the old draw/erase sizes on Pen; 8d: tool may be 'shape', shape from
+shapes.js `SHAPES` missing = 'line', shapePerfect missing = false;
+`sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
 hideHeadphonesTip, appColor }`
 (5c; missing = false; `layersPanelOpen` retired after 5c, ignored;
 appColor after the light theme: an `APP_COLORS` id from

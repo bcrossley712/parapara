@@ -25,6 +25,8 @@ point = one symmetry copy with `flipX`/`flipY`; the paper grain;
 panel samples), `stabilizer.js` (8a, pure: the trailing
 line), `symmetry.js` (8b-i, pure: mirror points, `mergeOverlapping`),
 `size-curve.js` (8b-i, pure: the size slider's curve),
+`shapes.js` (8d, pure: shape outlines, Perfect, stamp spacing along a
+path),
 `gestures.js` (pure pan/zoom/rotate math,
 tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`,
 `flipSpan`),
@@ -92,6 +94,28 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   before-patch each — so undo never holds a box spanning the canvas.
   The guide (`.pp-symmetry-guide`) is a div in the wrapper above the
   layers, hidden while the playback picture shows (`is-playing`).
+- **Shapes (8d)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)
+  → "8d scoping"): tool `'shape'`, drawn with Draw's tip, size,
+  strength and color (`SHAPE_TIP_TOOL`; the rail's Size *is* Draw's);
+  no stabilizer. A shape is a stroke in the buffer that `redrawShape`
+  clears and restamps on each move (≤ once per animation frame,
+  `shapeTick`), marking the old boxes pending so the layer gets
+  committed pixels back where the shape left; `dirtyParts` is only
+  ever the shape now showing, so the undo box is the final shape's.
+  Outlines are one path (`stampPoints`: spacing carried round corners).
+  A press that moves < `SHAPE_TAP_PX` (6 CSS px) on screen places
+  nothing. **Triangle is two steps:** the base (a Line) stays
+  *uncommitted* on lift (`shapeBase`); the next press drags the third
+  corner and commits the triangle as one edit. While it waits:
+  `layerSource` gives the committed copy to `exportPNG`,
+  `getLayerImage` and `drawThumbnail` (the base never reaches storage,
+  the frame cache or a thumbnail); a press that becomes a two-finger
+  gesture puts the base back (`restoreShapeBase`); `dropShapeBase`
+  reverts it — called first by every API method that changes the tool,
+  frame, layer, symmetry or pixels, by `ui.js` for any touch outside
+  the drawing (except Undo), by `main.js`'s `undo()` (instead of
+  undoing) and `hideEditor`. Undo stays enabled while a base waits
+  (`onShapeBase`).
 - **Gestures — match Sketchbook defaults**
   ([why](DESIGN_NOTES.md#gestures)): three-finger tap = undo;
   three-finger swipe left/right = undo/redo; two-finger double-tap =
@@ -180,6 +204,12 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 - **Grain is anchored to the canvas**: `applyGrain` must translate by
   the box's position, and fill only that box; anchoring it to the
   stroke or stamp makes grain swim (`brush.spec.js` checks).
+- **A triangle's waiting base (8d) is uncommitted pixels between
+  strokes** — the only time `dirty` is set with no pointer down. A new
+  API method that changes the tool, frame, layer or pixels calls
+  `dropShapeBase()` first (or it bakes the base into the committed copy
+  or reverts onto the wrong layer); a new reader of a layer's pixels
+  for saving or display goes through `layerSource(id)`.
 - **A new pixel path that mirrors** goes through `mirrorPoints` with
   `strokeSymmetry`, never the live `symmetry` (it can change mid-stroke).
 - **Nothing of a stroke outlives it.** The stabilizer's catch-up runs
@@ -195,7 +225,7 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 
 ### iPad-only checks
 
-Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`. Since 8b-ii: how each tip looks to her, and whether large Soft, Paintbrush and Chalk strokes keep up (sprites and grain cost more per move than Pen).
+Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`. Since 8b-ii: how each tip looks to her, and whether large Soft, Paintbrush and Chalk strokes keep up (sprites and grain cost more per move than Pen). Since 8d: whether a big Chalk or Soft oval keeps up while dragging (the whole outline restamps each frame; fallback if not: a thin preview while dragging, the brush on lift), and the triangle's two steps with her stylus.
 
 ---
 
@@ -1199,7 +1229,8 @@ on her iPad; a background photo in the video once it's on.
 
 **Files:** `js/ui/color-picker.js` (HSV picker, eyedropper button, recents,
 palette — UI only), `ui/brush-panel.js` (8b-ii: tips, size, strength,
-stabilizer — UI only), `storage/colors.js` (pure list rules,
+stabilizer — UI only), `ui/shape-panel.js` (8d: the Shape button and
+its panel — UI only), `storage/colors.js` (pure list rules,
 `MAX_RECENTS`, `MAX_PALETTE`); tool-settings validation in
 `canvas.js` (`sanitizeToolSettings`).
 
@@ -1210,8 +1241,8 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
   - **Eyedropper** samples what she sees (`readVisible`, over white),
     is a one-shot mode, not one of `TOOLS`, never saved, and works on
     locked/hidden layers. A second finger makes it a gesture.
-  - **Recent colors:** app-wide, 8, added when a draw or fill
-    *commits* (not on picker moves or picks); `meta.recentColors`.
+  - **Recent colors:** app-wide, 8, added when a draw, fill or shape
+    (8d) *commits* (not on picker moves or picks); `meta.recentColors`.
   - **Palette:** per project, 10, saved on the project record; edits
     aren't undoable (as in Procreate).
 - **Brush panel (8b-ii):** tapping Draw or Erase when it's already the
@@ -1222,9 +1253,14 @@ stabilizer — UI only), `storage/colors.js` (pure list rules,
   the tip's name under the label (accessible name stays
   "Draw"/"Erase"). The rail keeps Size; the panel has Size too (same
   curve, number shown), Strength 1–100% and Stabilizer.
+- **Shape panel (8d, `ui/shape-panel.js`):** the Shape button (after
+  Smudge) names the current shape; tapping it when it's the tool opens
+  the panel — Line, Rectangle, Oval, Triangle (picking one closes it)
+  and a Perfect switch (stays open). No tip, size or strength there:
+  shapes use Draw's (she goes back to Draw to change the tip).
 - **Tool settings** (tool, color, per-tool sizes, per-tool stabilizer
   — draw and erase, 8a; 8b-ii: last tip per tool, size and strength
-  per tool *and* tip) are remembered
+  per tool *and* tip; 8d: `shape` and `shapePerfect`) are remembered
   app-wide, not per project, and carry from one project into the next.
   Per project: the open frame and active layer. App-wide: whether the
   layers panel was open, which screen she was on, and the last
@@ -1284,7 +1320,7 @@ canvas above the frame tiles, opened from a top-bar Sound button.
 
 - **Menus vs the canvas** (after 5b, Procreate's way): a touch on the
   canvas while a menu or popover is open (color picker, Image,
-  Symmetry, layer, frame, onion settings, fps, gear) only closes it — no stroke, fill or
+  Symmetry, Shape, layer, frame, onion settings, fps, gear) only closes it — no stroke, fill or
   pick, and fingers joining it are ignored until all are up (the
   playback-stop swallow). **The layers panel counts too** (after 5c,
   her request — Procreate's popover): any tap outside it closes it
