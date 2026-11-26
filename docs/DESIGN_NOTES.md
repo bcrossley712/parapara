@@ -1359,6 +1359,29 @@ these forces a redo of what's built; each is additive.
     stay under the stylus). Whether a big Chalk or Soft oval keeps up
     while dragging is an iPad check; the fallback, if it lags, is a
     thin preview while dragging and the brush on lift.
+  - **Outcome (2026-11-25):** confirmed on the iPad; big Chalk and
+    Soft shapes keep up, so no thin preview. Going back to Draw to
+    change tip is fine for now — a tip row in the Shape panel may be
+    revisited later.
+- **8e scoping (2026-11-25) — smudge and stamps.** His calls on the
+  proposal:
+  - **Smudge** — today each step pastes a hard-clipped circle at a
+    fixed 18%, which leaves circle edges and doesn't blend. Rebuilt on
+    the Soft tip's falloff, carrying a little of the color it picks
+    up along the drag (Procreate and Sketchbook smudge that way). Its
+    own Strength slider (1–100) beside Size; both remembered across
+    launches (additive `toolSettings` fields, sanitized). **Coupled,
+    decided:** mirrors with symmetry (as Procreate's does); no
+    stabilizer for now; Soft tip only, no tip choice. Feel is an iPad
+    check — expect a tuning round.
+  - **Stamps are tips**, in Draw's tip list (option a, chosen over a
+    Stamp rail button): her apps treat stamps as brushes, and Erase
+    gets them too (erase in a star shape). Shapes: Web, Star, Heart —
+    drawn by us, no others for now. Solid in the current color,
+    **upright** (not turned to follow the drag). A tap places one; a
+    drag leaves a trail spaced by size. Symmetry mirrors them. The
+    last stamp is remembered like any tip. Tip-row width with nine
+    tips is a layout check.
 - **Adjustable shortcut bar (deferred to after step 6).** The idea is to
   let her put the actions she uses most in a bar, like Clip Studio's
   command bar. It takes:

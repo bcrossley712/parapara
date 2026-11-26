@@ -128,7 +128,9 @@ icon, manifest `name`/`short_name`, and repo copy.
   dark over the light top bar), canvas shapes (portrait/square),
   Undo/Redo moved right, onion fill fix (all confirmed 2026-11-23);
   **8c** flip drawing (layer and frame) and clearer onion ghosts
-  (confirmed 2026-11-24; a few checks still open below). How each works is
+  (confirmed 2026-11-24; a few checks still open below); **8d** shape
+  tools (confirmed 2026-11-25; Chalk and Soft keep up while dragging).
+  How each works is
   in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
@@ -137,43 +139,28 @@ icon, manifest `name`/`short_name`, and repo copy.
 stamps; share links after her requested extras). 8b closed at 8b-ii;
 its planned third push is now 8e, so steps stay in numerical order:
 
-1. **8d — Shape tools — built, awaiting a push** (checks below;
-   [design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
-   → "8d scoping"): a Shape button after Smudge with a small panel —
-   Line, Rectangle, Oval (from its center), Triangle, and Perfect;
-   outline only, in Draw's tip, size, strength and color. Triangle is
-   two steps (his call, 2026-11-24): a base, then the next press drags
-   the third corner; one undo step. Perfect: square, circle, 45° lines
-   and base, an even-sided triangle whose second touch picks a side.
-2. **8e — smudge + stamps** (was 8b-iii): smudge rebuilt for blending
-   (she uses it to blend — any way that achieves it is fine) on the
-   soft tip, with its own strength; stamps (a tap places one shape, a
-   drag leaves a spaced trail; a few shapes drawn by us, e.g. a web,
-   star, heart — her list, not a library; other shapes she wants go
-   here, not in 8d).
-3. **Share links and Krita reference import** on the backup's
+1. **8e — smudge + stamps — scoped 2026-11-25, not built**
+   ([design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
+   → "8e scoping"):
+   - **Smudge** rebuilt for blending: Soft tip's falloff (no hard
+     circle edge), carries a little picked-up color along the drag;
+     its own Strength (1–100) beside Size, both remembered. Mirrors
+     with symmetry; no stabilizer; Soft tip only (no tip choice).
+   - **Stamps are tips in Draw's tip list** (as in Sketchbook and
+     Procreate — so Erase can use them too): Web, Star, Heart, solid
+     in the current color, upright. A tap places one; a drag leaves a
+     trail spaced by size. Symmetry mirrors them. Remembered like any
+     tip.
+2. **Share links and Krita reference import** on the backup's
    Cloudflare backend — ask her first whether she still wants share
    links, now that video sharing works.
-4. The rest of the requested extras (Open items, and Parked in the
+3. The rest of the requested extras (Open items, and Parked in the
    design notes).
 
-**Handoff (2026-11-24):** 8d is built and tier-2 tested in the clone,
-not yet sent. Next conversation: ask how the 8d checks went, then
-build 8e from its line above (scope it first — smudge and stamps).
+**Handoff (2026-11-25):** 8d confirmed. 8e is scoped (above and in the
+design notes) and the scope is pushed; next conversation builds it.
 
 **Open iPad checks** (send the activity log with any of them):
-- **After the 8d push:** the Shape button sits after Smudge and the
-  rail still fits with the iPad either way round (measured ~250 px
-  spare in landscape). Each shape follows her stylus and lands where
-  she lifts; a tap places nothing; one Undo takes a shape away. Does a
-  big Chalk or Soft oval keep up while dragging (the outline restamps
-  every frame; if it lags, say so — the fallback is a thin preview
-  while dragging)? Triangle: the base stays after the lift, the next
-  press drags the corner; two fingers zoom without losing the base;
-  Undo takes just the base; tapping anything else drops it. With
-  Perfect on, a tap on either side of the base gives an even-sided
-  triangle pointing that way. Does she want a tip row in the Shape
-  panel after all (now: back to Draw to change tip)?
 - **Still open from 8c:** after a frame flip, Undo leaves soft edges
   exactly as they were (if slightly off, see design notes → "8c");
   ghosts after a frame switch feel no slower than before (~30 ms each
