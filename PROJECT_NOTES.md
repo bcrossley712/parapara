@@ -139,14 +139,16 @@ icon, manifest `name`/`short_name`, and repo copy.
   theme and App color, canvas shapes (portrait/square), Undo/Redo
   moved right, onion fill fix; **8c** flip drawing (layer and frame)
   and clearer onion ghosts (a few checks still open below); **8d**
-  shape tools. How each works is in
+  shape tools.
+- **Built, awaiting a push:** **8e** smudge + stamps (checks below). How each works is in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
 
 **Next:**
 
-1. **8e — smudge + stamps — scoped 2026-11-25, not built**
+1. **8e — smudge + stamps — built, awaiting a push; tune until it
+   feels right**
    ([design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
    → "8e scoping"):
    - **Smudge** rebuilt for blending: Soft tip's falloff (no hard
@@ -174,6 +176,16 @@ icon, manifest `name`/`short_name`, and repo copy.
    [design notes](docs/DESIGN_NOTES.md#parked-until-she-asks).
 
 **Open iPad checks** (send the activity log with any of them):
+- **After the 8e push:** Smudge: tapping it again opens its panel (Size
+  and Strength; starts at 50%). Does dragging blend the way she
+  expects in Procreate/Sketchbook? At low, middle and full strength —
+  too strong, too weak, color carried too far or not far enough (feel
+  values in `smudge.js`)? Does a big smudge (100+) keep up? Any
+  striping inside a smudge? Stamps: Web, Star and Heart in Draw's
+  tips; a tap places one, a drag a spaced trail; are the shapes and
+  the gaps what she wants; does Erase with a stamp make sense to her?
+  The brush panel now has nine tips — still comfortable, on screen
+  either way round?
 - **Still open from 8c:** after a frame flip, Undo leaves soft edges
   exactly as they were (if slightly off, see design notes → "8c");
   ghosts after a frame switch feel no slower than before (~30 ms each
@@ -258,7 +270,12 @@ if it shows:
 - **Small screens (phones) aren't workable** (his Android phone, 4b):
   the layout is sized for the iPad and nothing scrolls — the rail
   cuts off in landscape, the strip in portrait. Not her device; if
-  friends will use phones, a compact layout is its own step.
+  friends will use phones, a compact layout is its own step — a
+  post-v1 project he plans (2026-11-26; reconfirmed on his phone: it
+  needs rotating back and forth to reach things). Part of it: lists
+  that grow (the brush panel's tips, nine since 8e) scroll vertically
+  when they don't fit, as Sketchbook's do; the panels have no height
+  cap or scrolling today.
 - **Adjustable shortcut bar** (as in Clip Studio's command bar) — a
   post-v1 candidate; ask her which actions she reaches for. It needs one
   registry of actions that every button calls. Shortcuts add a second
@@ -268,6 +285,7 @@ if it shows:
 - **Parked until she asks** — merge down, fill sample toggle, frame
   holds and other playback/sound extras, GIF/PNG export, saving the
   frame cache, color opacity, onion extras, rename from the editor,
+  a tip row in the Shape panel, stamps that turn with the stroke,
   tutorials, "Make into layer", and the 2026-11 offers (App color in
   the backup, a portrait safe-area guide, panel fades, rotating an
   animation's shape): [design notes](docs/DESIGN_NOTES.md#parked-until-she-asks).
@@ -438,11 +456,12 @@ type, buffer }` — layer bitmaps, reference images, the sound file
 `toolSettings` = `{ tool, color, brushSizes: { draw, erase, smudge },
 stabilizer: { draw, erase }, tips: { draw, erase },
 tipSettings: { draw: { [tip]: { size, strength } }, erase: … },
-shape, shapePerfect }`
+shape, shapePerfect, smudgeStrength }`
 (8a: stabilizer 0–10, missing = 5; 8b-ii: tips from brush.js `TIPS`,
 missing = 'pen'; strength 1–100; missing tipSettings = defaults with
 the old draw/erase sizes on Pen; 8d: tool may be 'shape', shape from
 shapes.js `SHAPES` missing = 'line', shapePerfect missing = false;
+8e: smudgeStrength 1–100, missing = 50; stamp tips are TIPS entries;
 `sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
 hideHeadphonesTip, appColor, newShape }`
 (5c; missing = false; `layersPanelOpen` retired after 5c, ignored;

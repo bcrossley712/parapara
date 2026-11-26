@@ -6,13 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TIPS, TIP_LABELS, sanitizeTipName, getTip, grainAlpha, seededRandom, GRAIN_TILE } from '../../js/canvas/brush.js';
+import { TIPS, TIP_LABELS, sanitizeTipName, getTip, grainAlpha, seededRandom, GRAIN_TILE, createTrail } from '../../js/canvas/brush.js';
 
 test('every tip has a label, a positive spacing and a stamper', () => {
   for (const name of TIPS) {
     assert.equal(typeof TIP_LABELS[name], 'string');
     const tip = getTip(name);
-    assert.ok(tip.spacingRatio > 0 && tip.spacingRatio <= 0.25, name);
+    // Stamps (8e) sit apart; the other tips overlap into a line.
+    if (tip.trail) assert.ok(tip.spacingRatio >= 1, name);
+    else assert.ok(tip.spacingRatio > 0 && tip.spacingRatio <= 0.25, name);
     assert.equal(typeof tip.stamper, 'function');
     assert.ok([null, 'fine', 'coarse'].includes(tip.grain), name);
   }
@@ -27,7 +29,33 @@ test('unknown tip names become Pen', () => {
 test('grain: pencil and chalk have grain, the rest none', () => {
   assert.equal(getTip('pencil').grain, 'fine');
   assert.equal(getTip('chalk').grain, 'coarse');
-  for (const name of ['pen', 'chisel', 'paintbrush', 'soft']) assert.equal(getTip(name).grain, null);
+  for (const name of ['pen', 'chisel', 'paintbrush', 'soft', 'web', 'star', 'heart']) assert.equal(getTip(name).grain, null);
+});
+
+test('stamps (8e): Web, Star and Heart are the trail tips', () => {
+  assert.deepEqual(TIPS.filter((name) => getTip(name).trail), ['web', 'star', 'heart']);
+});
+
+test('trail: points land every spacing along the whole path, however it is split', () => {
+  const whole = createTrail(10).walk({ x: 0, y: 0 }, { x: 35, y: 0 });
+  assert.deepEqual(whole.map((p) => p.x), [10, 20, 30]);
+  // The same path in uneven pieces gives the same points.
+  const trail = createTrail(10);
+  const pieces = [];
+  let x = 0;
+  for (const step of [3, 4, 0, 6, 1, 13, 8]) {
+    pieces.push(...trail.walk({ x, y: 0 }, { x: x + step, y: 0 }));
+    x += step;
+  }
+  assert.deepEqual(pieces.map((p) => Math.round(p.x * 1e9) / 1e9), [10, 20, 30]);
+  // Turning a corner carries the leftover distance.
+  const corner = createTrail(10);
+  assert.deepEqual(corner.walk({ x: 0, y: 0 }, { x: 6, y: 0 }), []);
+  const after = corner.walk({ x: 6, y: 0 }, { x: 6, y: 20 });
+  assert.deepEqual(after.map((p) => Math.round(p.y * 1e9) / 1e9), [4, 14]);
+  // A zero-length piece places nothing; spacing below 1 acts as 1.
+  assert.deepEqual(createTrail(10).walk({ x: 5, y: 5 }, { x: 5, y: 5 }), []);
+  assert.equal(createTrail(0.2).walk({ x: 0, y: 0 }, { x: 3, y: 0 }).length, 3);
 });
 
 test('grain is the same every launch, and tiles without a seam', () => {

@@ -17,8 +17,10 @@
 
 import { initCanvas, MAX_BRUSH_SIZE } from '../canvas/canvas.js';
 
-// Tools with a brush panel (8b-ii); smudge gets one with 8e (was 8b-iii).
-const BRUSH_PANEL_TOOLS = ['draw', 'erase'];
+// Tools with a brush panel (8b-ii; smudge's, 8e, has Size and Strength
+// only), and the ones that pick a tip (their button names it).
+const BRUSH_PANEL_TOOLS = ['draw', 'erase', 'smudge'];
+const TIPPED_TOOLS = ['draw', 'erase'];
 import { TIP_LABELS } from '../canvas/brush.js';
 import { createBrushPanel } from './brush-panel.js';
 import { sliderToSize, sizeToSlider, SIZE_SLIDER_STEPS } from '../canvas/size-curve.js';
@@ -293,7 +295,7 @@ export function initUI(container, options = {}) {
   }, { signal, capture: true });
 
   // Tapping the tool that's already chosen opens its brush panel
-  // (draw and erase, 8b-ii) — as the current frame tile opens its menu.
+  // (draw and erase, 8b-ii; smudge, 8e) — as the current frame tile opens its menu.
   const toolButtons = {};
   // With the eyedropper armed, tapping the current tool only cancels
   // it — she's going back to drawing, not to her brush settings.
@@ -344,12 +346,13 @@ export function initUI(container, options = {}) {
   shapeBtn.addEventListener('click', () => pickTool('shape'));
   toolButtons.draw = drawBtn;
   toolButtons.erase = eraseBtn;
+  toolButtons.smudge = smudgeBtn;
   toolButtons.shape = shapeBtn;
   // Draw and Erase show their tip's name under the label, so she can
   // tell which tip she'll get without drawing (the accessible name
   // stays "Draw"/"Erase").
   const tipNames = {};
-  for (const tool of BRUSH_PANEL_TOOLS) {
+  for (const tool of TIPPED_TOOLS) {
     const btn = toolButtons[tool];
     btn.classList.add('pp-tool-btn--tipped');
     btn.setAttribute('aria-label', btn.textContent);
@@ -403,7 +406,7 @@ export function initUI(container, options = {}) {
   // the panel.
   function syncBrushControls() {
     const settings = canvasApi.getSettings();
-    for (const tool of BRUSH_PANEL_TOOLS) {
+    for (const tool of TIPPED_TOOLS) {
       tipNames[tool].textContent = TIP_LABELS[settings.tips[tool]];
     }
     shapePanel.render({ shape: settings.shape, perfect: settings.shapePerfect });

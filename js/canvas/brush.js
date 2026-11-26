@@ -18,7 +18,9 @@
 // No DOM at import time (unit tests import this): canvases are made
 // the first time a stamp or grain is needed.
 
-export const TIPS = ['pen', 'pencil', 'chalk', 'chisel', 'paintbrush', 'soft'];
+// The last three are stamps (8e): one shape per stamp, spaced apart
+// along the stroke (a tap places one).
+export const TIPS = ['pen', 'pencil', 'chalk', 'chisel', 'paintbrush', 'soft', 'web', 'star', 'heart'];
 
 export const TIP_LABELS = {
   pen: 'Pen',
@@ -27,6 +29,9 @@ export const TIP_LABELS = {
   chisel: 'Chisel',
   paintbrush: 'Paintbrush',
   soft: 'Soft',
+  web: 'Web',
+  star: 'Star',
+  heart: 'Heart',
 };
 
 export const DEFAULT_TIP = 'pen';
@@ -45,6 +50,9 @@ export const TIP_DEFAULTS = {
     chisel: { size: 16, strength: 100 },
     paintbrush: { size: 24, strength: 90 },
     soft: { size: 40, strength: 60 },
+    web: { size: 60, strength: 100 },
+    star: { size: 40, strength: 100 },
+    heart: { size: 40, strength: 100 },
   },
   erase: {
     pen: { size: 6, strength: 100 },
@@ -53,6 +61,9 @@ export const TIP_DEFAULTS = {
     chisel: { size: 16, strength: 100 },
     paintbrush: { size: 24, strength: 100 },
     soft: { size: 40, strength: 100 },
+    web: { size: 60, strength: 100 },
+    star: { size: 40, strength: 100 },
+    heart: { size: 40, strength: 100 },
   },
 };
 
@@ -197,13 +208,108 @@ function drawChalk(ctx, size, color) {
   ctx.fill();
 }
 
+// --- stamps (8e): Web, Star, Heart — upright, solid in the color ---
+//
+// Drawn by us (her list, not a library). Each stays inside the size
+// circle like every tip. A mirrored symmetry copy is the mirror image
+// (a heart below a horizontal axis points up), as Procreate mirrors.
+
+// Star: five points, one straight up.
+function drawStar(ctx, size, color) {
+  const outer = size / 2 - 0.5;
+  const inner = outer * 0.42;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+    const x = Math.cos(angle) * r;
+    const y = Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Heart: two lobes and a point, centered in the circle. Drawn in a
+// unit box (x and y from -1 to 1) scaled to fit; the lobes' far edges
+// are the farthest points from the center (~0.95 of the radius).
+function drawHeart(ctx, size, color) {
+  const s = (size / 2 - 0.5) * 0.92;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -0.45 * s);
+  ctx.bezierCurveTo(0.2 * s, -0.95 * s, 1.0 * s, -0.85 * s, 0.95 * s, -0.25 * s);
+  ctx.bezierCurveTo(0.9 * s, 0.25 * s, 0.35 * s, 0.6 * s, 0, 0.95 * s);
+  ctx.bezierCurveTo(-0.35 * s, 0.6 * s, -0.9 * s, 0.25 * s, -0.95 * s, -0.25 * s);
+  ctx.bezierCurveTo(-1.0 * s, -0.85 * s, -0.2 * s, -0.95 * s, 0, -0.45 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Web: spokes from the center and rings that sag between them, like a
+// spider's web. Lines thicken with size so a small web still reads.
+const WEB_SPOKES = 8;
+const WEB_RINGS = 4;
+function drawWeb(ctx, size, color) {
+  const line = Math.max(1, size * 0.035);
+  const r = size / 2 - line;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = line;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const angle = (i) => -Math.PI / 2 + (i * Math.PI * 2) / WEB_SPOKES;
+  ctx.beginPath();
+  for (let i = 0; i < WEB_SPOKES; i++) {
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(angle(i)) * r, Math.sin(angle(i)) * r);
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  for (let ring = 1; ring <= WEB_RINGS; ring++) {
+    const rr = (r * ring) / WEB_RINGS;
+    for (let i = 0; i <= WEB_SPOKES; i++) {
+      const a = angle(i);
+      const x = Math.cos(a) * rr;
+      const y = Math.sin(a) * rr;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+        continue;
+      }
+      // Sag toward the center between spokes.
+      const mid = angle(i - 0.5);
+      const sag = rr * 0.78;
+      ctx.quadraticCurveTo(Math.cos(mid) * sag, Math.sin(mid) * sag, x, y);
+    }
+  }
+  ctx.stroke();
+}
+
+// Stamps sit apart along a drag: the gap between centers, as a
+// fraction of size (a little more than one stamp, so they don't touch).
+const STAMP_SPACING_RATIO = 1.25;
+
+function stampTip(name, draw) {
+  return {
+    spacingRatio: STAMP_SPACING_RATIO,
+    grain: null,
+    // Spacing is carried from one stroke segment to the next
+    // (createTrail), so stamps land evenly however the samples arrive.
+    trail: true,
+    stamper: (size, color) => spriteStamper(cachedSprite(`${name}:${size}:${color}`, size, (ctx) => draw(ctx, size, color))),
+  };
+}
+
 function hexToRgb(hex) {
   const n = parseInt(String(hex).slice(1), 16) || 0;
   return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
 
 // The tips. spacingRatio: fraction of size between stamps (smaller =
-// smoother, more stamps). grain: null, 'fine' or 'coarse'.
+// smoother, more stamps). grain: null, 'fine' or 'coarse'. trail (8e
+// stamps): spacing carries across segments (createTrail) instead of
+// each segment spreading its own stamps evenly.
 // stamper(size, color) → (ctx, point) => void, made once per stroke.
 const TIP_SHAPES = {
   pen: { spacingRatio: 0.2, grain: null, stamper: (size) => roundStamper(size) },
@@ -228,10 +334,39 @@ const TIP_SHAPES = {
     grain: null,
     stamper: (size, color) => spriteStamper(cachedSprite(`soft:${size}:${color}`, size, (ctx) => drawSoft(ctx, size, color))),
   },
+  web: stampTip('web', drawWeb),
+  star: stampTip('star', drawStar),
+  heart: stampTip('heart', drawHeart),
 };
 
 export function getTip(name) {
   return TIP_SHAPES[sanitizeTipName(name)];
+}
+
+// --- trail: evenly spaced points along a stroke, segment by segment ---
+//
+// For tips whose stamps sit apart (8e) and for smudge's dabs. The
+// stroke's first point is stamped by the caller; walk(a, b) returns
+// the points on a→b that land every `spacing` along the whole path so
+// far, however short each segment is. Pure — unit-tested.
+export function createTrail(spacing) {
+  const step = Math.max(1, spacing);
+  let walked = 0; // distance since the last point placed
+  return {
+    walk(a, b) {
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      const out = [];
+      if (length === 0) return out;
+      let at = step - walked; // distance along a→b of the next point
+      while (at <= length) {
+        const t = at / length;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+        at += step;
+      }
+      walked = length - (at - step);
+      return out;
+    },
+  };
 }
 
 // --- paper grain, fixed to the canvas ---

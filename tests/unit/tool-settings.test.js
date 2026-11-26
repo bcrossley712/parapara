@@ -13,6 +13,7 @@ import { sanitizeToolSettings, MAX_BRUSH_SIZE, DEFAULT_COLOR } from '../../js/ca
 import * as storage from '../../js/storage/storage.js';
 import { DEFAULT_STABILIZER, MAX_STABILIZER } from '../../js/canvas/stabilizer.js';
 import { TIPS, TIP_DEFAULTS, MAX_STRENGTH } from '../../js/canvas/brush.js';
+import { DEFAULT_SMUDGE_STRENGTH } from '../../js/canvas/smudge.js';
 
 // Tip settings (8b-ii) as the defaults, with Pen's sizes overridden —
 // what settings saved before 8b-ii turn into.
@@ -32,6 +33,7 @@ const DEFAULTS = {
   tipSettings: tipSettingsWith(),
   shape: 'line',
   shapePerfect: false,
+  smudgeStrength: DEFAULT_SMUDGE_STRENGTH,
 };
 
 beforeEach(() => {
@@ -64,6 +66,7 @@ test('valid settings pass through unchanged (color lowercased)', () => {
     tipSettings: tipSettingsWith(1, 33),
     shape: 'line',
     shapePerfect: false,
+    smudgeStrength: DEFAULT_SMUDGE_STRENGTH,
   });
 });
 
@@ -87,6 +90,7 @@ test('each bad field falls back on its own, keeping the good ones', () => {
     tipSettings: tipSettingsWith(12, 6),
     shape: 'line',
     shapePerfect: false,
+    smudgeStrength: DEFAULT_SMUDGE_STRENGTH,
   });
 });
 
@@ -108,7 +112,7 @@ test('extra or unexpected fields are dropped', () => {
     stabilizer: { draw: 1, erase: 2, smudge: 3, fill: 4 },
     zoom: 3,
   });
-  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'shape', 'shapePerfect', 'stabilizer', 'tipSettings', 'tips', 'tool']);
+  assert.deepEqual(Object.keys(result).sort(), ['brushSizes', 'color', 'shape', 'shapePerfect', 'smudgeStrength', 'stabilizer', 'tipSettings', 'tips', 'tool']);
   assert.deepEqual(Object.keys(result.brushSizes).sort(), ['draw', 'erase', 'smudge']);
   assert.deepEqual(Object.keys(result.stabilizer).sort(), ['draw', 'erase']);
 });
@@ -125,6 +129,27 @@ test('shape (8d): the tool, its shape and Perfect are kept; bad ones fall back',
   const old = sanitizeToolSettings({ tool: 'draw', color: '#000000' });
   assert.equal(old.shape, 'line');
   assert.equal(old.shapePerfect, false);
+});
+
+test('smudge strength (8e): kept when valid; missing or bad falls back to the default', () => {
+  assert.equal(sanitizeToolSettings({ smudgeStrength: 1 }).smudgeStrength, 1);
+  assert.equal(sanitizeToolSettings({ smudgeStrength: MAX_STRENGTH }).smudgeStrength, MAX_STRENGTH);
+  for (const bad of [0, MAX_STRENGTH + 1, 30.5, '40', null, undefined]) {
+    assert.equal(sanitizeToolSettings({ smudgeStrength: bad }).smudgeStrength, DEFAULT_SMUDGE_STRENGTH);
+  }
+});
+
+test('stamp tips (8e) are remembered like any tip, per tool', () => {
+  const result = sanitizeToolSettings({
+    tool: 'draw',
+    tips: { draw: 'heart', erase: 'star' },
+    tipSettings: { draw: { heart: { size: 80, strength: 70 } } },
+  });
+  assert.equal(result.tips.draw, 'heart');
+  assert.equal(result.tips.erase, 'star');
+  assert.deepEqual(result.tipSettings.draw.heart, { size: 80, strength: 70 });
+  assert.equal(result.brushSizes.draw, 80);
+  assert.deepEqual(result.tipSettings.erase.star, TIP_DEFAULTS.erase.star);
 });
 
 test('stabilizer: settings saved before 8a get the midway default', () => {

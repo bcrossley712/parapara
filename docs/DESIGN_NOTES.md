@@ -108,8 +108,8 @@ Sections: [Process lessons](#process-lessons) ·
   stylus is a set distance ahead). The string cuts corners and feels
   odd without an on-canvas guide, which she doesn't want. Trailing
   needs a frame loop while the stylus rests (iPadOS sends no moves
-  then). Per tool like Flipaclip's per-brush slider; not smudge (its
-  feel is on hold). 11 notches because the rail's slider is short.
+  then). Per tool like Flipaclip's per-brush slider; not smudge (his
+  call at 8e: none for now). 11 notches because the rail's slider is short.
   Default midway (5) — his call, so she feels it straight away. Built
   ahead of symmetry and brush variety: it works on input points, not
   `stamp()`, so it doesn't touch the code they share.
@@ -120,13 +120,21 @@ Sections: [Process lessons](#process-lessons) ·
   stack), `FILL_TOLERANCE = 32` so anti-aliased edges don't leave a
   fringe. Reads/writes the whole buffer per tap; fast enough on her
   iPad.
-- **Smudge tuning math.** Overlapping steps *multiply*: one pass over a
-  spot applies ~1/spacingRatio blends. The original strength 0.5 /
-  spacing 0.2 gave 1-(1-0.5)^5 ≈ 97% — "goes to a full color line."
-  Now 0.18 / 0.5 → 1-(1-0.18)^2 ≈ 33% per pass, so blending builds up
-  over a couple of passes. Still not the feel she expects: she showed
-  that brushes in other apps soften their own edges, so smudge feel is
-  tied to having a broader brush set. Don't retune it in isolation.
+- **Smudge tuning math (rebuilt in 8e).** Overlapping dabs *multiply*:
+  a pixel under the middle of a pass gets ~5 brush-widths' worth of
+  mask from dabs every 0.05 of the size. The first smudge set a
+  per-step strength directly (0.5 at spacing 0.2 → ~97% a pass, "goes
+  to a full color line"; then 0.18 / 0.5 → ~33%) — and pasted a
+  hard-clipped circle. 8e instead states its feel values **per brush
+  width of drag** (`smudge.js`: `PASS_BLEND` — how far one pass moves
+  a pixel toward the carried color; `CARRY_*` — how much carried color
+  is left after one width) and derives the per-dab rates from the
+  spacing (`smudgeRates`), so changing the spacing doesn't change the
+  feel. Closer dabs (0.05, not 0.1) took visible banding out. Colors
+  are mixed premultiplied, so dragging paint into empty canvas fades
+  it and dragging empty canvas into paint thins it (as Procreate's
+  does), never dragging black in. These are first tries: tune on her
+  iPad until it feels right — that tuning is still 8e.
 - **No `willReadFrequently: true`.** It tends to push the whole canvas
   onto a slower CPU path — hurting draw/erase (constant) to help
   smudge/fill (rare). If those need speed, bound fill's region.
@@ -1440,6 +1448,21 @@ one only when she asks (or its trigger shows up), after scoping.
   storage on her near-full iPad (roughly 0.5–1 MB per frame for real
   line art) and adds a derived blob kind that the sweep and duplicate
   project must handle, like the thumbnail.
+- **A tip row in the Shape panel** (after 8d) — today she goes back to
+  Draw to change a shape's tip, which is fine (2026-11-25). Add the row
+  only if she asks.
+- **Stamps that turn with the stroke** (after 8e; they're upright
+  today). How: each stamp lands on a stretch a→b of the trail, so its
+  angle is that stretch's direction — rotate, place the sprite, rotate
+  back (a turning sprite stamper in `brush.js`, the angle passed from
+  `canvas.js`'s stamping). Smooth the angle over about one stamp's
+  width of travel, or slow drags make stamps wobble. A tap stays
+  upright; symmetry copies turn the mirror way for free (the flip
+  happens after the stamp is placed); Shape outlines turn along the
+  outline. Cheap to draw. Her calls when asked: does "up" face along
+  the drag or across it; a remembered "Turn with stroke" switch per
+  stamp (as Procreate offers) or always; and maybe a random tilt
+  (Procreate's rotation jitter — same angle plumbing).
 - **Merge down** — deferred on purpose (needs opacity-aware
   compositing and a two-layer undo entry). Only if she asks.
 - **Fill sample toggle** (current layer vs all visible, as Sketchbook

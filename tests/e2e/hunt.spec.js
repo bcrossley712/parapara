@@ -1,6 +1,6 @@
 // The robot test: a seeded, randomized hunt for lost drawing.
 //
-// A robot user draws, erases, smudges, undoes, redoes, adds, switches,
+// A robot user draws, stamps (8e), erases, smudges, undoes, redoes, adds, switches,
 // deletes and drags frames (4d), copies a layer's drawing and pastes
 // it into whichever layer is active, on any frame (4d),
 // switches layers, draws with symmetry on (8b-i: a mark and its
@@ -95,6 +95,18 @@ async function setSymmetry(page, label) {
 
 async function pickTool(page, name) {
   await page.getByRole('button', { name, exact: true }).click();
+}
+
+// Draw's tip (Draw is the tool): opens the brush panel, picks it, and
+// closes the panel again.
+async function useTip(page, label) {
+  const draw = page.getByRole('button', { name: 'Draw', exact: true });
+  const panel = page.locator('.pp-brush-panel:not([hidden])');
+  await draw.click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole('button', { name: label, exact: true }).click();
+  await draw.click();
+  await expect(panel).toHaveCount(0);
 }
 
 // The Shape tool (8d) with `shape` ('Line', 'Triangle'; Perfect stays
@@ -312,8 +324,26 @@ for (const seed of SEEDS) {
       return true;
     }
 
+    // A mark made with a stamp tip (8e): one Star or Heart tapped on the
+    // spot (size 40 stays inside the spot's cell), then back to Pen.
+    async function stampMark() {
+      if (!(await closeMenuByTap())) return false;
+      const spot = model.spots.pop();
+      if (!spot) return false;
+      const frame = model.timeline[await currentIndex(page)];
+      const layer = await activeLayer(page);
+      await useTip(page, pick(['Star', 'Heart']));
+      await tapAt(page, spot.x + 12, spot.y);
+      await useTip(page, 'Pen');
+      const mark = { frame, layer, spot, present: true };
+      model.marks.push(mark);
+      push({ type: 'mark', mark });
+      return true;
+    }
+
     const actions = [
       [30, 'mark', markStroke],
+      [3, 'stamp mark', stampMark],
       [4, 'mirrored mark', mirroredMark],
       [5, 'shape mark', shapeMark],
       [6, 'scribble', async () => {

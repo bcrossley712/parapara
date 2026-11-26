@@ -48,7 +48,15 @@ import {
   DEFAULT_TIP,
   MIN_STRENGTH,
   MAX_STRENGTH,
+  createTrail,
 } from './brush.js';
+import {
+  smudgeMask,
+  startBuffer,
+  smudgeDab,
+  DEFAULT_SMUDGE_STRENGTH,
+  SMUDGE_SPACING_RATIO,
+} from './smudge.js';
 import { mirrorPoints, mergeOverlapping, sanitizeSymmetry } from './symmetry.js';
 import { createStabilizer, MAX_STABILIZER, DEFAULT_STABILIZER } from './stabilizer.js';
 import { sanitizeShape, lineEnd, shapeOutline, triangleOutline, stampPoints } from './shapes.js';
@@ -86,32 +94,13 @@ const DEFAULT_HEIGHT = 1080;
 
 // Upper bound for brush size — shared with ui.js (imported there for
 // the size slider's max) so the two don't drift out of sync, and used
-// here to size the smudge tool's scratch canvas once instead of
-// reallocating it per stroke. 200 since 8b-i (was 60): the slider is
+// for tool-settings validation. 200 since 8b-i (was 60): the slider is
 // on a curve (size-curve.js), so the bigger range doesn't cost
 // precision at small sizes.
 export const MAX_BRUSH_SIZE = 200;
 
-// Smudge: how strongly each individual step blends sampled pixels
-// into the new position (0 = no effect, 1 = fully replaces), and how
-// far apart those steps land along the path (as a fraction of brush
-// diameter — same idea as brush.js's spacingRatio, just tuned
-// separately since smudge compounds differently than a solid stamp).
-//
-// These compound fast: consecutive steps overlap, so a single
-// continuous pass over one spot applies roughly (1 / spacingRatio)
-// overlapping blends, not one. At the original settings (strength
-// 0.5, spacing 0.2 → ~5 overlaps per pass), that works out to
-// 1-(1-0.5)^5 ≈ 97% effective opacity — a single pass already looked
-// almost like solid paint, reported as "goes to a full color line."
-// These values are tuned for a single light pass landing around
-// ~30% effective blend (1-(1-0.18)^2 ≈ 0.33 at spacing 0.5 → ~2
-// overlaps), so it takes a couple of deliberate passes to build up
-// real blending, matching how smudge tools elsewhere feel. Revisit
-// once tested — this is a feel judgment, not a formula with one right
-// answer.
-const SMUDGE_STRENGTH = 0.18;
-const SMUDGE_SPACING_RATIO = 0.5;
+// Smudge (8e): smudge.js — blends by dragging color through a soft
+// mask, with its own strength (smudgeStrength).
 
 // Default draw/fill color — single source of truth, shared with
 // ui/color-picker.js so the picker's initial state and the canvas's
@@ -134,15 +123,16 @@ export const EXPORT_TIMEOUT_MS = 15000;
 const TOOLS = ['draw', 'erase', 'fill', 'smudge', 'shape'];
 const SIZED_TOOLS = ['draw', 'erase', 'smudge'];
 // Tools the stabilizer (8a) applies to, each with its own strength
-// (Flipaclip has one per brush). Not fill (no line), not smudge (its
-// feel is on hold until there are more brushes).
+// (Flipaclip has one per brush). Not fill (no line), not smudge (his
+// call at 8e scoping: none for now).
 const STABILIZED_TOOLS = ['draw', 'erase'];
 const DEFAULT_TOOL = 'draw';
 const DEFAULT_BRUSH_SIZE = 6;
 
 // Tools that pick a brush tip (8b-ii), each remembering its last tip
 // and, per tip, its own size and strength (Draw-Pencil and
-// Erase-Pencil are separate). Smudge keeps a plain size until 8e (was 8b-iii).
+// Erase-Pencil are separate). Smudge (8e) has no tip choice: its size
+// is brushSizes.smudge and its strength smudgeStrength.
 const TIPPED_TOOLS = ['draw', 'erase'];
 // Whose tip, size and strength a shape is drawn with (8d: as
 // Sketchbook's shapes use the current brush).
@@ -163,7 +153,8 @@ const isStrength = (v) => Number.isInteger(v) && v >= MIN_STRENGTH && v <= MAX_S
 // Shape: { tool, color, brushSizes: { draw, erase, smudge },
 // stabilizer: { draw, erase }, tips: { draw, erase },
 // tipSettings: { draw: { [tip]: { size, strength } }, erase: … },
-// shape, shapePerfect }. shape/shapePerfect (8d): the Shape tool's
+// shape, shapePerfect, smudgeStrength }. smudgeStrength (8e): 1–100,
+// missing = DEFAULT_SMUDGE_STRENGTH. shape/shapePerfect (8d): the Shape tool's
 // shape (shapes.js SHAPES; missing = 'line') and its Perfect toggle
 // (missing = false).
 // brushSizes.draw/erase are the current tip's size (kept so the saved
@@ -231,7 +222,10 @@ export function sanitizeToolSettings(raw) {
   const shape = sanitizeShape(input.shape);
   const shapePerfect = input.shapePerfect === true;
 
-  return { tool, color, brushSizes, stabilizer, tips, tipSettings, shape, shapePerfect };
+  // 8e.
+  const smudgeStrength = isStrength(input.smudgeStrength) ? input.smudgeStrength : DEFAULT_SMUDGE_STRENGTH;
+
+  return { tool, color, brushSizes, stabilizer, tips, tipSettings, shape, shapePerfect, smudgeStrength };
 }
 
 // Fill: per-channel color-distance tolerance for what counts as "the
@@ -570,12 +564,6 @@ export function initCanvas(container, options = {}) {
 
   const blockedListeners = new Set();
 
-  // Smudge's scratch buffer: sized once to the largest brush size
-  // rather than reallocated per stroke.
-  const scratchCanvas = document.createElement('canvas');
-  scratchCanvas.width = MAX_BRUSH_SIZE;
-  scratchCanvas.height = MAX_BRUSH_SIZE;
-  const scratchCtx = scratchCanvas.getContext('2d');
 
   // The committed copy (see top of file). Read with getImageData only
   // when a stroke commits, so — like the main canvas — no
@@ -650,6 +638,9 @@ export function initCanvas(container, options = {}) {
   let strokeTip = getTip(DEFAULT_TIP);
   let strokeSize = DEFAULT_BRUSH_SIZE;
   let strokeStamp = () => {};
+  // Stamp tips (8e) carry their spacing from segment to segment
+  // (brush.js createTrail); null for the others. Smudge uses one too.
+  let strokeTrail = null;
   // Where a grained stroke's region is copied to have the grain cut
   // into it before it goes on the layer. Grows to the biggest box
   // composed; released when the stroke ends.
@@ -789,6 +780,8 @@ export function initCanvas(container, options = {}) {
   // Shape (8d): which shape, and whether Perfect is on.
   let shapeKind = defaults.shape;
   let shapePerfect = defaults.shapePerfect;
+  // Smudge's strength (8e), percent.
+  let smudgeStrength = defaults.smudgeStrength;
   // The tool whose tip the active tool draws with: itself, or Draw's
   // for Shape; null for fill and smudge.
   const tipToolFor = (name) => (name === 'shape' ? SHAPE_TIP_TOOL : (TIPPED_TOOLS.includes(name) ? name : null));
@@ -1006,6 +999,10 @@ export function initCanvas(container, options = {}) {
 
   function stampAlongLine(a, b) {
     const size = strokeSize;
+    if (strokeTrail) {
+      for (const p of strokeTrail.walk(a, b)) stamp(p, size);
+      return;
+    }
     const spacing = Math.max(1, size * strokeTip.spacingRatio);
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
     const steps = Math.max(1, Math.ceil(dist / spacing));
@@ -1023,69 +1020,68 @@ export function initCanvas(container, options = {}) {
     // exact.
     const approxLength = Math.hypot(control.x - start.x, control.y - start.y)
       + Math.hypot(end.x - control.x, end.y - control.y);
-    const steps = Math.max(1, Math.ceil(approxLength / spacing));
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
+    const quadratic = (t) => {
       const oneMinusT = 1 - t;
-      const x = oneMinusT * oneMinusT * start.x + 2 * oneMinusT * t * control.x + t * t * end.x;
-      const y = oneMinusT * oneMinusT * start.y + 2 * oneMinusT * t * control.y + t * t * end.y;
-      stamp({ x, y }, size);
+      return {
+        x: oneMinusT * oneMinusT * start.x + 2 * oneMinusT * t * control.x + t * t * end.x,
+        y: oneMinusT * oneMinusT * start.y + 2 * oneMinusT * t * control.y + t * t * end.y,
+      };
+    };
+    if (strokeTrail) {
+      // Spaced stamps (8e): walk the curve in short straight pieces so
+      // the spacing follows it.
+      const pieces = Math.max(1, Math.ceil(approxLength / 4));
+      let prev = start;
+      for (let i = 1; i <= pieces; i++) {
+        const next = quadratic(i / pieces);
+        for (const p of strokeTrail.walk(prev, next)) stamp(p, size);
+        prev = next;
+      }
+      return;
     }
+    const steps = Math.max(1, Math.ceil(approxLength / spacing));
+    for (let i = 1; i <= steps; i++) stamp(quadratic(i / steps), size);
   }
 
-  // --- smudge: sample a patch behind the stroke, blend it forward ---
+  // --- smudge (8e): drag color through a soft mask (smudge.js) ---
+  //
+  // Each symmetry copy carries its own color (smudgeBuffers, by copy
+  // index), picked up under its own first point — so every copy
+  // smears the colors on its own side. It paints the layer directly
+  // (it reads it), not the stroke buffer. A tap does nothing: there's
+  // nothing to blend without a drag.
+  let smudgeBuffers = [];
 
-  function smudgeStep(from, to, size, part = 0) {
-    const half = size / 2;
-
-    // Sample a patch centered on the previous position, then paint it
-    // back centered on the new position at partial opacity. Points
-    // near the canvas edge sample some out-of-bounds pixels, which
-    // come back transparent per spec — fine, it just fades toward
-    // transparent at the edge.
-    const patch = ctx.getImageData(
-      Math.round(from.x - half),
-      Math.round(from.y - half),
-      size,
-      size
-    );
-    scratchCtx.putImageData(patch, 0, 0);
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(to.x, to.y, half, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.globalAlpha = SMUDGE_STRENGTH;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(scratchCanvas, 0, 0, size, size, to.x - half, to.y - half, size, size);
-    ctx.restore();
-    markDirty(rectAroundPoint(to, size), part);
+  // The size × size patch whose center is (nearly) the point.
+  function smudgePatchAt(point, size) {
+    return { x: Math.round(point.x - size / 2), y: Math.round(point.y - size / 2) };
   }
 
-  // Bug fix: smudge originally called smudgeStep once per pointer
-  // sample pair, with no interpolation — unlike draw/erase (see
-  // stampAlongLine/stampAlongQuadratic above), which already fill
-  // gaps between far-apart samples. On a fast drag, consecutive
-  // points can land farther apart than the brush radius, so instead
-  // of a continuous smear it produced isolated circular blends with
-  // visible gaps — reported as "stippling dots." This interpolates
-  // smudgeStep calls along the segment the same way draw/erase do.
+  function beginSmudge(point) {
+    const size = strokeSize;
+    smudgeBuffers = mirrorPoints(point, strokeSymmetry, width, height).map((copy) => {
+      const at = smudgePatchAt(copy, size);
+      return startBuffer(ctx.getImageData(at.x, at.y, size, size).data);
+    });
+    strokeTrail = createTrail(size * SMUDGE_SPACING_RATIO);
+  }
+
+  function smudgeDabAt(point, part) {
+    const size = strokeSize;
+    const at = smudgePatchAt(point, size);
+    const patch = ctx.getImageData(at.x, at.y, size, size);
+    if (smudgeDab(patch.data, smudgeBuffers[part], smudgeMask(size), strokeStrength)) {
+      ctx.putImageData(patch, at.x, at.y);
+    }
+    // Marked even when nothing changed, so a smudge drag is always one
+    // undo step — as before 8e, and as erasing empty canvas is.
+    markDirty(rectAroundPoint(point, size), part);
+  }
+
   function smudgeAlongLine(from, to) {
-    const size = Math.max(2, Math.round(brushSizes.smudge));
-    const spacing = Math.max(1, size * SMUDGE_SPACING_RATIO);
-    const dist = Math.hypot(to.x - from.x, to.y - from.y);
-    const steps = Math.max(1, Math.ceil(dist / spacing));
-
-    // Symmetry (8b-i): each copy smears between its own mirrored
-    // points. Smudge picks its paint up from the layer, so every copy
-    // carries the colors on its own side.
-    let prev = mirrorPoints(from, strokeSymmetry, width, height);
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const point = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
-      const next = mirrorPoints(point, strokeSymmetry, width, height);
-      for (let c = 0; c < next.length; c++) smudgeStep(prev[c], next[c], size, c);
-      prev = next;
+    for (const point of strokeTrail.walk(from, to)) {
+      const copies = mirrorPoints(point, strokeSymmetry, width, height);
+      for (let c = 0; c < copies.length; c++) smudgeDabAt(copies[c], c);
     }
   }
 
@@ -1320,11 +1316,13 @@ export function initCanvas(container, options = {}) {
     if (strokeBlocked) return;
 
     if (tool === 'smudge') {
-      // Smudge has no "begin" mark — it only does something once it
-      // has a from/to pair to drag between (see extendStroke). A
-      // lone tap with no movement intentionally does nothing, same
-      // as smudge tools elsewhere (nothing to blend without a
-      // direction to drag).
+      // Smudge has no "begin" mark — it picks up the color under the
+      // first point and only lays it down as she drags (see
+      // extendStroke). A lone tap does nothing, as in smudge tools
+      // elsewhere (nothing to blend without a direction to drag).
+      strokeSize = Math.max(2, Math.round(brushSizes.smudge));
+      strokeStrength = smudgeStrength / MAX_STRENGTH;
+      beginSmudge(point);
       return;
     }
 
@@ -1340,6 +1338,7 @@ export function initCanvas(container, options = {}) {
     strokeStrength = setting.strength / MAX_STRENGTH;
     const stampColor = strokeErase ? '#000000' : color;
     strokeStamp = strokeTip.stamper(strokeSize, stampColor);
+    strokeTrail = strokeTip.trail ? createTrail(strokeSize * strokeTip.spacingRatio) : null;
     strokeCtx.globalCompositeOperation = 'source-over';
     strokeCtx.globalAlpha = 1;
     strokeCtx.fillStyle = stampColor;
@@ -2196,12 +2195,17 @@ export function initCanvas(container, options = {}) {
       return currentSize();
     },
     // Strength in percent (8b-ii), MIN_STRENGTH–MAX_STRENGTH, of the
-    // active tool's tip; null for fill and smudge.
+    // active tool's tip, or smudge's own (8e); null for fill.
     setBrushStrength(percent) {
+      if (tool === 'smudge') {
+        smudgeStrength = percent;
+        return;
+      }
       const setting = currentTipSetting();
       if (setting) setting.strength = percent;
     },
     getBrushStrength() {
+      if (tool === 'smudge') return smudgeStrength;
       return currentTipSetting()?.strength ?? null;
     },
     // Stabilizer strength (8a), 0–10, for the active tool; null for
@@ -2264,6 +2268,7 @@ export function initCanvas(container, options = {}) {
         tipSettings: tipCopy,
         shape: shapeKind,
         shapePerfect,
+        smudgeStrength,
       };
     },
 
@@ -2280,6 +2285,7 @@ export function initCanvas(container, options = {}) {
       Object.assign(tipSettings, clean.tipSettings);
       shapeKind = clean.shape;
       shapePerfect = clean.shapePerfect;
+      smudgeStrength = clean.smudgeStrength;
     },
 
     // Undoable like any edit. Clearing an already-blank layer is a
@@ -2625,7 +2631,7 @@ export function initCanvas(container, options = {}) {
       order = [];
       canvas = null;
       ctx = null;
-      for (const c of [committedCanvas, scratchCanvas, strokeCanvas]) {
+      for (const c of [committedCanvas, strokeCanvas]) {
         c.width = 0;
         c.height = 0;
       }

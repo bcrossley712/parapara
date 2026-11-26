@@ -4,7 +4,8 @@
 // when it's already the tool (as the current frame tile opens its
 // menu). Tips with a sample stroke each, then Size (with the number),
 // Strength and Stabilizer — Flipaclip keeps these in its brush
-// settings. It opens to the right of the button, like the color
+// settings. Smudge's (8e) is the same panel with Size and Strength
+// only (no tip choice, no stabilizer). It opens to the right of the button, like the color
 // picker, and closes on a tap anywhere else.
 //
 // Pure UI: ui.js reads the canvas's settings into render(state) and
@@ -15,7 +16,7 @@ import { TIPS, TIP_LABELS, MIN_STRENGTH, MAX_STRENGTH, drawTipSample } from '../
 import { MAX_STABILIZER } from '../canvas/stabilizer.js';
 import { sliderToSize, sizeToSlider, SIZE_SLIDER_STEPS } from '../canvas/size-curve.js';
 
-const TOOL_TITLES = { draw: 'Draw brush', erase: 'Erase brush' };
+const TOOL_TITLES = { draw: 'Draw brush', erase: 'Erase brush', smudge: 'Smudge' };
 
 // Sample strokes: CSS size, drawn at 2× for the iPad's screen.
 const SAMPLE_W = 96;
@@ -114,11 +115,26 @@ export function createBrushPanel({ container, signal, maxSize, onTip, onSize, on
   let state = null;
 
   // state: { tool, tip, size, strength, stabilizer, color,
-  // tipStrength(name) }.
+  // tipStrength(name) }. tip and stabilizer are null for smudge: their
+  // controls hide.
   function render(next) {
     state = next;
     if (panel.hidden || !state) return;
     title.textContent = TOOL_TITLES[state.tool] ?? '';
+    grid.hidden = state.tip === null;
+    stabilizer.input.closest('label').hidden = state.stabilizer === null;
+    if (state.tip !== null) drawSamples();
+    size.input.value = String(sizeToSlider(state.size, maxSize));
+    showSize(state.size);
+    strength.input.value = String(state.strength);
+    showStrength(state.strength);
+    if (state.stabilizer !== null) {
+      stabilizer.input.value = String(state.stabilizer);
+      showStabilizer(state.stabilizer);
+    }
+  }
+
+  function drawSamples() {
     const ink = state.tool === 'erase' ? ERASE_SAMPLE_COLOR : state.color;
     for (const [name, { button, canvas }] of tipButtons) {
       const current = name === state.tip;
@@ -130,12 +146,6 @@ export function createBrushPanel({ container, signal, maxSize, onTip, onSize, on
         size: name === 'pencil' || name === 'pen' ? 8 * SAMPLE_SCALE : 18 * SAMPLE_SCALE,
       });
     }
-    size.input.value = String(sizeToSlider(state.size, maxSize));
-    showSize(state.size);
-    strength.input.value = String(state.strength);
-    showStrength(state.strength);
-    stabilizer.input.value = String(state.stabilizer);
-    showStabilizer(state.stabilizer);
   }
 
   function position() {

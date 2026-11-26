@@ -2882,3 +2882,9 @@ textarea,
 .pp-brush-panel__slider input[type="range"] {
   width: 100%;
 }
+
+/* Smudge's panel (8e) has no tips or stabilizer. */
+.pp-brush-panel__tips[hidden],
+.pp-brush-panel__slider[hidden] {
+  display: none;
+}

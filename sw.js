@@ -44,6 +44,7 @@ const APP_SHELL = [
   './js/canvas/stabilizer.js',
   './js/canvas/symmetry.js',
   './js/canvas/shapes.js',
+  './js/canvas/smudge.js',
   './js/canvas/size-curve.js',
   './js/canvas/gestures.js',
   './js/canvas/region.js',

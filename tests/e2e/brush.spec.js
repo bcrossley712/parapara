@@ -57,7 +57,7 @@ async function setSymmetry(page, label) {
 
 // ---------------- the panel ----------------
 
-test('tapping the current Draw or Erase opens its brush panel; Fill and Smudge have none', async ({ page }) => {
+test('tapping the current Draw or Erase opens its brush panel; Fill has none', async ({ page }) => {
   await openApp(page);
   await expect(brushPanel(page)).toHaveCount(0);
 
@@ -77,11 +77,10 @@ test('tapping the current Draw or Erase opens its brush panel; Fill and Smudge h
   await expect(brushPanel(page)).toContainText('Erase brush');
   await toolButton(page, 'Erase').click();
 
-  for (const name of ['Fill', 'Smudge']) {
-    await toolButton(page, name).click();
-    await toolButton(page, name).click();
-    await expect(brushPanel(page)).toHaveCount(0);
-  }
+  // Smudge's own panel (8e) is in smudge.spec.js.
+  await toolButton(page, 'Fill').click();
+  await toolButton(page, 'Fill').click();
+  await expect(brushPanel(page)).toHaveCount(0);
 });
 
 test('a canvas tap with the panel open only closes it', async ({ page }) => {

@@ -26,7 +26,8 @@ panel samples), `stabilizer.js` (8a, pure: the trailing
 line), `symmetry.js` (8b-i, pure: mirror points, `mergeOverlapping`),
 `size-curve.js` (8b-i, pure: the size slider's curve),
 `shapes.js` (8d, pure: shape outlines, Perfect, stamp spacing along a
-path),
+path), `smudge.js` (8e, pure: smudge's soft mask, carried color and
+per-dab rates),
 `gestures.js` (pure pan/zoom/rotate math,
 tap/swipe classifiers), `region.js` (dirty rects, `inkBounds`,
 `flipSpan`),
@@ -68,9 +69,26 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   So a stroke doesn't darken where it crosses itself; the next stroke
   does (Procreate's default). Smudge and fill still paint the layer
   directly (they read it).
+- **Smudge (8e)** ([why](DESIGN_NOTES.md#drawing-engine) → "Smudge
+  tuning math"): blends by dragging color. At pointerdown each
+  symmetry copy picks up the color under it (`smudgeBuffers`, by copy
+  index); dabs every `SMUDGE_SPACING_RATIO` of the size along the drag
+  (`createTrail`) lay some of it down through the Soft tip's fade and
+  pick up what's now there (`smudgeDab`: `getImageData`, blend,
+  `putImageData`). Size `brushSizes.smudge`, its own strength
+  (`smudgeStrength`, 1–100, default 50); no tip choice, no
+  stabilizer; mirrors with symmetry. A tap changes nothing; a drag is
+  always one undo step, even over empty canvas (as erasing is).
 - **Brush tips (8b-ii)** ([why](DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
   Pen (the old round tip — default, pixels unchanged), Pencil, Chalk,
-  Chisel, Paintbrush, Soft; draw and erase each use any of them.
+  Chisel, Paintbrush, Soft, and the stamps Web, Star, Heart (8e);
+  draw and erase each use any of them (Erase with a stamp cuts that
+  shape). **Stamps** are sprites, upright (a mirrored copy is the
+  mirror image), spaced `STAMP_SPACING_RATIO` (1.25) of the size
+  apart: a tap places one (the first stamp), a drag leaves a trail
+  whose spacing carries from segment to segment (`trail: true` →
+  `strokeTrail`, `createTrail`), so the gaps don't depend on how fast
+  she moves. With Shape they space round the outline like any tip.
   Tip, size and strength are fixed at pointerdown (`strokeTip`,
   `strokeSize`, `strokeStamp`). Shaped tips are sprites drawn once per
   size and color (`cachedSprite`), stamped mirrored for a mirrored
@@ -183,7 +201,7 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 - Fill applies immediately but is a gesture candidate like draw/erase:
   a second finger in the window reverts it from the committed copy. It
   commits on pointerup.
-- Every paint operation marks the dirty rect (`stamp()`, smudge step,
+- Every paint operation marks the dirty rect (`stamp()`, smudge dab,
   fill bounds) — a mark outside it won't be undoable or revertible.
   With symmetry, mark the copy's own part (`markDirty(rect, index)`).
 - **Draw/erase stamps go to the stroke buffer, never the layer**, and
@@ -195,6 +213,10 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
   overlapping copy boxes (`mergeOverlapping`) first — two overlapping
   patches swapped one after the other read each other's pixels on
   redo.
+- **A smudge dab marks its dirty rect even when it changed nothing**
+  (8e) — a smudge drag is one undo step, as before 8e (the robot test
+  models it so). Its patch (`smudgePatchAt`, size × size) must stay
+  inside `rectAroundPoint(point, size)`.
 - **Every tip stays inside a circle of diameter `size`** — the dirty
   rect is `rectAroundPoint(point, size)`. A new tip that reaches
   further leaves marks undo can't take back (`brush.spec.js` checks
@@ -225,7 +247,7 @@ tap ≤ 350 ms / 20 px; swipe ≥ 60 px, mostly horizontal.
 
 ### iPad-only checks
 
-Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`. Since 8b-ii: how each tip looks to her, and whether large Soft, Paintbrush and Chalk strokes keep up (sprites and grain cost more per move than Pen). Since 8d: whether a big Chalk or Soft oval keeps up while dragging (the whole outline restamps each frame; fallback if not: a thin preview while dragging, the brush on lift), and the triangle's two steps with her stylus.
+Stylus feel, iPadOS gesture conflicts, whether iPadOS's real lost canvas behaves like the simulations in `canvas-loss.spec.js`. Since 8b-ii: how each tip looks to her, and whether large Soft, Paintbrush and Chalk strokes keep up (sprites and grain cost more per move than Pen). Since 8d: the triangle's two steps with her stylus. Since 8e: whether smudge feels like blending (tune `PASS_BLEND` / `CARRY_*` in `smudge.js`), whether a big smudge keeps up (each dab reads and writes the layer), and how Web, Star and Heart look at her sizes.
 
 ---
 
@@ -1229,7 +1251,7 @@ on her iPad; a background photo in the video once it's on.
 
 **Files:** `js/ui/color-picker.js` (HSV picker, eyedropper button, recents,
 palette — UI only), `ui/brush-panel.js` (8b-ii: tips, size, strength,
-stabilizer — UI only), `ui/shape-panel.js` (8d: the Shape button and
+stabilizer; 8e: Smudge's Size and Strength — UI only), `ui/shape-panel.js` (8d: the Shape button and
 its panel — UI only), `storage/colors.js` (pure list rules,
 `MAX_RECENTS`, `MAX_PALETTE`); tool-settings validation in
 `canvas.js` (`sanitizeToolSettings`).
@@ -1249,7 +1271,9 @@ its panel — UI only), `storage/colors.js` (pure list rules,
   tool opens it (as the current frame tile opens its menu) — unless
   the eyedropper is armed: then that tap only cancels it; a tap
   anywhere else closes it, and a canvas tap then only closes it.
-  Smudge and Fill have none until 8e (was 8b-iii). The Draw/Erase buttons show
+  Smudge's (8e) opens the same way, titled "Smudge", with Size and
+  Strength only (the tips and Stabilizer hide); Fill has none. The
+  Draw/Erase buttons show
   the tip's name under the label (accessible name stays
   "Draw"/"Erase"). The rail keeps Size; the panel has Size too (same
   curve, number shown), Strength 1–100% and Stabilizer.
@@ -1260,7 +1284,8 @@ its panel — UI only), `storage/colors.js` (pure list rules,
   shapes use Draw's (she goes back to Draw to change the tip).
 - **Tool settings** (tool, color, per-tool sizes, per-tool stabilizer
   — draw and erase, 8a; 8b-ii: last tip per tool, size and strength
-  per tool *and* tip; 8d: `shape` and `shapePerfect`) are remembered
+  per tool *and* tip; 8d: `shape` and `shapePerfect`; 8e:
+  `smudgeStrength`) are remembered
   app-wide, not per project, and carry from one project into the next.
   Per project: the open frame and active layer. App-wide: whether the
   layers panel was open, which screen she was on, and the last
@@ -1280,7 +1305,7 @@ its panel — UI only), `storage/colors.js` (pure list rules,
 - **Tip settings (8b-ii) are the source of truth** for draw/erase
   sizes: `brushSizes.draw/erase` only mirror the current tip's size
   (kept so the saved shape still reads as before); smudge's size lives
-  in `brushSizes.smudge`. Settings saved before 8b-ii have no
+  in `brushSizes.smudge`, its strength in `smudgeStrength` (8e). Settings saved before 8b-ii have no
   `tipSettings` — their draw/erase sizes become Pen's. Stabilizer
   stays per tool, not per tip (his call — Flipaclip has it per brush).
 - **Don't open a panel from a tool button's first tap** — the first
