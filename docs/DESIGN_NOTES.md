@@ -904,7 +904,8 @@ device-only.
   alone — ours too (audio is in time, not tied to frames).
 - **Export tiers:** (1) video/animation export + native Web Share —
   covers "send it to a friend," the main use; (2) shareable link via a
-  Cloudflare Worker + R2, deferred until the core app is proven;
+  Cloudflare Worker + R2 — **dropped 2026-11-25** (his call: video
+  through the share sheet covers sending to friends);
   (3) full project export/import, stretch goal — **raised to step 7's
   first job (2026-10-31) as automatic backup to R2**: a manual backup
   goes stale (his phone wipe: the manual one was too old to help, the
@@ -1440,22 +1441,18 @@ one only when she asks (or its trigger shows up), after scoping.
   line art) and adds a derived blob kind that the sweep and duplicate
   project must handle, like the thumbnail.
 - **Merge down** — deferred on purpose (needs opacity-aware
-  compositing and a two-layer undo entry). Revisit after step 4.
+  compositing and a two-layer undo entry). Only if she asks.
 - **Fill sample toggle** (current layer vs all visible, as Sketchbook
   offers) — fill always samples all visible layers; add the toggle if
   she asks.
 - **Color opacity** — not in the picker on purpose; revisit if she
   asks. (8b's per-brush strength is a brush setting, as in Flipaclip's
   brush Opacity — the picker stays without it.)
-- **Storage warning — dropped (6d scoping, 2026-10-29).** Without a
-  project backup her only remedy is deleting drawings (a video can't be
-  opened as a project again), and ~80% of Safari's quota likely never
-  fires on her iPad — eviction follows the iPad's free space, not the
-  app's quota. Instead each launch logs a `storage` line. **Her iPad
-  (2026-10-31): ~34 MB used of a ~35 GB quota (0.1%), `persisted=yes`**
-  — confirms the warning would never fire. **Revisit**
-  after step 7's backup, or if the log shows usage climbing or
-  `persisted=no`. ([why](#planned-features))
+- **Storage warning — closed (dropped at 6d, 2026-10-29).** Her iPad
+  used ~0.1% of its quota with `persisted=yes`, and automatic backup
+  (7b) is now the remedy for eviction. Reopen only if a launch's
+  `storage` line shows `persisted=no` or usage climbing.
+  ([why](#planned-features))
 - **Onion skin extras — revisit in final touches**, once she knows
   onion skins (she's too new to judge them now): wrap-around with
   loop, ghosts of the active layer only.

@@ -66,6 +66,20 @@ icon, manifest `name`/`short_name`, and repo copy.
 - **Be upfront about what can't be verified off-device** (iOS storage
   eviction, stylus feel, mic permission flow, share-sheet behavior).
 
+**Numbering after v1** (from 2026-11-25; steps 1–8 are v1):
+- **`v1.N` — one scoped change**: a feature, a redesign or a
+  multi-area fix, numbered in the order it's started (v1.1, v1.2 …),
+  never reused. Pushes within it are lettered: **v1.3a, v1.3b**.
+- **Every `v1.N` gets a scoping line before building** (what, her
+  apps' convention or a flagged departure, what it touches) — even a
+  request that arrives between pushes, if it touches more than one
+  area or changes how the app looks. That's the gap the light theme
+  and canvas shapes went through without a step.
+- **A small fix inside one area needs no number** — it rides with the
+  current `v1.N`, or goes alone as `fix: …` in the commit.
+- **Use the number in commit messages, notes and design notes**
+  ("v1.2b", "→ v1.2 scoping"), so history and notes line up.
+
 **Convention checks** ([why](docs/DESIGN_NOTES.md#process-lessons))
 - **Flag any departure from her apps' conventions before building it**,
   so it's a deliberate choice, not a surprise.
@@ -119,25 +133,18 @@ icon, manifest `name`/`short_name`, and repo copy.
   Listen/Set start) and export (MP4 with sound through the share
   sheet, Include images per project); **7a** project files (gallery ⋯
   → Save as file, top bar → Import); **7b** automatic backup to
-  Cloudflare and restore (both verified 2026-11-02; decisions in
-  [design notes](docs/DESIGN_NOTES.md#planned-features) → "Backup (7b
-  scoping)"); **8a** stabilizer
-  (as she expects, 2026-11-02); **8b** symmetry, stroke buffer and
-  curved size (8b-i, 2026-11-02), brush panel and tips (8b-ii); her
-  requests between pushes — light theme and App color (status bar
-  dark over the light top bar), canvas shapes (portrait/square),
-  Undo/Redo moved right, onion fill fix (all confirmed 2026-11-23);
-  **8c** flip drawing (layer and frame) and clearer onion ghosts
-  (confirmed 2026-11-24; a few checks still open below); **8d** shape
-  tools (confirmed 2026-11-25; Chalk and Soft keep up while dragging).
-  How each works is
-  in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
+  Cloudflare and restore ([decisions](docs/DESIGN_NOTES.md#planned-features)
+  → "Backup (7b scoping)"); **8a** stabilizer; **8b** symmetry, brush
+  panel and tips, curved size; her requests between pushes — light
+  theme and App color, canvas shapes (portrait/square), Undo/Redo
+  moved right, onion fill fix; **8c** flip drawing (layer and frame)
+  and clearer onion ghosts (a few checks still open below); **8d**
+  shape tools. How each works is in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). She mostly undoes
   with the buttons, not gestures. She knows songs from streaming apps
   can't be imported (bought downloads can).
 
-**Next** (her order, 2026-11-23: flip, then shapes, then smudge and
-stamps; share links after her requested extras). 8b closed at 8b-ii;
-its planned third push is now 8e, so steps stay in numerical order:
+**Next:**
 
 1. **8e — smudge + stamps — scoped 2026-11-25, not built**
    ([design notes](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)
@@ -151,14 +158,20 @@ its planned third push is now 8e, so steps stay in numerical order:
      in the current color, upright. A tap places one; a drag leaves a
      trail spaced by size. Symmetry mirrors them. Remembered like any
      tip.
-2. **Share links and Krita reference import** on the backup's
-   Cloudflare backend — ask her first whether she still wants share
-   links, now that video sharing works.
-3. The rest of the requested extras (Open items, and Parked in the
-   design notes).
-
-**Handoff (2026-11-25):** 8d confirmed. 8e is scoped (above and in the
-design notes) and the scope is pushed; next conversation builds it.
+2. **v1 is done when 8e is confirmed on the iPad** (his call,
+   2026-11-25). Steps 1–8 are the main build; **share links are
+   dropped** (video sharing covers sending to friends). At that point:
+   collapse the Done paragraph to "v1 (steps 1–8)", and decide with
+   him which Developer tools stay — the Activity log is how bugs get
+   diagnosed on her iPad (removal list under [Areas](#areas)).
+3. **After v1, work is numbered `v1.N`** (Working agreements →
+   Numbering after v1).
+   **Candidates** (none started; she picks the order): tuning
+   smudge and stamps after 8e, how-to / tutorials (his wish), the
+   adjustable shortcut bar (ask her which actions she reaches for),
+   Krita reference import (PC → iPad on the backup's backend — still
+   wanted without share links?), and anything under Parked in the
+   [design notes](docs/DESIGN_NOTES.md#parked-until-she-asks).
 
 **Open iPad checks** (send the activity log with any of them):
 - **Still open from 8c:** after a frame flip, Undo leaves soft edges
@@ -216,6 +229,8 @@ if it shows:
   `project-import-failed`;
 - **backup (7b):** `backup-failed` (with `error`, or `step` while
   turning on); `restore-failed` (with `step` and `error`).
+- **frame cache:** `flatten-failed` (a frame's picture for playback
+  or onion skin couldn't be built);
 - **onion skin and anything uncaught (after 8b-ii):** `onion-failed`,
   `error` (an error nothing else caught; at most 20 per launch).
 
@@ -236,14 +251,6 @@ if it shows:
   behind, the frame cache's in-memory PNGs — `undo=`/`cache=`/`made=`
   show which grows. **Export (step 6) adds memory load — watch for it
   after.** Get logs and note what she did just before each.
-- **Smudge feel** is off; deferred until more brushes exist (she ties
-  it to brushes that soften their own edges). Don't retune it alone.
-  ([why](docs/DESIGN_NOTES.md#drawing-engine))
-- **After the main build — requested, deferred so step 4 comes sooner**
-  ([why](docs/DESIGN_NOTES.md#after-the-main-build-requested-deferred)):
-  - **Flip drawing** (was 3c): built in 8c (Current state).
-  - Symmetry, brush variety, the stabilizer and erasers: built in 8
-    (Current state).
 - **Frame-cache encode timeout?** The cache flattens with `toBlob`
   (`encodePNG`); a `toBlob` that never calls back (seen on the sandbox
   build) would keep "Getting ready" up forever. Same fix as
@@ -252,8 +259,8 @@ if it shows:
   the layout is sized for the iPad and nothing scrolls — the rail
   cuts off in landscape, the strip in portrait. Not her device; if
   friends will use phones, a compact layout is its own step.
-- **Adjustable shortcut bar** (as in Clip Studio's command bar), after
-  step 6, once she knows which actions she reaches for. It needs one
+- **Adjustable shortcut bar** (as in Clip Studio's command bar) — a
+  post-v1 candidate; ask her which actions she reaches for. It needs one
   registry of actions that every button calls. Shortcuts add a second
   way to reach an action; they don't move it out of its home. Core
   items stay fixed. Saved app-wide.
@@ -295,9 +302,9 @@ Applies to the whole app. How each area works is in
   hardcoded. Code reads `project.canvas`, never 1920×1080.
 - **Backup (7b)** runs on a Cloudflare Worker + R2 (`worker/`,
   deployed by its own workflow, not part of the published site);
-  restore (push 2) reads it back. **Planned**
-  ([details](docs/DESIGN_NOTES.md#planned-features)): share links and
-  Krita import on the same backend. The storage warning was dropped (design notes → Parked).
+  restore (push 2) reads it back. Share links were dropped
+  (2026-11-25); Krita reference import is a post-v1 candidate on the
+  same backend.
 
 ## Global rules
 
@@ -437,11 +444,14 @@ missing = 'pen'; strength 1–100; missing tipSettings = defaults with
 the old draw/erase sizes on Pen; 8d: tool may be 'shape', shape from
 shapes.js `SHAPES` missing = 'line', shapePerfect missing = false;
 `sanitizeToolSettings`), `uiState` = `{ screen: 'gallery' | 'editor',
-hideHeadphonesTip, appColor }`
+hideHeadphonesTip, appColor, newShape }`
 (5c; missing = false; `layersPanelOpen` retired after 5c, ignored;
 appColor after the light theme: an `APP_COLORS` id from
 `ui/app-color.js`, missing = 'purple', `sanitizeAppColor`; mirrored to
-localStorage `parapara-app-color` for the launch's first paint);
+localStorage `parapara-app-color` for the launch's first paint;
+newShape after canvas shapes: the last shape picked for a new
+animation, a `CANVAS_SHAPES` key, missing = 'landscape',
+`sanitizeCanvasShape`);
 `recentColors` = `['#rrggbb', …]` newest first).
 `bitmapRef` is assigned when a frame or layer is created and never
 changes; no blob under it means blank. Adding a layer adds a ref to
@@ -481,7 +491,7 @@ Current state here says what's built and what to check on the iPad,
 with no story of how it got there.
 
 - **Commands:** `npm install` once; `npm run test:unit` (seconds),
-  `npm run test:e2e` (~3.2 min), or `npm test`.
+  `npm run test:e2e` (CI: ~3–4 min on 4 workers), or `npm test`.
 - **In a Claude sandbox:** after `npm install`, run
   `bash tests/sandbox-setup.sh` once, then e2e with
   `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`. The preinstalled
@@ -544,8 +554,7 @@ with no story of how it got there.
     install and taps New animation; specs that need the gallery go
     through the Gallery button.
   - Each test gets its own browser context (own IndexedDB), so tests
-    must not depend on order or on each other. ~3.2 min after the
-    lost-canvas guard.
+    must not depend on order or on each other.
   - **The robot test** (`hunt.spec.js`): seeded random use with a
     model; checks every mark on screen and after a reload. **When it
     fails in the sandbox, read the message:** a timeout can be the
